@@ -4,7 +4,7 @@ title: 'Republish gate v2: recreate repo fresh, CI, flip public'
 status: To Do
 assignee: []
 created_date: '2026-08-19 02:56'
-updated_date: '2026-08-19 03:43'
+updated_date: '2026-08-19 03:45'
 labels: []
 dependencies: []
 ordinal: 46000
@@ -27,7 +27,7 @@ Successor to TASK-35: delete and recreate the GitHub repo with a single fresh in
 - [x] #7 Repo deleted and recreated PRIVATE as BigCactusLabs/blotter with wiki disabled; description/topics/homepage applied; Actions workflow permissions verified read-only
 - [x] #8 Single fresh initial commit pushed; rev-list --count HEAD is 1 on the remote; fresh v0.15.0 tag created on the new root and pushed explicitly by name
 - [ ] #9 Codex review app re-installed on the new repo
-- [ ] #10 TASK-37 CI workflow landed and green before any visibility change
+- [x] #10 TASK-37 CI workflow landed and green before any visibility change
 - [ ] #11 Owner gave explicit go immediately before the public flip
 - [ ] #12 Flipped public; protect-history ruleset applied post-flip and verified active; secret scanning + push protection confirmed on
 - [ ] #13 From a clean temporary clone: git fetch origin b8012f9 rejected AND https://github.com/BigCactusLabs/blotter/commit/b8012f9 returns 404; crates.io repo link resolves
