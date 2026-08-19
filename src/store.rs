@@ -293,14 +293,19 @@ fn open_locked(
     mut open: impl FnMut() -> AppResult<File>,
 ) -> AppResult<File> {
     let mut file = Some(regular_file(open()?, path)?);
+    // The last reopen that found nothing. Kept so an exhausted budget whose
+    // final failure was a vanished log answers not_found (66) instead of
+    // blaming contention that never happened; any later failure clears it.
+    let mut missing: Option<AppError> = None;
     for attempt in 0..LOCK_ATTEMPTS {
         if file.is_none() {
             match open() {
+                // A reopen that succeeds needs no clear: the lock attempt below
+                // ends this iteration in a branch that returns or clears.
                 Ok(opened) => file = Some(regular_file(opened, path)?),
                 Err(error) if error.code == "not_found" => {
-                    if attempt + 1 < LOCK_ATTEMPTS {
-                        thread::sleep(LOCK_DELAY);
-                    }
+                    missing = Some(error);
+                    delay_before_retry(attempt);
                     continue;
                 }
                 Err(error) => return Err(error),
@@ -318,19 +323,32 @@ fn open_locked(
                 }
                 let stale = file.take().expect("file is open");
                 let _ = stale.unlock();
+                // The path names another inode now. Reopening costs the same
+                // delay every other retry pays, so the attempt budget cannot
+                // burn through in microseconds and report a timeout nobody
+                // waited for.
+                missing = None;
+                delay_before_retry(attempt);
             }
             Err(error) => {
                 let error: std::io::Error = error.into();
                 if error.kind() != std::io::ErrorKind::WouldBlock {
                     return Err(AppError::from_io(error, path));
                 }
-                if attempt + 1 < LOCK_ATTEMPTS {
-                    thread::sleep(LOCK_DELAY);
-                }
+                missing = None;
+                delay_before_retry(attempt);
             }
         }
     }
-    Err(AppError::lock_timeout(path))
+    Err(missing.unwrap_or_else(|| AppError::lock_timeout(path)))
+}
+
+/// Pay the retry delay unless this was the last attempt, where the caller
+/// returns instead of retrying.
+fn delay_before_retry(attempt: usize) {
+    if attempt + 1 < LOCK_ATTEMPTS {
+        thread::sleep(LOCK_DELAY);
+    }
 }
 
 /// Reject a log path that is not a regular file, before the lock and before any
@@ -1018,6 +1036,67 @@ mod tests {
         writer.join().unwrap();
 
         assert_eq!(std::fs::read(&path).unwrap(), b"replacement\nwriter\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_permanent_path_identity_mismatch_still_pays_the_retry_delay() {
+        // The locked descriptor never names the requested path, so every
+        // attempt mismatches. The budget must still span the published bound
+        // rather than burning through in microseconds.
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("cuts.jsonl");
+        let other = temp.path().join("other.jsonl");
+        std::fs::write(&path, b"").unwrap();
+        std::fs::write(&other, b"").unwrap();
+
+        let started = std::time::Instant::now();
+        let error = open_locked(&path, true, || {
+            OpenOptions::new()
+                .read(true)
+                .append(true)
+                .open(&other)
+                .map_err(|error| AppError::from_log_open(error, &other))
+        })
+        .expect_err("a permanent identity mismatch never locks the path");
+        let elapsed = started.elapsed();
+
+        assert_eq!(error.code, "lock_timeout");
+        assert_eq!(error.exit_code, 75);
+        assert!(
+            elapsed >= LOCK_DELAY * (LOCK_ATTEMPTS as u32 - 1),
+            "gave up after {elapsed:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_log_that_vanishes_during_the_retry_budget_reports_not_found() {
+        // First open lands on another inode, so the identity check rejects it;
+        // every reopen then finds nothing. Exhaustion must name the missing
+        // log, not contention that never happened.
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("cuts.jsonl");
+        let other = temp.path().join("other.jsonl");
+        std::fs::write(&other, b"").unwrap();
+
+        let mut first = true;
+        let error = open_locked(&path, true, || {
+            let target = if std::mem::take(&mut first) {
+                other.as_path()
+            } else {
+                path.as_path()
+            };
+            OpenOptions::new()
+                .read(true)
+                .append(true)
+                .open(target)
+                .map_err(|error| AppError::from_log_open(error, target))
+        })
+        .expect_err("a log that never appears cannot be locked");
+
+        assert_eq!(error.code, "not_found");
+        assert_eq!(error.exit_code, 66);
     }
 
     #[test]
