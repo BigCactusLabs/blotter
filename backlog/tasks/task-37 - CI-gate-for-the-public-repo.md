@@ -1,9 +1,10 @@
 ---
 id: TASK-37
 title: CI gate for the public repo
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-18 22:32'
+updated_date: '2026-08-19 03:43'
 labels: []
 dependencies: []
 ordinal: 45000
