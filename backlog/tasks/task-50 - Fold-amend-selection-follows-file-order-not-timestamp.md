@@ -1,10 +1,10 @@
 ---
 id: TASK-50
 title: 'Fold amend selection follows file order, not timestamp'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-19 14:44'
-updated_date: '2026-08-19 15:12'
+updated_date: '2026-08-19 15:40'
 labels:
   - bug
   - store

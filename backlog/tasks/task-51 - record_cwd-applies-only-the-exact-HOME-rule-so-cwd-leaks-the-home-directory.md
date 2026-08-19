@@ -1,10 +1,10 @@
 ---
 id: TASK-51
 title: 'record_cwd applies only the exact-HOME rule, so cwd leaks the home directory'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-19 14:44'
-updated_date: '2026-08-19 15:12'
+updated_date: '2026-08-19 15:40'
 labels:
   - bug
   - redaction
