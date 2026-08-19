@@ -1460,7 +1460,7 @@ fn every_command_success_envelope_deserializes() {
     );
     assert_eq!(
         schema.data["records"]["cut"]["cwd"],
-        "repo-relative path when cwd is inside the discovered repo; ~-relative when under the home directory; absolute path otherwise"
+        "repo-relative path when cwd is inside the discovered repo; ~-relative when under the home directory; otherwise the absolute path with home prefixes rewritten to ~"
     );
     assert!(
         schema.data["commands"]["add"]["flags"]["--stderr-file"]
@@ -3443,8 +3443,16 @@ fn structured_error_exit_matrix_and_help_exceptions() {
         .output()
         .unwrap();
     error(&invalid_utf8, 65, "invalid_input");
+    // A directory is not a regular file, so the log-open guard rejects it at the
+    // same code the sibling --stderr-file lane uses, ahead of the EISDIR read.
     let directory_error = run_file(temp.path(), &["list"]);
-    error(&directory_error, 74, "io_error");
+    let directory_envelope = error(&directory_error, 65, "invalid_input");
+    assert!(
+        directory_envelope
+            .error
+            .message
+            .contains("not a regular file")
+    );
 
     let help = run(&["--help"]);
     assert!(help.status.success());
@@ -10461,4 +10469,383 @@ fn archive_sole_newline_log_has_zero_physical_lines() {
     assert_eq!(archive.data["archived"], 0);
     assert_eq!(archive.data["kept"], 0);
     assert_eq!(std::fs::read(&file).unwrap(), b"\n");
+}
+
+// --- store.rs log-path guard, amend ordering by timestamp, cwd redaction, and
+// --- the add/dogear stdin raw gate.
+
+#[cfg(unix)]
+fn spawn_blotter(file: &Path, args: &[&str]) -> std::process::Child {
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin!("blotter"));
+    child
+        .env("BLOTTER_NOW", NOW)
+        .env_remove("BLOTTER_FILE")
+        .env_remove("BLOTTER_AGENT")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .arg("--file")
+        .arg(file)
+        .args(args);
+    child.spawn().unwrap()
+}
+
+/// Wait with a deadline. The pre-fix FIFO behaviour was an unbounded block, so a
+/// regression must fail this test rather than wedge the whole suite.
+#[cfg(unix)]
+fn wait_bounded(mut child: std::process::Child, what: &str) -> std::process::Output {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            return child.wait_with_output().unwrap();
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("{what} blocked on a non-regular log path");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn non_regular_log_cases() -> [(&'static str, Vec<&'static str>); 5] {
+    [
+        ("list", vec!["list"]),
+        ("triage", vec!["triage"]),
+        ("digest", vec!["digest"]),
+        ("add", vec!["add", "non-regular log", "--agent", "tester"]),
+        ("doctor", vec!["doctor"]),
+    ]
+}
+
+fn assert_non_regular_log(output: &std::process::Output, what: &str) {
+    let envelope = error(output, 65, "invalid_input");
+    assert!(
+        envelope.error.message.contains("not a regular file"),
+        "{what}: {}",
+        envelope.error.message
+    );
+    assert!(
+        envelope.error.suggested_fix.contains("FIFOs and devices"),
+        "{what}: {}",
+        envelope.error.suggested_fix
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_fifo_log_path_is_rejected_without_blocking() {
+    let temp = TempDir::new().unwrap();
+    let fifo = temp.path().join("log.fifo");
+    let made_fifo = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .is_ok_and(|status| status.success());
+    if !made_fifo {
+        eprintln!("skipping FIFO log assertion; mkfifo unavailable");
+        return;
+    }
+    for (what, args) in non_regular_log_cases() {
+        let output = wait_bounded(spawn_blotter(&fifo, &args), what);
+        assert_non_regular_log(&output, what);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_device_log_path_is_rejected_before_an_unbounded_read() {
+    let device = Path::new("/dev/zero");
+    if !device.exists() {
+        eprintln!("skipping device log assertion; /dev/zero unavailable");
+        return;
+    }
+    for (what, args) in non_regular_log_cases() {
+        assert_non_regular_log(&run_file(device, &args), what);
+    }
+    // Deliberate behaviour change: /dev/null used to fold as an empty log and
+    // exit 0. It is a character device, so it is invalid_input like the rest.
+    assert_non_regular_log(
+        &run_file(Path::new("/dev/null"), &["list"]),
+        "list /dev/null",
+    );
+}
+
+fn resolve_line(id: &str, ts: &str, note: &str, amend: bool) -> String {
+    let mut value = json!({"kind":"resolve","id":id,"ts":ts,"agent":"fixer","note":note});
+    if amend {
+        value["amend"] = json!(true);
+    }
+    value.to_string()
+}
+
+fn append_lines(file: &Path, lines: &[String]) {
+    let mut log = std::fs::read_to_string(file).unwrap();
+    for line in lines {
+        log.push_str(line);
+        log.push('\n');
+    }
+    std::fs::write(file, log).unwrap();
+}
+
+#[test]
+fn resolve_amend_with_the_latest_timestamp_wins_over_file_order() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "merge reordered amends");
+    let id = cut.data.record.cut_id().to_owned();
+    // A union merge concatenates branches in branch order, so the older amend
+    // can land last in the byte stream. Timestamp decides, not file position.
+    append_lines(
+        &file,
+        &[
+            resolve_line(&id, "2026-07-10T00:00:00.000Z", "base", false),
+            resolve_line(&id, "2026-07-12T00:00:00.000Z", "later", true),
+            resolve_line(&id, "2026-07-11T00:00:00.000Z", "earlier", true),
+        ],
+    );
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
+    let resolution = listed.data.items[0].resolution.as_ref().unwrap();
+    assert_eq!(resolution.note.as_deref(), Some("later"));
+    assert_eq!(resolution.ts, "2026-07-12T00:00:00.000Z");
+    assert!(resolution.amended);
+}
+
+#[test]
+fn resolve_amends_sharing_a_timestamp_keep_the_last_in_file_order() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "frozen clock amends");
+    let id = cut.data.record.cut_id().to_owned();
+    // Two amends under one frozen BLOTTER_NOW are reachable from the CLI; the
+    // comparison is >=, so the last one in file order still wins the tie.
+    append_lines(
+        &file,
+        &[
+            resolve_line(&id, "2026-07-10T00:00:00.000Z", "base", false),
+            resolve_line(&id, "2026-07-11T00:00:00.000Z", "first", true),
+            resolve_line(&id, "2026-07-11T00:00:00.000Z", "second", true),
+        ],
+    );
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
+    let resolution = listed.data.items[0].resolution.as_ref().unwrap();
+    assert_eq!(resolution.note.as_deref(), Some("second"));
+}
+
+#[test]
+fn verify_exit_code_is_stable_when_amend_lines_are_swapped() {
+    for (name, amends_in_clock_order) in [("clock order", true), ("merge order", false)] {
+        let temp = TempDir::new().unwrap();
+        let file = temp.path().join("cuts.jsonl");
+        let anchor = add_at(
+            &file,
+            "2026-07-09T18:30:00Z",
+            "Cache configuration missing",
+            &[],
+        );
+        let id = anchor.data.record.cut_id().to_owned();
+        add_at(
+            &file,
+            "2026-07-09T18:35:00Z",
+            "Cache configuration missing",
+            &[],
+        );
+        let early = resolve_line(&id, "2026-07-09T18:32:00.000Z", "early", true);
+        let late = resolve_line(&id, "2026-07-09T18:40:00.000Z", "late", true);
+        let mut lines = vec![resolve_line(&id, "2026-07-09T18:31:00.000Z", "base", false)];
+        if amends_in_clock_order {
+            lines.extend([early, late]);
+        } else {
+            lines.extend([late, early]);
+        }
+        append_lines(&file, &lines);
+
+        // The later open cut predates the latest amend either way, so byte order
+        // must not flip verify between exit 0 and exit 1.
+        let verify = verify_success(&run_file(&file, &["verify"]), 0);
+        assert_eq!(verify.data["count"], 0, "{name}");
+        assert_eq!(verify.data["recurrences"], json!([]), "{name}");
+    }
+}
+
+#[test]
+fn cwd_under_a_dash_encoded_home_slug_is_redacted() {
+    let temp = TempDir::new().unwrap();
+    if temp_has_git_ancestor(&temp) {
+        eprintln!("skipping dash-encoded cwd assertion inside a git checkout");
+        return;
+    }
+    let home = temp.path().join("fakehome");
+    let scratchpad = temp
+        .path()
+        .join("claude-501")
+        .join("-Users-alice-Documents-GitHub-blotter")
+        .join("sess")
+        .join("scratchpad");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&scratchpad).unwrap();
+    let scratchpad = scratchpad.canonicalize().unwrap();
+    // The r23 rule rewrites only the matched prefix and keeps the rest of the
+    // dash-encoded token verbatim.
+    let expected = scratchpad.to_string_lossy().replace("-Users-alice", "~");
+    assert!(expected.contains("/~-Documents-GitHub-blotter/"));
+
+    let file = temp.path().join("cuts.jsonl");
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", &home)
+            .current_dir(&scratchpad)
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "dash-encoded cwd", "--agent", "tester"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(added.data.record.cut_cwd(), expected);
+
+    let doctor = doctor_response(
+        &command()
+            .env("HOME", &home)
+            .arg("--file")
+            .arg(&file)
+            .args(["doctor", "--leaks"])
+            .output()
+            .unwrap(),
+        0,
+    );
+    assert!(doctor.data.healthy);
+}
+
+#[test]
+fn cwd_under_a_generic_home_root_is_redacted() {
+    let cwd = std::env::current_dir().unwrap();
+    let cwd_text = cwd.to_string_lossy().into_owned();
+    let Some(rest) = ["/Users/", "/home/"]
+        .into_iter()
+        .find_map(|prefix| cwd_text.strip_prefix(prefix))
+    else {
+        eprintln!("skipping generic home cwd assertion outside /Users and /home");
+        return;
+    };
+    if cwd_text.contains(char::is_whitespace) {
+        eprintln!("skipping generic home cwd assertion; the path is not one token");
+        return;
+    }
+    let expected = match rest.split_once('/') {
+        Some((_, tail)) => format!("~/{tail}"),
+        None => "~".to_owned(),
+    };
+
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("fakehome");
+    std::fs::create_dir_all(&home).unwrap();
+    // The log lives outside the repo, so the cwd is not repo-relative, and $HOME
+    // is elsewhere: only the generic /Users/ and /home/ rule can redact it.
+    let file = temp.path().join("cuts.jsonl");
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", &home)
+            .current_dir(&cwd)
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "generic home cwd", "--agent", "tester"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(added.data.record.cut_cwd(), expected);
+
+    let doctor = doctor_response(
+        &command()
+            .env("HOME", &home)
+            .arg("--file")
+            .arg(&file)
+            .args(["doctor", "--leaks"])
+            .output()
+            .unwrap(),
+        0,
+    );
+    assert!(doctor.data.healthy);
+}
+
+#[test]
+fn duplicate_add_returns_the_existing_record_with_normalized_tags() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let args = [
+        "add",
+        "legacy tag order",
+        "--agent",
+        "tester",
+        "--tag",
+        "zeta",
+        "--tag",
+        "alpha",
+    ];
+    let first: SuccessEnvelope<AddData> = success(&run_file(&file, &args));
+    assert_eq!(first.data.record.cut_tags(), ["alpha", "zeta"]);
+
+    // Rewrite the stored line with a legacy unsorted tag array. The ID hashes
+    // sorted tags, so the duplicate still matches, and the sentinel record the
+    // append path returns must come back normalized.
+    let mut stored: Value =
+        serde_json::from_str(std::fs::read_to_string(&file).unwrap().trim()).unwrap();
+    stored["tags"] = json!(["zeta", "alpha"]);
+    std::fs::write(&file, format!("{stored}\n")).unwrap();
+
+    let duplicate: SuccessEnvelope<AddData> = success(&run_file(&file, &args));
+    assert!(!duplicate.data.changed);
+    assert_eq!(duplicate.data.record.cut_tags(), ["alpha", "zeta"]);
+    assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 1);
+}
+
+#[test]
+fn stdin_text_over_10000_bytes_that_redacts_smaller_is_accepted() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("fakehome");
+    std::fs::create_dir_all(&home).unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let raw = "/Users/verylongusername/deep/path ".repeat(400);
+    assert!(raw.len() > 10_000);
+
+    // r25: the text is redacted first, and `validate_text`'s 10000-byte limit
+    // measures the redacted text, so the raw read cannot be capped at 10000.
+    let added: SuccessEnvelope<Value> = success(
+        &command()
+            .env("HOME", &home)
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "-", "--agent", "tester"])
+            .write_stdin(raw)
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(added.data["changed"], true);
+    assert_eq!(
+        added.data["record"]["text"].as_str().unwrap(),
+        "~/deep/path ".repeat(400)
+    );
+}
+
+#[test]
+fn stdin_text_over_the_raw_read_limit_is_rejected() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let oversized = vec![b'x'; 1024 * 1024 + 1];
+
+    let output = command()
+        .arg("--file")
+        .arg(&file)
+        .args(["add", "-", "--agent", "tester"])
+        .write_stdin(oversized)
+        .output()
+        .unwrap();
+    let envelope = error(&output, 65, "invalid_input");
+    assert!(
+        envelope
+            .error
+            .message
+            .contains("exceeds the 1048576-byte read limit")
+    );
+    assert!(!file.exists());
 }

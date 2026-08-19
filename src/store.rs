@@ -157,11 +157,11 @@ pub fn record_cwd(cwd: &Path, repo: Option<&Path>, home: Option<&Path>) -> Strin
             false => relative.to_string_lossy().into_owned(),
         };
     }
-    match home.and_then(|root| cwd.strip_prefix(root).ok()) {
-        Some(relative) if relative.as_os_str().is_empty() => "~".into(),
-        Some(relative) => format!("~/{}", relative.to_string_lossy()),
-        None => cwd.to_string_lossy().into_owned(),
-    }
+    // The whole-string scanner, not a prefix-anchored match: a dash-encoded home
+    // (`/private/tmp/<session>/-Users-<user>-<repo>`) appears mid-path, and only
+    // this scanner applies the generic `/Users/` and `/home/` rules that
+    // `doctor --leaks` gates on. Its exact-home branch subsumes strip_prefix.
+    crate::redact::rewrite_home_paths(&cwd.to_string_lossy(), home)
 }
 
 fn absolute(cwd: &Path, path: PathBuf) -> PathBuf {
@@ -185,7 +185,18 @@ fn absolute(cwd: &Path, path: PathBuf) -> PathBuf {
 
 pub fn with_shared<T>(path: &Path, action: impl FnOnce(&mut File) -> AppResult<T>) -> AppResult<T> {
     let mut file = open_locked(path, false, || {
-        File::open(path).map_err(|error| AppError::from_log_open(error, path))
+        // O_NONBLOCK does not make a FIFO fail; it makes the open return
+        // immediately instead of blocking for a writer, and the regular-file
+        // check in open_locked is what rejects it. The flag has no effect on
+        // regular-file reads or writes on Linux or macOS.
+        #[cfg(unix)]
+        let opened = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path);
+        #[cfg(not(unix))]
+        let opened = File::open(path);
+        opened.map_err(|error| AppError::from_log_open(error, path))
     })?;
     let result = action(&mut file);
     let unlock = file
@@ -252,10 +263,13 @@ pub fn with_exclusive<T>(
         std::fs::create_dir_all(parent).map_err(|error| AppError::from_io(error, parent))?;
     }
     let mut file = open_locked(path, true, || {
-        OpenOptions::new()
-            .read(true)
-            .append(true)
-            .create(create)
+        let mut options = OpenOptions::new();
+        options.read(true).append(true).create(create);
+        // See with_shared: O_NONBLOCK only keeps the open from blocking on a
+        // FIFO; open_locked's regular-file check is what rejects one.
+        #[cfg(unix)]
+        options.custom_flags(libc::O_NONBLOCK);
+        options
             .open(path)
             .map_err(|error| AppError::from_log_open(error, path))
     })?;
@@ -274,11 +288,11 @@ fn open_locked(
     exclusive: bool,
     mut open: impl FnMut() -> AppResult<File>,
 ) -> AppResult<File> {
-    let mut file = Some(open()?);
+    let mut file = Some(regular_file(open()?, path)?);
     for attempt in 0..LOCK_ATTEMPTS {
         if file.is_none() {
             match open() {
-                Ok(opened) => file = Some(opened),
+                Ok(opened) => file = Some(regular_file(opened, path)?),
                 Err(error) if error.code == "not_found" => {
                     if attempt + 1 < LOCK_ATTEMPTS {
                         thread::sleep(LOCK_DELAY);
@@ -313,6 +327,24 @@ fn open_locked(
         }
     }
     Err(AppError::lock_timeout(path))
+}
+
+/// Reject a log path that is not a regular file, before the lock and before any
+/// read. flock reports ENOTSUP on a macOS FIFO, so a post-lock check would
+/// surface io_error instead of invalid_input, and a path that can never be valid
+/// would first burn the whole retry budget. `File::metadata` is fstat on the open
+/// handle, so this cannot race a swap the way a path stat can.
+fn regular_file(file: File, path: &Path) -> AppResult<File> {
+    let metadata = file
+        .metadata()
+        .map_err(|error| AppError::from_io(error, path))?;
+    if !metadata.is_file() {
+        return Err(AppError::invalid_input(
+            format!("blotter file is not a regular file: {}", path.display()),
+            "Point --file PATH or BLOTTER_FILE at a regular JSONL file; FIFOs and devices are not accepted.",
+        ));
+    }
+    Ok(file)
 }
 
 #[cfg(unix)]
@@ -520,8 +552,8 @@ pub fn append_unique(path: &Path, record: LogEvent, dry_run: bool) -> AppResult<
     };
     with_exclusive(path, true, |log| {
         let bytes = read_bytes(log, path)?;
-        let folded = fold_bytes(&bytes);
-        if let Some(existing) = folded.record(&id) {
+        let records = fold_records(&bytes);
+        if let Some(existing) = records.get(&id) {
             return if std::mem::discriminant(&record) == std::mem::discriminant(existing) {
                 Ok((false, existing.clone()))
             } else {
@@ -695,10 +727,36 @@ fn resolution_from_event(event: &LogEvent) -> Resolution {
     }
 }
 
+/// Records-only fold for the append path. `append_unique` needs one fact — does
+/// this ID already exist — so it skips the resolution join, the ListItem clones,
+/// the timestamp parses, and the sort that `fold_bytes` would discard, inside
+/// the exclusive lock. Tag normalization must match `fold_bytes`: the duplicate
+/// branch returns this record straight into the add/dogear response envelope.
+fn fold_records(bytes: &[u8]) -> BTreeMap<String, LogEvent> {
+    let mut records = BTreeMap::<String, LogEvent>::new();
+    for scanned in scan(bytes) {
+        let Ok(mut event) = scanned.event else {
+            continue;
+        };
+        match &mut event {
+            LogEvent::Cut { tags, .. } | LogEvent::Dogear { tags, .. } => {
+                tags.sort();
+                tags.dedup();
+            }
+            LogEvent::Resolve { .. } | LogEvent::Unknown => continue,
+        }
+        let id = event.id().expect("parsed records have IDs").to_owned();
+        records.entry(id).or_insert(event);
+    }
+    records
+}
+
 pub fn fold_bytes(bytes: &[u8]) -> FoldResult {
     let mut records = BTreeMap::<String, LogEvent>::new();
     let mut resolves = HashMap::<String, LogEvent>::new();
-    let mut amends = HashMap::<String, LogEvent>::new();
+    // Amends carry their parsed timestamp so the winner is chosen by clock, not
+    // by byte position, without reparsing the incumbent for every candidate.
+    let mut amends = HashMap::<String, (jiff::Timestamp, LogEvent)>::new();
     let mut counts = WarningCounts::default();
     for scanned in scan(bytes) {
         match scanned.event {
@@ -728,11 +786,26 @@ pub fn fold_bytes(bytes: &[u8]) -> FoldResult {
                         counts.duplicate_dogears += 1;
                     }
                 }
-                LogEvent::Resolve { id, amend, .. } => {
+                LogEvent::Resolve { id, ts, amend, .. } => {
                     let id = id.clone();
                     let amend = *amend;
                     if amend {
-                        amends.insert(id, event);
+                        let timestamp = ts
+                            .parse::<jiff::Timestamp>()
+                            .expect("parsed resolves have valid RFC3339 timestamps");
+                        match amends.entry(id) {
+                            std::collections::hash_map::Entry::Occupied(mut entry) => {
+                                // `>=`, not `>`: equal timestamps are reachable
+                                // under a frozen BLOTTER_NOW, and there the last
+                                // amend in file order keeps winning.
+                                if timestamp >= entry.get().0 {
+                                    entry.insert((timestamp, event));
+                                }
+                            }
+                            std::collections::hash_map::Entry::Vacant(entry) => {
+                                entry.insert((timestamp, event));
+                            }
+                        }
                     } else if let std::collections::hash_map::Entry::Vacant(entry) =
                         resolves.entry(id)
                     {
@@ -746,10 +819,15 @@ pub fn fold_bytes(bytes: &[u8]) -> FoldResult {
         }
     }
 
-    // Base resolves remain first-wins. A latest amend only materializes when
-    // the full scan found a base resolve, so merge-reordered base resolves work.
+    // Base resolves remain first-wins. The winning amend is the one with the
+    // latest timestamp, with the last in file order breaking an exact tie; file
+    // position never decides, because a `merge=union` log concatenates branches
+    // in branch order. A latest amend only materializes when the full scan found
+    // a base resolve, so merge-reordered base resolves work. `orphan_amends`
+    // inherits the same winner, keeping `materialized_appended_resolution` in
+    // step with a full re-fold.
     let mut orphan_amends = HashMap::new();
-    for (id, amend) in amends {
+    for (id, (_, amend)) in amends {
         match resolves.entry(id) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
                 entry.insert(amend);
