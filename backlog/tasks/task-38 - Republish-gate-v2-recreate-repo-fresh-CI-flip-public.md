@@ -1,10 +1,10 @@
 ---
 id: TASK-38
 title: 'Republish gate v2: recreate repo fresh, CI, flip public'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-19 02:56'
-updated_date: '2026-08-19 03:55'
+updated_date: '2026-08-19 04:11'
 labels: []
 dependencies: []
 ordinal: 46000
@@ -37,4 +37,6 @@ Successor to TASK-35: delete and recreate the GitHub repo with a single fresh in
 
 <!-- SECTION:NOTES:BEGIN -->
 AC12 2026-08-19: flipped public; protect-history ruleset id 21023465 (non_fast_forward + deletion, ~ALL branches, active, no bypass); secret scanning + push protection were DISABLED after the private-created flip (unlike a public-created repo) — enabled explicitly via PATCH, both now enabled. AC13 verified from a clean clone: fetch of b8012f9 rejected 'not our ref', commit page 404, repo page 200, homepage links crates.io. AC9 (Codex app re-install) remains — owner action at chatgpt.com/codex settings; task stays open until then.
+
+AC9 waived by owner 2026-08-19 ('just close it') — Codex review app not re-installed; re-install at chatgpt.com/codex settings whenever PR review coverage is wanted again. Task closed with 12/13 ACs met.
 <!-- SECTION:NOTES:END -->
