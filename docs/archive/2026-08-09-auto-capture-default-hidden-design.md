@@ -3,7 +3,7 @@
 Date: 2026-08-09
 Issue: [BigCactusLabs/blotter#19](https://github.com/BigCactusLabs/blotter/issues/19)
 Task: TASK-26
-Status: implemented (PR #20, 2026-08-09)
+Status: implemented (0.13.0, PR #20, 2026-08-09). Archived 2026-08-19 — 0.13.0 is no longer the current release; kept for provenance. For current behaviour see the design doc (r17, and r29 for the hook's eligibility gates) and `blotter schema`, not this file.
 
 ## Problem
 
