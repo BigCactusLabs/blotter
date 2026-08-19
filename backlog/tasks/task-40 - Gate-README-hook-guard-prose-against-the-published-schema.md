@@ -1,9 +1,10 @@
 ---
 id: TASK-40
 title: Gate README hook-guard prose against the published schema
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-19 13:54'
+updated_date: '2026-08-19 14:44'
 labels:
   - docs
   - tooling

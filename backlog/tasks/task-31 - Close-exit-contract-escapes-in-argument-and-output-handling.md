@@ -1,9 +1,10 @@
 ---
 id: TASK-31
 title: Close exit-contract escapes in argument and output handling
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-17 19:26'
+updated_date: '2026-08-19 14:44'
 labels:
   - bug
 dependencies: []
