@@ -1,6 +1,7 @@
 # Scale baselines: fold and analyzers
 
-Date: 2026-08-18. Status: baseline plus TASK-29.3 and TASK-29.2 results.
+Date: 2026-08-18. Status: baseline plus TASK-29.3 and TASK-29.2 results, then
+the 2026-08-19 verify recurrence-scan results.
 
 ## Scope
 
@@ -176,6 +177,119 @@ such a demonstrated gain, so it is closed as not-triggered rather than done.
 `verify` also has no production change in TASK-29.2, matching its TASK-29.3
 disposition.
 
+## Verify recurrence scan results (2026-08-19)
+
+This section supersedes the TASK-29.3 and TASK-29.2 disposition above: `verify`
+now reuses triage's `CandidateIndex` and its bit-parallel prefilter instead of
+comparing every resolved anchor against every open cut. `linked` remains the
+final pair predicate. The index is built over the open cuts while the token
+frequencies stay the open-plus-anchor counts `verify` already computed, which is
+what keeps document-frequency rarity — and therefore every `linked` verdict —
+unchanged. Because the prefilter returns positions into the `(timestamp, id)`
+sorted open vector, the post-resolution cutoff is applied as a starting floor on
+the bitset walk rather than as a second pass. `retrospect` inherits the change.
+
+### Fixture and runner deltas
+
+Two larger fixtures were needed. The committed generator emits 1k and 10k only,
+so its `build_fixture` was called with larger sizes from a scratch wrapper; the
+composition ratios, IDs, clocks, and byte layout are the generator's. These two
+files are measurement inputs, not canonical fixtures, and `--check` still passed
+for the committed pair before and after measurement.
+
+| Fixture | Bytes | SHA-256 |
+| --- | ---: | --- |
+| 100k | 18,261,236 | `6f6093d1297b786be4fe4072c8a532b701b7d88a8964e39f61fd611215a882dc` |
+| 300k | 55,074,854 | `c690507dc1b688656541d8a07c2179375231e8d07fd516ecd2c55580fd36f7ca` |
+
+Folded shape scales with the ratios: 8,300 / 83,000 / 249,000 open cuts and
+600 / 6,000 / 18,000 resolved anchors, giving 400 / 4,000 / 12,000 recurrences.
+
+The release profile is no longer `opt-level = "z"`; it is `opt-level = 3` from
+earlier in this batch. **Do not compare the absolute values below to the
+opt-level z tables above.** The before and after columns here share one profile,
+one binary layout, and one host, so only they are comparable to each other.
+Runner: `blotter 0.15.0`, `rustc 1.97.1 (8bab26f4f 2026-07-14)`,
+`aarch64-apple-darwin`, Apple M3 Max (Mac15,10), 36 GiB RAM, macOS 26.5.2. Base
+commit: `8d0494fe`. Method is the `bench-baseline.sh` method — one untimed
+warm-up, then three batches of three sequential invocations, `/usr/bin/time -l`,
+per-invocation wall and CPU, undivided peak RSS per batch — run from a
+verify-only harness because `bench-baseline.sh` iterates a fixed 1k/10k list.
+
+### Output equivalence
+
+Release-mode `verify` stdout was captured on all three fixtures before and after
+the change and compared byte for byte. All three are identical; the SHA-256 of
+each is the same value before and after.
+
+| Fixture | stdout SHA-256 (before == after) |
+| --- | --- |
+| 10k | `838c1161ff3e40b5a826071621ead852aedea8dece7d7188a44f2bab5d4f081d` |
+| 100k | `c22f15eef87c11793fa224256326145baeec993ad0e9397abc6056bbf327f8c0` |
+| 300k | `a143d1663968bd17f2c51d65826424efe08821c31f3f8fa0f760e906f2f6bfb8` |
+
+Same recurrences, same member order, same counts, same exit 1. The 252-test
+suite passed five consecutive times.
+
+### CPU and peak RSS
+
+Values are `min / median` over three batches.
+
+| Fixture | Verify CPU ms before → after min / median | Verify peak RSS KiB before → after min / median |
+| --- | ---: | ---: |
+| 10k | 43.33 / 46.67 → 43.33 / 46.67 | 34,224 / 34,336 → 38,144 / 38,784 |
+| 100k | 1,153.33 / 1,193.33 → 673.33 / 686.67 | 298,768 / 299,072 → 504,176 / 505,264 |
+| 300k | 24,963.33 / 25,166.67 → 3,590.00 / 3,660.00 | 889,856 / 901,296 → 2,306,800 / 2,309,648 |
+
+Median CPU improves 1.00x at 10k, 1.74x at 100k, and 6.88x at 300k. Median peak
+RSS grows 1.13x at 10k (about 4.3 MiB), 1.69x at 100k (about 201 MiB), and
+2.56x at 300k (about 1.34 GiB).
+
+`list` is the reference for whole-log fold plus output with no analyzer, measured
+the same way on the same binary: 23.33 / 260.00 / 896.67 ms median CPU and
+23,120 / 181,328 / 548,752 KiB median peak RSS. Subtracting it approximates the
+analyzer residual — candidate construction, frequencies, index build, scan, and
+materialization:
+
+| Fixture | Residual CPU ms before → after (median) | Ratio |
+| --- | ---: | ---: |
+| 10k | 23.34 → 23.34 | 1.00x |
+| 100k | 933.33 → 426.67 | 2.19x |
+| 300k | 24,270.00 → 2,763.33 | 8.78x |
+
+The residual's own 10k→300k growth for 30x records falls from 1,040x to 118x.
+It is still super-linear because the surviving term is the bitset walk itself:
+anchors x open/64 words, 70 M word operations at 300k against 7.8 M at 100k.
+That is triage's own residual prefilter cost, and it is filed separately.
+
+### The memory cost is worse than expected
+
+The brief expected the index to roughly double peak RSS, as it did for triage at
+10k. At 10k and 100k that holds — 1.13x and 1.69x. At 300k it does not: 2.56x,
+and 2.20 GiB in absolute terms. That is the honest headline, and it is a real
+acceptance concern for a CLI an agent runs, not a diagnostic footnote.
+
+The cause is that every posting set in the index is a bitset sized to the open
+cut count, so each entry costs `open/8` bytes — about 31 KiB per entry at 300k —
+and this fixture has a wide indexed vocabulary: roughly 18,000 shared tokens and
+24,000 distinct open-cut tags. Two thirds of the growth is `by_tag` and
+`by_token` posting sets.
+
+Two things keep this a defensible trade rather than a new failure class. First,
+it is the cost triage already ships on the same log: single-run peak RSS for
+`triage` on these fixtures is 459,072 KiB at 100k and 1,843,792 KiB at 300k, so
+anyone folding a 300k log already meets a 1.8 GiB analyzer. Verify is now at
+parity with it, plus the anchors and the recurrence output it also holds.
+Second, the alternative at 300k was 25 s of CPU.
+
+The cheapest available reduction was deliberately not taken. In `verify` the
+representative is always an anchor, so any indexed token or tag that no anchor
+carries is built and never queried — roughly 42% of the index on this fixture.
+Filtering the index to the representative vocabulary is provably output-neutral,
+because an entry that is never looked up cannot change a prefilter result, but it
+changes a shared structure that a separate triage task is already queued to
+touch. It is recorded here as the next lever, not applied.
+
 ## What the measurements support
 
 - **Triage candidate scan: confirmed material, now remediated.** The baseline
@@ -186,6 +300,9 @@ disposition.
   anchors compare against 8,300 open cuts (about 4.98 million possible checks),
   yet the baseline was 96.67 ms CPU and the unchanged checkpoint was 93.33 ms.
   The algorithmic risk remains, but this fixture mix does not justify a change.
+  **Superseded 2026-08-19:** the risk was real above the 10k budget. At 300k the
+  same scan reached 25.17 s CPU, and 10k stayed the only size where it looked
+  free. It is now indexed; see the verify recurrence-scan section.
 - **Fold double-parse / owned-state amplification: not isolated.** List and
   duplicate add scale to 63.33 ms CPU and about 19.8 MiB RSS at 10k. That shows
   whole-log fold cost but does not assign it to JSON handling, cloning, sorting,

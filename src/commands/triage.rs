@@ -71,7 +71,13 @@ struct OrderedCluster {
 /// `candidate <= representative` guard. Skipping those tokens keeps the index
 /// proportional to the shared vocabulary instead of the whole vocabulary,
 /// which is what bounds memory when every record brings new words.
-struct CandidateIndex {
+///
+/// `verify` reuses the index with resolved anchors as representatives and the
+/// open cuts as the indexed candidates. That stays sound as long as the
+/// frequencies passed here also count the representatives: a token shared by an
+/// anchor and an open cut then has a count of at least two and is indexed, and
+/// every representative token has a counted frequency to score against.
+pub(crate) struct CandidateIndex {
     by_title: BTreeMap<String, Vec<usize>>,
     by_tag: BTreeMap<String, BitSet>,
     untagged: BitSet,
@@ -81,7 +87,7 @@ struct CandidateIndex {
 }
 
 impl CandidateIndex {
-    fn new(candidates: &[Candidate], frequencies: &TokenFrequencies) -> Self {
+    pub(crate) fn new(candidates: &[Candidate], frequencies: &TokenFrequencies) -> Self {
         let words = candidates.len().div_ceil(64);
         let mut by_title = BTreeMap::new();
         let mut by_tag = BTreeMap::new();
@@ -133,7 +139,7 @@ impl CandidateIndex {
     }
 }
 
-struct BitSet {
+pub(crate) struct BitSet {
     words: Vec<u64>,
 }
 
@@ -182,11 +188,25 @@ impl BitSet {
     }
 
     fn indices(&self) -> impl Iterator<Item = usize> + '_ {
+        self.indices_from(0)
+    }
+
+    /// Ascending set positions at or above `floor`. Callers whose candidates
+    /// are sorted can turn an ordered cutoff into a starting word instead of a
+    /// second filtering pass: whole words below the floor are never visited.
+    pub(crate) fn indices_from(&self, floor: usize) -> impl Iterator<Item = usize> + '_ {
+        let first_word = floor / 64;
+        let first_mask = u64::MAX << (floor % 64);
         self.words
             .iter()
             .enumerate()
-            .flat_map(|(word_index, word)| {
-                let mut remaining = *word;
+            .skip(first_word)
+            .flat_map(move |(word_index, word)| {
+                let mut remaining = if word_index == first_word {
+                    *word & first_mask
+                } else {
+                    *word
+                };
                 std::iter::from_fn(move || {
                     if remaining == 0 {
                         return None;
@@ -257,7 +277,7 @@ impl BitSlicedCounter {
     }
 }
 
-struct CandidateScratch {
+pub(crate) struct CandidateScratch {
     tag_pool: BitSet,
     matches: BitSet,
     overlap: BitSlicedCounter,
@@ -265,7 +285,7 @@ struct CandidateScratch {
 }
 
 impl CandidateScratch {
-    fn new(candidate_count: usize) -> Self {
+    pub(crate) fn new(candidate_count: usize) -> Self {
         let words = candidate_count.div_ceil(64);
         Self {
             tag_pool: BitSet::empty(words),
@@ -275,7 +295,7 @@ impl CandidateScratch {
         }
     }
 
-    fn matching_candidates<'a>(
+    pub(crate) fn matching_candidates<'a>(
         &'a mut self,
         representative: &Candidate,
         index: &CandidateIndex,
