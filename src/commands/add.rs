@@ -1,6 +1,7 @@
 use crate::cli::AddArgs;
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
+use crate::redact::{evidence_delimiter, rewrite_home_paths};
 use crate::store;
 use crate::{Evidence, LogEvent, compute_id, format_timestamp, resolve_agent_checked};
 use jiff::Timestamp;
@@ -16,6 +17,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 const STDERR_INPUT_LIMIT: u64 = 1024 * 1024;
+const STDIN_INPUT_LIMIT: u64 = 1024 * 1024;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AddData {
@@ -171,21 +173,11 @@ fn truncate_utf8(value: &str, max_bytes: usize) -> String {
 }
 
 const SENSITIVE_KEYS: &str = "accesskey apikey authorization authtoken bearer clientsecret dbpassword key passwd password secret token";
-// Keep this token-boundary class mirrored in `commands::doctor` for raw leak scans.
-// A slash is a path parent, not a delimiter.
-const EVIDENCE_DELIMITERS: &str = ",;)]}&#\"'";
-// Home-path prefixes, in slash form and in the dash-encoded form that harness
-// scratchpad and session slugs embed, such as `-Users-<name>-<repo>`.
-const HOME_PREFIXES: [&str; 4] = ["/Users/", "/home/", "-Users-", "-home-"];
 
 fn word(s: &str, i: usize) -> bool {
     s.as_bytes()
         .get(i)
         .is_some_and(|b| b.is_ascii_alphanumeric())
-}
-
-fn evidence_delimiter(character: char) -> bool {
-    character.is_ascii_whitespace() || EVIDENCE_DELIMITERS.contains(character)
 }
 
 fn assignment_value_span(input: &str, end: usize) -> Option<(usize, usize)> {
@@ -210,103 +202,6 @@ fn extend_one_token(input: &str, end: usize) -> usize {
     trimmed
         .find(|character: char| evidence_delimiter(character))
         .map_or(input.len(), |offset| start + offset)
-}
-
-fn path_prefix_boundary(input: &str, end: usize, separator: char) -> bool {
-    input[end..].chars().next().is_none_or(|character| {
-        character == '/' || character == separator || evidence_delimiter(character)
-    })
-}
-
-fn dash_start_boundary(input: &str, start: usize) -> bool {
-    start == 0
-        || input[..start]
-            .chars()
-            .next_back()
-            .is_some_and(|character| evidence_delimiter(character) || character == '/')
-}
-
-fn generic_home_prefix_end(input: &str, start: usize) -> Option<usize> {
-    let prefix = HOME_PREFIXES
-        .into_iter()
-        .find(|prefix| input[start..].starts_with(prefix))?;
-    let separator = prefix.chars().next().expect("prefixes are non-empty");
-    // Generic aliases only start a token. Unlike exact $HOME matching, a
-    // preceding slash makes the slash form a nested path such as
-    // /tmp/Users/alice; a dash-encoded slug normally does follow a slash.
-    if start != 0
-        && !input[..start].chars().next_back().is_some_and(|character| {
-            evidence_delimiter(character) || (separator == '-' && character == '/')
-        })
-    {
-        return None;
-    }
-    let component_start = start + prefix.len();
-    let component_end = input[component_start..]
-        .char_indices()
-        .find_map(|(offset, character)| {
-            (character == '/' || character == separator || evidence_delimiter(character))
-                .then_some(component_start + offset)
-        })
-        .unwrap_or(input.len());
-    (component_end > component_start && path_prefix_boundary(input, component_end, separator))
-        .then_some(component_end)
-}
-
-fn token_end(input: &str, start: usize) -> usize {
-    input[start..]
-        .find(|character: char| evidence_delimiter(character))
-        .map_or(input.len(), |offset| start + offset)
-}
-
-pub(crate) fn rewrite_home_paths(input: &str, home: Option<&Path>) -> String {
-    let home = home.and_then(Path::to_str);
-    // Exact current home in dash-encoded form. This must win over the generic
-    // dash rule: a dash inside the username would otherwise truncate the
-    // rewrite after its first dash-separated component.
-    let dash_home = home.map(|home| home.replace('/', "-"));
-    let mut output = String::with_capacity(input.len());
-    let mut copied = 0;
-    let mut index = 0;
-    while index < input.len() {
-        let character = input[index..]
-            .chars()
-            .next()
-            .expect("index stays on a character boundary");
-        if character != '/' && character != '-' {
-            index += character.len_utf8();
-            continue;
-        }
-        let end = home
-            .filter(|home| input[index..].starts_with(home))
-            .map(|home| index + home.len())
-            .filter(|end| path_prefix_boundary(input, *end, '/'))
-            .or_else(|| {
-                dash_home
-                    .as_deref()
-                    .filter(|_| dash_start_boundary(input, index))
-                    .filter(|dash| input[index..].starts_with(dash))
-                    .map(|dash| index + dash.len())
-                    .filter(|end| path_prefix_boundary(input, *end, '-'))
-            })
-            .or_else(|| generic_home_prefix_end(input, index));
-        if let Some(end) = end {
-            output.push_str(&input[copied..index]);
-            output.push('~');
-            copied = end;
-            // A match replaces only the home prefix. Keep the rest of this path
-            // token verbatim rather than finding and rewriting nested segments.
-            index = token_end(input, end);
-        } else {
-            index += character.len_utf8();
-        }
-    }
-    if copied == 0 {
-        input.into()
-    } else {
-        output.push_str(&input[copied..]);
-        output
-    }
 }
 
 pub(crate) fn redact_evidence(input: &str, home: Option<&Path>) -> String {
@@ -395,11 +290,33 @@ pub(crate) fn read_text(
     let use_stdin =
         text.as_deref() == Some("-") || (text.is_none() && !std::io::stdin().is_terminal());
     let mut text = if use_stdin {
+        // r25 validates the *redacted* text, so `validate_text`'s 10000-byte
+        // limit cannot gate the raw read: oversized input that redacts below it
+        // is accepted. Gate this lane at the sibling stdin/stderr scale instead,
+        // so an endless producer cannot grow the buffer without bound.
+        //
+        // The budget is on bytes *read*, so it is measured before the trailing
+        // newline is trimmed, exactly as `--stderr-file` measures the whole
+        // file. Trimming first would leave a hole at the boundary: a stream of
+        // exactly the limit, then a newline, then more data fills the reader to
+        // the cap, and the trim would drop that newline back to the limit and
+        // accept — silently discarding everything the reader never reached.
+        // Test length before decoding, too: a stream cut mid-codepoint at the
+        // cap would otherwise report a misleading UTF-8 error.
         let mut input = Vec::new();
         std::io::stdin()
             .lock()
+            .take(STDIN_INPUT_LIMIT + 1)
             .read_to_end(&mut input)
             .map_err(|error| AppError::from_io(error, std::path::Path::new("stdin")))?;
+        if input.len() > STDIN_INPUT_LIMIT as usize {
+            return Err(AppError::invalid_input(
+                format!(
+                    "{record_name} text from stdin exceeds the {STDIN_INPUT_LIMIT}-byte read limit"
+                ),
+                format!("Pipe at most {STDIN_INPUT_LIMIT} bytes to `blotter {command_name} -`."),
+            ));
+        }
         String::from_utf8(input).map_err(|_| {
             AppError::invalid_input(
                 format!("{record_name} text from stdin is not valid UTF-8"),

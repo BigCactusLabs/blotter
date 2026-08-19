@@ -3,7 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use crate::store;
 use crate::{
-    IdNamespace, ItemStatus, ListItem, LogEvent, Resolution, format_timestamp, id_namespace,
+    IdNamespace, ItemStatus, ListItem, LogEvent, format_timestamp, id_namespace,
     resolve_agent_checked,
 };
 use jiff::Timestamp;
@@ -140,10 +140,13 @@ pub fn run(
                 }
             }
         } else {
-            for item in &mut items {
+            // Predict through the same rule the apply path uses, so a dry run
+            // cannot promise a resolution the real append would not produce —
+            // an amend backdated behind a stored one does not win.
+            for (id, item) in ids.iter().zip(&mut items) {
                 if amend || item.status == ItemStatus::Open {
-                    item.status = ItemStatus::Resolved;
-                    item.resolution = Some(Resolution {
+                    let candidate = LogEvent::Resolve {
+                        id: id.clone(),
                         ts: ts.clone(),
                         agent: agent.clone(),
                         note: note.clone(),
@@ -152,8 +155,10 @@ pub fn run(
                         commit: commit.clone(),
                         url: url.clone(),
                         dropped,
-                        amended: amend,
-                    });
+                        amend,
+                    };
+                    item.status = ItemStatus::Resolved;
+                    item.resolution = Some(folded.materialized_appended_resolution(&candidate));
                 }
             }
         }

@@ -88,6 +88,7 @@ enum HookExecOutcome {
     ProbeCommand(String),
     MissingLog(PathBuf),
     DuplicateOpenCommand(String),
+    DuplicateId(String),
     Filed(String),
     ClockUnavailable(String),
     RuntimeError(String),
@@ -130,6 +131,9 @@ impl HookExecOutcome {
             }
             Self::DuplicateOpenCommand(id) => {
                 format!("hook exec: duplicate open command matches cut {id}; skipped")
+            }
+            Self::DuplicateId(id) => {
+                format!("hook exec: computed cut ID {id} already exists in the log; skipped")
             }
             Self::Filed(id) => format!("hook exec: filed cut {id}"),
             Self::ClockUnavailable(reason) => {
@@ -278,7 +282,7 @@ fn exec_claude_code(file: Option<PathBuf>, now: Timestamp) -> AppResult<HookExec
         return Ok(HookExecOutcome::MissingLog(resolved.path));
     }
 
-    let (agent, _) = resolve_agent(None);
+    let (agent, _) = resolve_agent(None)?;
     let ts = format_timestamp(now);
     let tags = vec!["auto".into(), "claude-code".into()];
     let id = compute_id(&ts, &agent, &command, Severity::Minor, &tags);
@@ -304,7 +308,8 @@ fn exec_claude_code(file: Option<PathBuf>, now: Timestamp) -> AppResult<HookExec
 
     store::with_exclusive(&resolved.path, false, |log| {
         let bytes = store::read_bytes(log, &resolved.path)?;
-        let duplicate_open_command = store::fold_bytes(&bytes)
+        let folded = store::fold_bytes(&bytes);
+        let duplicate_open_command = folded
             .items
             .iter()
             .find(|item| {
@@ -313,6 +318,12 @@ fn exec_claude_code(file: Option<PathBuf>, now: Timestamp) -> AppResult<HookExec
             .map(|item| item.id.clone());
         if let Some(existing_id) = duplicate_open_command {
             return Ok(HookExecOutcome::DuplicateOpenCommand(existing_id));
+        }
+        // The hook is the only writer outside `store::append_unique`. A resolved
+        // command may file again (r8/r25), and under a frozen clock that replay
+        // recomputes the resolved cut's ID, so uniqueness is checked here too.
+        if folded.record(&id).is_some() {
+            return Ok(HookExecOutcome::DuplicateId(id.clone()));
         }
         store::append_json(log, &resolved.path, &bytes, &record)?;
         Ok(HookExecOutcome::Filed(id.clone()))

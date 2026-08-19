@@ -36,7 +36,7 @@ Records live in an **append-only JSONL file** — by default `.blotter.jsonl` at
 - **Concurrency-safe**: multiple agents on one file are fine (advisory locking, atomic appends, self-healing torn lines).
 - **Deterministic**: content-addressed IDs — a cut's identity covers its timestamp, agent, text, severity, and sorted tags, so the same text filed under different tags is a different cut — plus stable sort and a reproducible-clock override for tests.
 - **Never rewrites history**: `resolve` appends an event; the log is a journal, not a database. The two exceptions, [`archive`](#archive) and [`doctor --fix`](#doctor), never edit in place — each writes a replacement copy and atomically swaps it in, always preserving the original as a timestamped backup.
-- **Evidence is bounded and redacted**: `add` can attach a failed command (`--cmd`), exit status (`--exit`), UTF-8 stderr file (`--stderr-file`), or free-form note (`--evidence`). `--stderr-file` rejects non-regular files and inputs over 1 MiB before sanitized stderr is stored up to 4096 UTF-8 bytes; a symlink is followed to its target, which must itself be a regular file. Redaction is best-effort hygiene, not a security boundary; never feed raw environment dumps.
+- **Evidence is bounded and redacted**: `add` can attach a failed command (`--cmd`), exit status (`--exit`), UTF-8 stderr file (`--stderr-file`), or free-form note (`--evidence`). `--stderr-file` rejects non-regular files and inputs over 1 MiB before sanitized stderr is stored up to 4096 UTF-8 bytes; a symlink is followed to its target, which must itself be a regular file. Redaction is best-effort hygiene, not a security boundary; never feed raw environment dumps. Every input lane carries the same 1 MiB read bound — `--stderr-file`, the hook payload, and text piped to `add -` or `dogear -` — and the log file itself must be a regular file, so a `--file` or `BLOTTER_FILE` naming a FIFO, device, or directory is rejected rather than blocking or growing without bound.
 
 Two global flags apply to every subcommand: `--file PATH` overrides log discovery for one invocation (same target as `BLOTTER_FILE`), and `--pretty` indents the JSON envelope for human reading. The one exception is `sweep`, which rejects `--file` because its inputs are its arguments.
 
@@ -89,13 +89,15 @@ blotter schema                    # full machine contract — agents self-orient
 
 Two other paths append besides the write commands: `blotter hook exec` (invoked by the harness after a failed tool call, never by hand) files the auto-tagged cuts described under [Hooks](#hooks), and `doctor --fix` appends in the course of a repair. `blotter schema` carries the authoritative `read_only`/`appends` annotation for every command.
 
-The five read commands — `list`, `triage`, `verify`, `digest`, and `sweep` — show hand-filed records by default; pass `--include-auto` to include records tagged `auto`. On `list`, `--tag auto` implies `--include-auto`, so you can ask for auto records by name without the extra flag.
+Six read commands — `list`, `triage`, `verify`, `digest`, `sweep`, and `export` — show hand-filed records by default; pass `--include-auto` to include records tagged `auto`. On `list`, `--tag auto` implies `--include-auto`, so you can ask for auto records by name without the extra flag.
 
 ## Cuts
 
 A cut is one or two sentences of friction: what you were doing, what got in the way. Default severity is `minor`; `major` means it cost real time, `blocker` means it stopped the task. Tags group cuts by area; evidence flags capture the failing command without pasting it into the text.
 
 A resolution you got wrong is corrected, not rewritten: `resolve <id> --amend` appends a second resolve event carrying the corrected fields. The first non-amend resolve stays the base event, the latest amend wins the materialized view (`resolution.amended: true`), and every original byte stays in the log. `--amend` needs at least one resolution field and every named record must already be resolved.
+
+"Latest" means the latest **timestamp**, not the last line in the file — a `merge=union` log concatenates branches in branch order, so the two disagree after a merge. An amend written with a clock behind a stored amend therefore does not take over the materialized view, and `resolve` reports the amend that actually won rather than the one it just wrote; `--dry-run` predicts the same answer.
 
 An amend **replaces** the materialized resolution; it does not merge field by field. If the base resolve carried `--pr` and you amend with only `--note`, the materialized `resolution` keeps the note and drops the pull request. Repeat every field you still want:
 
@@ -105,7 +107,7 @@ blotter resolve <id> --amend --note "corrected" --pr <url>
 
 The base resolve is still in the log, as always. It is the materialized view that `list` and `verify` read — the latest amend alone — that loses the field.
 
-`resolve` always returns a `data.records` array, including when only one ID is resolved. New records omit `repo`; their `cwd` is relative to the discovered repository root when possible, `~`-relative when outside that repository but under `$HOME`, or absolute otherwise.
+`resolve` always returns a `data.records` array, including when only one ID is resolved. New records omit `repo`; their `cwd` is relative to the discovered repository root when possible, and otherwise goes through the same home-path rewrite as evidence — the exact `$HOME`, a generic `/Users/<user>` or `/home/<user>`, and the dash-encoded slug harness scratchpad paths embed all become `~`, so a stored `cwd` does not trip `doctor --leaks`.
 
 New records carry `bl_`-prefixed IDs. Legacy `pc_` records remain readable as opaque historical data: existing logs fold and list normally, and `resolve` accepts explicit `pc_` IDs or prefixes. New records never use the prefix.
 
@@ -212,7 +214,7 @@ Use `--settings PATH` for an explicit settings file, or `--global` for `~/.claud
 
 Claude Code then invokes `blotter hook exec claude-code` after a failed Bash tool call. The hook files a minor cut whose text and `evidence.cmd` are the same best-effort-redacted failed command (home-path rewrite followed by the secret pass), with tags `auto` and `claude-code` and `source:"hook"` — the one provenance value `add` cannot forge, marking the record as machine-observed rather than self-reported; its human-readable failure message becomes a best-effort-redacted evidence note. It never creates a blotter log, ignores interrupts and malformed or inapplicable payloads, and keeps stdout empty with exit 0 so a logging failure cannot disrupt the host session. Four noise guards apply. It skips an event when an **open** cut already has exactly the same redacted text — once that cut is resolved, the command can be filed again. It skips a raw command longer than 500 bytes before redaction: a sprawling debugging one-liner is log noise rather than a description of friction. It skips a command that is not a simple command — an unquoted `&&`, `||`, `;`, `|`, newline, `$(`, or backtick, or a command that ends inside a quote — because a chain's non-zero exit names neither the failing step nor the friction, so the stored text would be an unreadable one-liner; the scan tracks quote state but does not parse the shell, and an ambiguous read skips. And it skips read-only probe commands (`grep`, `rg`, `ls`, `find`, `tail`, `head`, `cat`, `stat`, `test`, `[`, `which`, `curl`, `gh`) whose non-zero exit is an expected answer rather than friction — matched best-effort on the first program word only, after leading `VAR=value` assignments and ignoring pipelines and chains.
 
-Auto-captured cuts are hidden from `list`, `triage`, `digest`, `verify`, and `sweep` by default. The hook captures that a command failed, not why it mattered, so those records are evidence rather than analysis; pass `--include-auto` when that evidence is needed.
+Auto-captured cuts are hidden from `list`, `triage`, `digest`, `verify`, `sweep`, and `export` by default. The hook captures that a command failed, not why it mattered, so those records are evidence rather than analysis; pass `--include-auto` when that evidence is needed.
 
 Silence makes the hook hard to debug, so set `BLOTTER_HOOK_EXPLAIN=1` to have `hook exec` write one line to stderr naming why it skipped — the failed gate, the duplicate cut, an unusable clock — or the id of the cut it filed. stdout stays empty and the exit code stays 0 either way. Any other value keeps the hook silent.
 
@@ -297,7 +299,7 @@ Duplicate lines after a merge are harmless — the fold is first-wins and `blott
 
 Everything an agent needs is in `blotter schema`: commands and flags with read-only/appends annotations, env vars (`BLOTTER_FILE`, `BLOTTER_AGENT`, `BLOTTER_NOW`, `BLOTTER_HOOK_EXPLAIN`), record shapes, error codes, and the exit-code dictionary (0 success · 1 command findings · 2 usage · 65 bad input · 66 not found · 70 internal · 74 I/O · 75 lock timeout, retryable · 77 permission denied · 78 config). Empty results are exit 0, never errors.
 
-Exit 1 is not an error — it is a finding count. `doctor` returns it for an unhealthy log, `triage` for at least one chronic cluster, and `verify` for at least one recurrence. Each command's own `exit_codes` entry in `blotter schema` says which meaning applies.
+Exit 1 is not an error — it is a finding count. `doctor` returns it for an unhealthy log, `triage` for at least one chronic cluster, `verify` for at least one recurrence, and `retrospect` for at least one promotion candidate. Each command's own `exit_codes` entry in `blotter schema` says which meaning applies.
 
 ## License
 

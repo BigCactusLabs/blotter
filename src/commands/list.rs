@@ -17,24 +17,24 @@ pub struct ListData {
 }
 
 pub fn run(args: ListArgs, file: Option<PathBuf>, pretty: bool, now: Timestamp) -> AppResult<i32> {
-    let resolved = store::discover(file)?;
     if args.kind != ListKind::Cut && args.severity.is_some() {
         return Err(AppError::invalid_argument(
             "--severity is only available with --kind cut",
             "Remove --severity or use `blotter list --kind cut --severity minor|major|blocker`.",
         ));
     }
+    let since = args
+        .since
+        .as_deref()
+        .map(|value| parse_since(value, now))
+        .transpose()?;
+    let resolved = store::discover(file)?;
     let store::LoadedFold {
         items,
         mut warnings,
     } = store::load_folded(&resolved)?;
     let include_auto = args.include_auto || args.tag.as_deref() == Some("auto");
     let (items, auto_captures) = crate::partition_auto_captures(items, include_auto);
-    let since = args
-        .since
-        .as_deref()
-        .map(|value| parse_since(value, now))
-        .transpose()?;
     let hidden = auto_captures
         .iter()
         .filter(|item| matches_filters(item, &args, since.as_ref()))

@@ -1460,7 +1460,7 @@ fn every_command_success_envelope_deserializes() {
     );
     assert_eq!(
         schema.data["records"]["cut"]["cwd"],
-        "repo-relative path when cwd is inside the discovered repo; ~-relative when under the home directory; absolute path otherwise"
+        "repo-relative path when cwd is inside the discovered repo; ~-relative when under the home directory; otherwise the absolute path with home prefixes rewritten to ~"
     );
     assert!(
         schema.data["commands"]["add"]["flags"]["--stderr-file"]
@@ -2953,6 +2953,14 @@ fn stdout_write_failures_are_structured_for_all_output_paths() {
         .unwrap();
     assert_stdout_write_error(&digest_markdown);
 
+    let export = command_with_read_only_stdout(&read_only_stdout)
+        .arg("--file")
+        .arg(&file)
+        .args(["export", "--format", "otlp-json"])
+        .output()
+        .unwrap();
+    assert_stdout_write_error(&export);
+
     let schema = command_with_read_only_stdout(&read_only_stdout)
         .arg("schema")
         .output()
@@ -3443,8 +3451,16 @@ fn structured_error_exit_matrix_and_help_exceptions() {
         .output()
         .unwrap();
     error(&invalid_utf8, 65, "invalid_input");
+    // A directory is not a regular file, so the log-open guard rejects it at the
+    // same code the sibling --stderr-file lane uses, ahead of the EISDIR read.
     let directory_error = run_file(temp.path(), &["list"]);
-    error(&directory_error, 74, "io_error");
+    let directory_envelope = error(&directory_error, 65, "invalid_input");
+    assert!(
+        directory_envelope
+            .error
+            .message
+            .contains("not a regular file")
+    );
 
     let help = run(&["--help"]);
     assert!(help.status.success());
@@ -6486,6 +6502,92 @@ fn verify_allows_one_open_cut_to_recur_against_two_resolved_anchors() {
 }
 
 #[test]
+fn verify_reports_one_open_cut_against_every_matching_anchor_and_link_path() {
+    // The recurrence scan prefilters open cuts per anchor, so this pins the
+    // parts a prefilter could quietly drop: an anchor whose tags miss the open
+    // cut still matches on an identical title, an anchor with a different title
+    // still matches through shared tokens plus a shared tag, no anchor claims
+    // the open cut away from the others, and an open cut that predates every
+    // resolution is still excluded even though it matches on title.
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let title_anchor = add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "Cache configuration missing",
+        &["alpha"],
+    );
+    let other_tag_anchor = add_at(
+        &file,
+        "2026-07-09T18:30:10Z",
+        "cache configuration MISSING",
+        &["beta"],
+    );
+    let token_anchor = add_at(
+        &file,
+        "2026-07-09T18:30:20Z",
+        "Cache configuration missing entirely",
+        &["gamma"],
+    );
+    let before_resolution = add_at(
+        &file,
+        "2026-07-09T18:30:30Z",
+        "cache configuration missing",
+        &["delta"],
+    );
+    for (index, anchor) in [&title_anchor, &other_tag_anchor, &token_anchor]
+        .iter()
+        .enumerate()
+    {
+        let _: SuccessEnvelope<ResolveData> = resolve_at(
+            &file,
+            &format!("2026-07-09T18:31:{:02}Z", index * 10),
+            anchor.data.record.cut_id(),
+            &["--agent", "fixer"],
+        );
+    }
+    let recurring = add_at(
+        &file,
+        "2026-07-09T18:32:00Z",
+        "CACHE CONFIGURATION MISSING!",
+        &["gamma"],
+    );
+
+    let verify = verify_success(&run_file(&file, &["verify"]), 1);
+    assert_eq!(verify.data["count"], 3);
+    assert_eq!(verify.data["scanned"], 2);
+    let recurrences = verify.data["recurrences"].as_array().unwrap();
+    let mut expected_resolved_ids = vec![
+        title_anchor.data.record.cut_id().to_owned(),
+        other_tag_anchor.data.record.cut_id().to_owned(),
+        token_anchor.data.record.cut_id().to_owned(),
+    ];
+    expected_resolved_ids.sort();
+    assert_eq!(
+        recurrences
+            .iter()
+            .map(|recurrence| recurrence["resolved_id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        expected_resolved_ids
+    );
+    for recurrence in recurrences {
+        assert_eq!(
+            recurrence["recurrence_ids"],
+            json!([recurring.data.record.cut_id()])
+        );
+        assert_eq!(recurrence["count"], 1);
+        assert_eq!(
+            recurrence["first_recurrence_ts"],
+            "2026-07-09T18:32:00.000Z"
+        );
+        assert_ne!(
+            recurrence["recurrence_ids"][0],
+            json!(before_resolution.data.record.cut_id())
+        );
+    }
+}
+
+#[test]
 fn verify_sorts_recurrence_ids_and_anchors_by_first_recurrence() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
@@ -8595,7 +8697,15 @@ fn hook_exec_claude_code_dedupes_open_commands_but_refiles_resolved_cuts() {
         success(&run_file(&file, &["resolve", id, "--agent", "tester"]));
     assert!(resolved.data.changed);
 
-    hook_exec_is_silent(&hook_exec_claude_code(&file, payload));
+    let refiled = command()
+        .env("BLOTTER_NOW", "2026-07-10T18:30:00.123456Z")
+        .arg("--file")
+        .arg(&file)
+        .args(["hook", "exec", "claude-code"])
+        .write_stdin(payload)
+        .output()
+        .unwrap();
+    hook_exec_is_silent(&refiled);
     assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 3);
 }
 
@@ -10461,4 +10571,742 @@ fn archive_sole_newline_log_has_zero_physical_lines() {
     assert_eq!(archive.data["archived"], 0);
     assert_eq!(archive.data["kept"], 0);
     assert_eq!(std::fs::read(&file).unwrap(), b"\n");
+}
+
+// --- store.rs log-path guard, amend ordering by timestamp, cwd redaction, and
+// --- the add/dogear stdin raw gate.
+
+#[cfg(unix)]
+fn spawn_blotter(file: &Path, args: &[&str]) -> std::process::Child {
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin!("blotter"));
+    child
+        .env("BLOTTER_NOW", NOW)
+        .env_remove("BLOTTER_FILE")
+        .env_remove("BLOTTER_AGENT")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .arg("--file")
+        .arg(file)
+        .args(args);
+    child.spawn().unwrap()
+}
+
+/// Wait with a deadline. The pre-fix FIFO behaviour was an unbounded block, so a
+/// regression must fail this test rather than wedge the whole suite.
+#[cfg(unix)]
+fn wait_bounded(mut child: std::process::Child, what: &str) -> std::process::Output {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if child.try_wait().unwrap().is_some() {
+            return child.wait_with_output().unwrap();
+        }
+        if std::time::Instant::now() >= deadline {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("{what} blocked on a non-regular log path");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+fn non_regular_log_cases() -> [(&'static str, Vec<&'static str>); 5] {
+    [
+        ("list", vec!["list"]),
+        ("triage", vec!["triage"]),
+        ("digest", vec!["digest"]),
+        ("add", vec!["add", "non-regular log", "--agent", "tester"]),
+        ("doctor", vec!["doctor"]),
+    ]
+}
+
+fn assert_non_regular_log(output: &std::process::Output, what: &str) {
+    let envelope = error(output, 65, "invalid_input");
+    assert!(
+        envelope.error.message.contains("not a regular file"),
+        "{what}: {}",
+        envelope.error.message
+    );
+    assert!(
+        envelope.error.suggested_fix.contains("FIFOs and devices"),
+        "{what}: {}",
+        envelope.error.suggested_fix
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_fifo_log_path_is_rejected_without_blocking() {
+    let temp = TempDir::new().unwrap();
+    let fifo = temp.path().join("log.fifo");
+    let made_fifo = std::process::Command::new("mkfifo")
+        .arg(&fifo)
+        .status()
+        .is_ok_and(|status| status.success());
+    if !made_fifo {
+        eprintln!("skipping FIFO log assertion; mkfifo unavailable");
+        return;
+    }
+    for (what, args) in non_regular_log_cases() {
+        let output = wait_bounded(spawn_blotter(&fifo, &args), what);
+        assert_non_regular_log(&output, what);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_device_log_path_is_rejected_before_an_unbounded_read() {
+    let device = Path::new("/dev/zero");
+    if !device.exists() {
+        eprintln!("skipping device log assertion; /dev/zero unavailable");
+        return;
+    }
+    for (what, args) in non_regular_log_cases() {
+        assert_non_regular_log(&run_file(device, &args), what);
+    }
+    // Deliberate behaviour change: /dev/null used to fold as an empty log and
+    // exit 0. It is a character device, so it is invalid_input like the rest.
+    assert_non_regular_log(
+        &run_file(Path::new("/dev/null"), &["list"]),
+        "list /dev/null",
+    );
+}
+
+fn resolve_line(id: &str, ts: &str, note: &str, amend: bool) -> String {
+    let mut value = json!({"kind":"resolve","id":id,"ts":ts,"agent":"fixer","note":note});
+    if amend {
+        value["amend"] = json!(true);
+    }
+    value.to_string()
+}
+
+fn append_lines(file: &Path, lines: &[String]) {
+    let mut log = std::fs::read_to_string(file).unwrap();
+    for line in lines {
+        log.push_str(line);
+        log.push('\n');
+    }
+    std::fs::write(file, log).unwrap();
+}
+
+#[test]
+fn resolve_amend_with_the_latest_timestamp_wins_over_file_order() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "merge reordered amends");
+    let id = cut.data.record.cut_id().to_owned();
+    // A union merge concatenates branches in branch order, so the older amend
+    // can land last in the byte stream. Timestamp decides, not file position.
+    append_lines(
+        &file,
+        &[
+            resolve_line(&id, "2026-07-10T00:00:00.000Z", "base", false),
+            resolve_line(&id, "2026-07-12T00:00:00.000Z", "later", true),
+            resolve_line(&id, "2026-07-11T00:00:00.000Z", "earlier", true),
+        ],
+    );
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
+    let resolution = listed.data.items[0].resolution.as_ref().unwrap();
+    assert_eq!(resolution.note.as_deref(), Some("later"));
+    assert_eq!(resolution.ts, "2026-07-12T00:00:00.000Z");
+    assert!(resolution.amended);
+}
+
+#[test]
+fn resolve_amends_sharing_a_timestamp_keep_the_last_in_file_order() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "frozen clock amends");
+    let id = cut.data.record.cut_id().to_owned();
+    // Two amends under one frozen BLOTTER_NOW are reachable from the CLI; the
+    // comparison is >=, so the last one in file order still wins the tie.
+    append_lines(
+        &file,
+        &[
+            resolve_line(&id, "2026-07-10T00:00:00.000Z", "base", false),
+            resolve_line(&id, "2026-07-11T00:00:00.000Z", "first", true),
+            resolve_line(&id, "2026-07-11T00:00:00.000Z", "second", true),
+        ],
+    );
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
+    let resolution = listed.data.items[0].resolution.as_ref().unwrap();
+    assert_eq!(resolution.note.as_deref(), Some("second"));
+}
+
+#[test]
+fn verify_exit_code_is_stable_when_amend_lines_are_swapped() {
+    for (name, amends_in_clock_order) in [("clock order", true), ("merge order", false)] {
+        let temp = TempDir::new().unwrap();
+        let file = temp.path().join("cuts.jsonl");
+        let anchor = add_at(
+            &file,
+            "2026-07-09T18:30:00Z",
+            "Cache configuration missing",
+            &[],
+        );
+        let id = anchor.data.record.cut_id().to_owned();
+        add_at(
+            &file,
+            "2026-07-09T18:35:00Z",
+            "Cache configuration missing",
+            &[],
+        );
+        let early = resolve_line(&id, "2026-07-09T18:32:00.000Z", "early", true);
+        let late = resolve_line(&id, "2026-07-09T18:40:00.000Z", "late", true);
+        let mut lines = vec![resolve_line(&id, "2026-07-09T18:31:00.000Z", "base", false)];
+        if amends_in_clock_order {
+            lines.extend([early, late]);
+        } else {
+            lines.extend([late, early]);
+        }
+        append_lines(&file, &lines);
+
+        // The later open cut predates the latest amend either way, so byte order
+        // must not flip verify between exit 0 and exit 1.
+        let verify = verify_success(&run_file(&file, &["verify"]), 0);
+        assert_eq!(verify.data["count"], 0, "{name}");
+        assert_eq!(verify.data["recurrences"], json!([]), "{name}");
+    }
+}
+
+// --- README hook prose drift gate ---
+
+/// Every published `hook exec claude-code` gate paired with a distinctive phrase
+/// that must survive in the README's `## Hooks` section. `blotter schema` is the
+/// source of truth; a gate that ships without prose is the drift this catches.
+const HOOK_GATE_README_MARKERS: &[(&str, &str)] = &[
+    ("hook_event_name", "after a failed Bash tool call"),
+    ("tool_name", "failed Bash tool call"),
+    ("is_interrupt", "ignores interrupts"),
+    ("tool_input.command", "inapplicable payloads"),
+    ("tool_input.command_bytes", "longer than 500 bytes"),
+    ("tool_input.command_shape", "not a simple command"),
+    ("tool_input.command_program", "read-only probe commands"),
+    ("resolved_log_file", "never creates a blotter log"),
+];
+
+/// Published gates deliberately left out of the README prose. Every entry needs a
+/// written reason beside it; empty means the prose covers the whole contract.
+const HOOK_GATE_README_UNDOCUMENTED: &[&str] = &[];
+
+fn readme_section(heading: &str) -> String {
+    let readme =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("README.md")).unwrap();
+    let mut lines = readme.lines().skip_while(|line| line.trim_end() != heading);
+    let found = lines
+        .next()
+        .unwrap_or_else(|| panic!("README has no {heading} section"));
+    std::iter::once(found)
+        .chain(lines.take_while(|line| !line.starts_with("## ")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn number_word(count: usize) -> &'static str {
+    match count {
+        1 => "One",
+        2 => "Two",
+        3 => "Three",
+        4 => "Four",
+        5 => "Five",
+        6 => "Six",
+        7 => "Seven",
+        8 => "Eight",
+        9 => "Nine",
+        10 => "Ten",
+        other => panic!("no number word for {other} noise guards"),
+    }
+}
+
+#[test]
+fn cwd_under_a_dash_encoded_home_slug_is_redacted() {
+    let temp = TempDir::new().unwrap();
+    if temp_has_git_ancestor(&temp) {
+        eprintln!("skipping dash-encoded cwd assertion inside a git checkout");
+        return;
+    }
+    let home = temp.path().join("fakehome");
+    let scratchpad = temp
+        .path()
+        .join("claude-501")
+        .join("-Users-alice-Documents-GitHub-blotter")
+        .join("sess")
+        .join("scratchpad");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&scratchpad).unwrap();
+    let scratchpad = scratchpad.canonicalize().unwrap();
+    // The r23 rule rewrites only the matched prefix and keeps the rest of the
+    // dash-encoded token verbatim.
+    let expected = scratchpad.to_string_lossy().replace("-Users-alice", "~");
+    assert!(expected.contains("/~-Documents-GitHub-blotter/"));
+
+    let file = temp.path().join("cuts.jsonl");
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", &home)
+            .current_dir(&scratchpad)
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "dash-encoded cwd", "--agent", "tester"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(added.data.record.cut_cwd(), expected);
+
+    let doctor = doctor_response(
+        &command()
+            .env("HOME", &home)
+            .arg("--file")
+            .arg(&file)
+            .args(["doctor", "--leaks"])
+            .output()
+            .unwrap(),
+        0,
+    );
+    assert!(doctor.data.healthy);
+}
+
+#[test]
+fn cwd_under_a_generic_home_root_is_redacted() {
+    let cwd = std::env::current_dir().unwrap();
+    let cwd_text = cwd.to_string_lossy().into_owned();
+    let Some(rest) = ["/Users/", "/home/"]
+        .into_iter()
+        .find_map(|prefix| cwd_text.strip_prefix(prefix))
+    else {
+        eprintln!("skipping generic home cwd assertion outside /Users and /home");
+        return;
+    };
+    if cwd_text.contains(char::is_whitespace) {
+        eprintln!("skipping generic home cwd assertion; the path is not one token");
+        return;
+    }
+    let expected = match rest.split_once('/') {
+        Some((_, tail)) => format!("~/{tail}"),
+        None => "~".to_owned(),
+    };
+
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("fakehome");
+    std::fs::create_dir_all(&home).unwrap();
+    // The log lives outside the repo, so the cwd is not repo-relative, and $HOME
+    // is elsewhere: only the generic /Users/ and /home/ rule can redact it.
+    let file = temp.path().join("cuts.jsonl");
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", &home)
+            .current_dir(&cwd)
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "generic home cwd", "--agent", "tester"])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(added.data.record.cut_cwd(), expected);
+
+    let doctor = doctor_response(
+        &command()
+            .env("HOME", &home)
+            .arg("--file")
+            .arg(&file)
+            .args(["doctor", "--leaks"])
+            .output()
+            .unwrap(),
+        0,
+    );
+    assert!(doctor.data.healthy);
+}
+
+#[test]
+fn duplicate_add_returns_the_existing_record_with_normalized_tags() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let args = [
+        "add",
+        "legacy tag order",
+        "--agent",
+        "tester",
+        "--tag",
+        "zeta",
+        "--tag",
+        "alpha",
+    ];
+    let first: SuccessEnvelope<AddData> = success(&run_file(&file, &args));
+    assert_eq!(first.data.record.cut_tags(), ["alpha", "zeta"]);
+
+    // Rewrite the stored line with a legacy unsorted tag array. The ID hashes
+    // sorted tags, so the duplicate still matches, and the sentinel record the
+    // append path returns must come back normalized.
+    let mut stored: Value =
+        serde_json::from_str(std::fs::read_to_string(&file).unwrap().trim()).unwrap();
+    stored["tags"] = json!(["zeta", "alpha"]);
+    std::fs::write(&file, format!("{stored}\n")).unwrap();
+
+    let duplicate: SuccessEnvelope<AddData> = success(&run_file(&file, &args));
+    assert!(!duplicate.data.changed);
+    assert_eq!(duplicate.data.record.cut_tags(), ["alpha", "zeta"]);
+    assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 1);
+}
+
+#[test]
+fn stdin_text_over_10000_bytes_that_redacts_smaller_is_accepted() {
+    let temp = TempDir::new().unwrap();
+    let home = temp.path().join("fakehome");
+    std::fs::create_dir_all(&home).unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let raw = "/Users/verylongusername/deep/path ".repeat(400);
+    assert!(raw.len() > 10_000);
+
+    // r25: the text is redacted first, and `validate_text`'s 10000-byte limit
+    // measures the redacted text, so the raw read cannot be capped at 10000.
+    let added: SuccessEnvelope<Value> = success(
+        &command()
+            .env("HOME", &home)
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "-", "--agent", "tester"])
+            .write_stdin(raw)
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(added.data["changed"], true);
+    assert_eq!(
+        added.data["record"]["text"].as_str().unwrap(),
+        "~/deep/path ".repeat(400)
+    );
+}
+
+#[test]
+fn stdin_text_over_the_raw_read_limit_is_rejected() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let oversized = vec![b'x'; 1024 * 1024 + 1];
+
+    let output = command()
+        .arg("--file")
+        .arg(&file)
+        .args(["add", "-", "--agent", "tester"])
+        .write_stdin(oversized)
+        .output()
+        .unwrap();
+    let envelope = error(&output, 65, "invalid_input");
+    assert!(
+        envelope
+            .error
+            .message
+            .contains("exceeds the 1048576-byte read limit")
+    );
+    assert!(!file.exists());
+}
+
+#[test]
+fn sweep_missing_registry_is_not_found_66() {
+    let temp = TempDir::new().unwrap();
+    let missing = temp.path().join("repos.txt");
+
+    let output = command()
+        .args(["sweep", "--registry"])
+        .arg(&missing)
+        .output()
+        .unwrap();
+    let envelope = error(&output, 66, "not_found");
+    assert!(envelope.error.message.contains("registry file not found"));
+    assert!(envelope.error.suggested_fix.contains("--registry"));
+}
+
+#[cfg(unix)]
+#[test]
+fn sweep_unreadable_registry_is_permission_denied_77() {
+    let temp = TempDir::new().unwrap();
+    let registry = temp.path().join("repos.txt");
+    std::fs::write(&registry, "").unwrap();
+    std::fs::set_permissions(&registry, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let output = command()
+        .args(["sweep", "--registry"])
+        .arg(&registry)
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&registry, std::fs::Permissions::from_mode(0o600)).unwrap();
+    error(&output, 77, "permission_denied");
+}
+
+#[test]
+fn invalid_since_is_reported_before_the_log_file_for_every_command() {
+    let temp = TempDir::new().unwrap();
+    let missing = temp.path().join("missing.jsonl");
+
+    for args in [
+        &["list", "--since", "banana"][..],
+        &["export", "--format", "otlp-json", "--since", "banana"][..],
+        &["digest", "--since", "banana"][..],
+    ] {
+        let envelope = error(&run_file(&missing, args), 2, "invalid_argument");
+        assert!(
+            envelope.error.message.contains("--since"),
+            "message={}",
+            envelope.error.message
+        );
+    }
+
+    // sweep rejects --file, so its equivalent missing input is --registry.
+    let sweep = command()
+        .args(["sweep", "--since", "banana", "--registry"])
+        .arg(temp.path().join("repos.txt"))
+        .output()
+        .unwrap();
+    let envelope = error(&sweep, 2, "invalid_argument");
+    assert!(envelope.error.message.contains("--since"));
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_blotter_agent_is_a_config_error_and_never_files_a_detected_agent() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let agent = std::ffi::OsStr::from_bytes(b"agent-\xff");
+
+    let output = command()
+        .env("BLOTTER_AGENT", agent)
+        .arg("--file")
+        .arg(&file)
+        .args(["add", "a cut filed under an unreadable agent"])
+        .output()
+        .unwrap();
+    let envelope = error(&output, 78, "config_error");
+    assert!(envelope.error.message.contains("BLOTTER_AGENT"));
+    assert!(!file.exists());
+
+    // The hook lane still fails open: it explains the gate and exits 0.
+    std::fs::write(&file, "").unwrap();
+    let hook = command()
+        .env("BLOTTER_AGENT", agent)
+        .env("BLOTTER_HOOK_EXPLAIN", "1")
+        .arg("--file")
+        .arg(&file)
+        .args(["hook", "exec", "claude-code"])
+        .write_stdin(claude_bash_failure("cargo test", temp.path()).to_string())
+        .output()
+        .unwrap();
+    assert_eq!(hook.status.code(), Some(0));
+    assert!(hook.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&hook.stderr).contains("BLOTTER_AGENT"));
+    assert!(std::fs::read_to_string(&file).unwrap().is_empty());
+}
+
+#[test]
+fn hook_exec_never_appends_a_second_line_with_an_existing_cut_id() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, "").unwrap();
+    let payload = claude_bash_failure("cargo test", temp.path()).to_string();
+
+    hook_exec_is_silent(&hook_exec_claude_code(&file, payload.clone()));
+    let first: Value = serde_json::from_str(
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    let id = first["id"].as_str().unwrap().to_owned();
+    let resolved: SuccessEnvelope<ResolveData> =
+        success(&run_file(&file, &["resolve", &id, "--agent", "tester"]));
+    assert!(resolved.data.changed);
+
+    // Same frozen clock, same command: the replay recomputes the resolved cut's
+    // ID, so the append is skipped rather than duplicating the ID.
+    let replay = hook_exec_claude_code_with_explain(&file, payload, "1");
+    hook_exec_explains(
+        &replay,
+        &format!("hook exec: computed cut ID {id} already exists in the log; skipped"),
+    );
+    let cut_lines = std::fs::read_to_string(&file)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|line| line["id"] == id.as_str() && line["kind"] == "cut")
+        .count();
+    assert_eq!(cut_lines, 1);
+    assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 2);
+}
+
+#[test]
+fn readme_hook_prose_describes_every_published_hook_gate() {
+    let schema: SuccessEnvelope<Value> = success(&run(&["schema"]));
+    let gates = schema.data["commands"]["hook"]["exec"]["payload"]["gates"]
+        .as_object()
+        .unwrap();
+    let markers: HashMap<&str, &str> = HOOK_GATE_README_MARKERS.iter().copied().collect();
+    let section = readme_section("## Hooks");
+
+    for gate in gates.keys() {
+        if HOOK_GATE_README_UNDOCUMENTED.contains(&gate.as_str()) {
+            continue;
+        }
+        let marker = markers.get(gate.as_str()).copied().unwrap_or_else(|| {
+            panic!(
+                "published hook gate {gate} has no README marker: describe it under ## Hooks and add it to HOOK_GATE_README_MARKERS"
+            )
+        });
+        assert!(
+            section.contains(marker),
+            "README ## Hooks no longer describes hook gate {gate}: expected the phrase {marker:?}"
+        );
+    }
+
+    // The README counts guards a reader can act on, not published gates: the three
+    // `tool_input.command_*` gates plus the open-cut dedupe guard, which skips a
+    // command an open cut already holds and is not a payload gate at all.
+    let guards = gates
+        .keys()
+        .filter(|gate| gate.starts_with("tool_input.command_"))
+        .count()
+        + 1;
+    let phrase = format!("{} noise guards apply", number_word(guards));
+    assert!(
+        section.contains(&phrase),
+        "README ## Hooks must say {phrase:?}: one guard per published tool_input.command_* gate plus the open-cut dedupe guard"
+    );
+}
+
+// --- Codex PR #2 review: the resolve envelope and the raw stdin gate must agree
+// --- with what a complete subsequent fold produces.
+
+#[test]
+fn resolve_amend_response_reports_the_timestamp_winning_amend() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let id = add_at(
+        &file,
+        "2026-01-01T00:00:00.000Z",
+        "backdated amend case",
+        &[],
+    )
+    .data
+    .record
+    .cut_id()
+    .to_string();
+    resolve_at(
+        &file,
+        "2026-02-01T00:00:00.000Z",
+        &id,
+        &["--agent", "tester", "--note", "base"],
+    );
+    resolve_at(
+        &file,
+        "2026-05-01T00:00:00.000Z",
+        &id,
+        &["--agent", "tester", "--amend", "--note", "may amend"],
+    );
+
+    // A backdated amend appends, but the fold keeps the later stored amend. The
+    // dry run predicts the same thing, so it cannot promise what apply will not do.
+    let planned = resolve_at(
+        &file,
+        "2026-03-01T00:00:00.000Z",
+        &id,
+        &[
+            "--agent",
+            "tester",
+            "--amend",
+            "--note",
+            "march amend",
+            "--dry-run",
+        ],
+    );
+    let planned = planned.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(planned.note.as_deref(), Some("may amend"));
+    assert_eq!(planned.ts, "2026-05-01T00:00:00.000Z");
+
+    let applied = resolve_at(
+        &file,
+        "2026-03-01T00:00:00.000Z",
+        &id,
+        &["--agent", "tester", "--amend", "--note", "march amend"],
+    );
+    let applied = applied.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(applied.note.as_deref(), Some("may amend"));
+    assert_eq!(applied.ts, "2026-05-01T00:00:00.000Z");
+
+    let listed = success::<ListData>(&run_file(&file, &["list", "--status", "all"]));
+    let listed = listed.data.items[0].resolution.as_ref().unwrap();
+    assert_eq!(listed.note.as_deref(), Some("may amend"));
+    assert_eq!(listed.ts, "2026-05-01T00:00:00.000Z");
+
+    // A later amend still wins, and an exact tie still falls to the appended
+    // event as the last in file order.
+    let later = resolve_at(
+        &file,
+        "2026-09-01T00:00:00.000Z",
+        &id,
+        &["--agent", "tester", "--amend", "--note", "september amend"],
+    );
+    assert_eq!(
+        later.data.records[0]
+            .resolution
+            .as_ref()
+            .unwrap()
+            .note
+            .as_deref(),
+        Some("september amend")
+    );
+    let tie = resolve_at(
+        &file,
+        "2026-09-01T00:00:00.000Z",
+        &id,
+        &["--agent", "tester", "--amend", "--note", "tie amend"],
+    );
+    assert_eq!(
+        tie.data.records[0]
+            .resolution
+            .as_ref()
+            .unwrap()
+            .note
+            .as_deref(),
+        Some("tie amend")
+    );
+    let listed = success::<ListData>(&run_file(&file, &["list", "--status", "all"]));
+    assert_eq!(
+        listed.data.items[0]
+            .resolution
+            .as_ref()
+            .unwrap()
+            .note
+            .as_deref(),
+        Some("tie amend")
+    );
+}
+
+#[test]
+fn stdin_text_at_the_read_limit_followed_by_a_newline_and_more_input_is_rejected() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    // The reader stops at the cap having consumed a trailing newline. Trimming
+    // that newline before the length test would drop the buffer back to the
+    // limit and accept, silently discarding everything past it.
+    let mut oversized = vec![b'x'; 1024 * 1024];
+    oversized.push(b'\n');
+    oversized.extend_from_slice(b"discarded suffix");
+
+    let output = command()
+        .arg("--file")
+        .arg(&file)
+        .args(["add", "-", "--agent", "tester"])
+        .write_stdin(oversized)
+        .output()
+        .unwrap();
+    let envelope = error(&output, 65, "invalid_input");
+    assert!(
+        envelope
+            .error
+            .message
+            .contains("exceeds the 1048576-byte read limit")
+    );
+    assert!(!file.exists());
 }

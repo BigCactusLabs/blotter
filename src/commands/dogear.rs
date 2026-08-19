@@ -1,7 +1,8 @@
 use crate::cli::DogearArgs;
-use crate::commands::add::{read_text, rewrite_home_paths, validate_text};
+use crate::commands::add::{read_text, validate_text};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
+use crate::redact::rewrite_home_paths;
 use crate::store;
 use crate::{LogEvent, compute_dogear_id, format_timestamp, resolve_agent_checked};
 use jiff::Timestamp;

@@ -176,6 +176,22 @@ impl AppError {
         }
     }
 
+    /// Error mapping for reading an explicit `sweep --registry` file. The flag
+    /// names a file as explicitly as `--file` does, so a missing path is
+    /// `not_found` / 66 rather than the `io_error` / 74 `from_io` gives.
+    pub fn from_registry_file(error: std::io::Error, path: &std::path::Path) -> Self {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            Self::new(
+                "not_found",
+                format!("sweep registry file not found: {}", path.display()),
+                false,
+                "Pass an existing registry file to --registry PATH.",
+            )
+        } else {
+            Self::from_io(error, path)
+        }
+    }
+
     pub fn from_evidence_file(error: std::io::Error, path: &std::path::Path) -> Self {
         match error.kind() {
             std::io::ErrorKind::NotFound => Self::new(
@@ -241,5 +257,21 @@ mod tests {
         let err = AppError::from_log_open(error, std::path::Path::new("/tmp/x"));
         assert_eq!(err.code, "not_found");
         assert_eq!(err.exit_code, 66);
+    }
+
+    #[test]
+    fn registry_not_found_maps_to_not_found_66() {
+        let error = std::io::Error::new(ErrorKind::NotFound, "missing");
+        let err = AppError::from_registry_file(error, std::path::Path::new("/tmp/x"));
+        assert_eq!(err.code, "not_found");
+        assert_eq!(err.exit_code, 66);
+    }
+
+    #[test]
+    fn registry_permission_denied_maps_to_permission_denied_77() {
+        let error = std::io::Error::new(ErrorKind::PermissionDenied, "denied");
+        let err = AppError::from_registry_file(error, std::path::Path::new("/tmp/x"));
+        assert_eq!(err.code, "permission_denied");
+        assert_eq!(err.exit_code, 77);
     }
 }

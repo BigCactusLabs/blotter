@@ -2,6 +2,7 @@ pub mod cli;
 pub mod commands;
 pub mod error;
 pub mod output;
+pub(crate) mod redact;
 pub mod store;
 
 use crate::error::{AppError, AppResult};
@@ -399,25 +400,33 @@ fn compute_id_fields_bytes(fields: &[&str], bytes: usize) -> String {
     id
 }
 
-pub fn resolve_agent(flag: Option<String>) -> (String, &'static str) {
+pub fn resolve_agent(flag: Option<String>) -> AppResult<(String, &'static str)> {
     if let Some(agent) = flag.filter(|value| !value.is_empty()) {
-        return (agent, "flag");
+        return Ok((agent, "flag"));
     }
-    if let Ok(agent) = std::env::var("BLOTTER_AGENT")
-        && !agent.is_empty()
-    {
-        return (agent, "env");
+    match std::env::var("BLOTTER_AGENT") {
+        Ok(agent) if !agent.is_empty() => return Ok((agent, "env")),
+        // An unset or empty BLOTTER_AGENT falls through to detection; a
+        // non-UTF-8 one names an agent this build cannot read, and silently
+        // filing under a detected name would contradict the operator.
+        Ok(_) | Err(std::env::VarError::NotPresent) => {}
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(AppError::config(
+                "BLOTTER_AGENT is not valid UTF-8",
+                "Set BLOTTER_AGENT to a UTF-8 agent name or unset it.",
+            ));
+        }
     }
     if std::env::var_os("CLAUDECODE").is_some() {
-        return ("claude-code".into(), "detected");
+        return Ok(("claude-code".into(), "detected"));
     }
     if std::env::vars_os().any(|(key, _)| key.to_string_lossy().starts_with("CODEX_")) {
-        return ("codex".into(), "detected");
+        return Ok(("codex".into(), "detected"));
     }
     if std::env::vars_os().any(|(key, _)| key.to_string_lossy().starts_with("CURSOR_")) {
-        return ("cursor".into(), "detected");
+        return Ok(("cursor".into(), "detected"));
     }
-    ("unknown".into(), "default")
+    Ok(("unknown".into(), "default"))
 }
 
 pub(crate) fn resolve_agent_checked(
@@ -430,7 +439,7 @@ pub(crate) fn resolve_agent_checked(
             "Pass a non-empty --agent NAME or omit the flag.",
         ));
     }
-    let (agent, source) = resolve_agent(flag);
+    let (agent, source) = resolve_agent(flag)?;
     if reject_resolved_whitespace && agent.trim().is_empty() {
         return Err(AppError::invalid_input(
             "agent name cannot be whitespace-only",
