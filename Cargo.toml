@@ -32,7 +32,11 @@ assert_cmd = "2"
 tempfile = "3"
 
 [profile.release]
-opt-level = "z"
+# Speed over size: measured at 100k records, opt-level = "z" cost 2.15x CPU on triage
+# (6.61 s vs 3.07 s), 1.76x on list, and 1.40x on verify, for 558 KiB of binary
+# (988 KB vs 1.5 MB). Peak RSS was unchanged. The analyzers are the stated scale risk,
+# so the half megabyte buys more than it costs.
+opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
