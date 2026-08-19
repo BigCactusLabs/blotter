@@ -1,0 +1,596 @@
+use crate::common::*;
+
+#[test]
+fn doctor_reports_orphan_amend_for_unknown_record() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let orphan_amend = json!({
+        "kind": "resolve",
+        "id": "bl_deadbeef0000",
+        "ts": "2026-07-09T18:30:00.123Z",
+        "agent": "fixture",
+        "note": "unknown record amend",
+        "amend": true
+    });
+    std::fs::write(&file, format!("{orphan_amend}\n")).unwrap();
+
+    let output = run_file(&file, &["doctor"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let doctor: SuccessEnvelope<DoctorData> = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(!doctor.data.healthy);
+    assert_eq!(doctor.data.findings.len(), 1);
+    assert_eq!(doctor.data.findings[0].kind, "orphan_resolve");
+}
+
+#[test]
+fn doctor_accepts_amend_for_existing_resolved_record() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "valid amend fixture");
+    let id = cut.data.record.cut_id().to_owned();
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(&file, &["resolve", &id]));
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &["resolve", &id, "--amend", "--note", "corrected"],
+    ));
+
+    let doctor: SuccessEnvelope<DoctorData> = success(&run_file(&file, &["doctor"]));
+    assert!(doctor.data.healthy);
+}
+
+#[test]
+fn doctor_reports_all_core_findings_and_recomputed_ids() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let good = add(&file, "valid").data.record;
+    let good_line = std::fs::read_to_string(&file).unwrap();
+    let bad_id = json!({"kind":"cut","id":"bl_000000000000","ts":good.cut_ts(),"agent":"tester","text":"bad","tags":[],"severity":"minor","cwd":"/tmp","repo":null});
+    let mut writer = OpenOptions::new().append(true).open(&file).unwrap();
+    writeln!(writer, "{good_line}{}", bad_id).unwrap();
+    writeln!(writer, "{{\"kind\":\"future\"}}").unwrap();
+    writeln!(writer, "{{\"kind\":\"resolve\",\"id\":\"bl_deadbeef0000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
+    writeln!(writer, "<<<<<<< HEAD").unwrap();
+    write!(writer, "{{\"kind\":").unwrap();
+    drop(writer);
+    let output = run_file(&file, &["doctor"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let envelope: SuccessEnvelope<DoctorData> = serde_json::from_slice(&output.stdout).unwrap();
+    let kinds: Vec<_> = envelope
+        .data
+        .findings
+        .iter()
+        .map(|finding| finding.kind.as_str())
+        .collect();
+    for kind in [
+        "duplicate_cut",
+        "id_conflict",
+        "unknown_kind",
+        "orphan_resolve",
+        "conflict_marker",
+        "torn_line",
+    ] {
+        assert!(kinds.contains(&kind), "missing {kind}: {kinds:?}");
+    }
+    assert!(!envelope.data.healthy);
+}
+
+#[test]
+fn doctor_fix_dry_run_reports_quarantine_plan_without_writing() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    add(&file, "valid");
+    let mut writer = OpenOptions::new().append(true).open(&file).unwrap();
+    writer.write_all(b"not-json\n<<<<<<< HEAD\n").unwrap();
+    drop(writer);
+    let before = std::fs::read(&file).unwrap();
+
+    let doctor = doctor_response(&run_file(&file, &["doctor", "--fix", "--dry-run"]), 1);
+    let fix = doctor.data.fix.as_ref().unwrap();
+    assert!(!fix.changed);
+    assert!(fix.dry_run);
+    assert!(fix.backup.is_none());
+    assert!(fix.quarantine.is_none());
+    assert!(fix.restore_hint.is_none());
+    assert_eq!(
+        fix.applied
+            .iter()
+            .map(|applied| (applied.line, applied.kind.as_str(), applied.action.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (2, "malformed", "quarantined"),
+            (3, "conflict_marker", "quarantined"),
+        ]
+    );
+    assert!(doctor.data.findings.iter().all(|finding| finding.fixable));
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+    assert!(!std::path::PathBuf::from(format!("{}.quarantine.jsonl", file.display())).exists());
+}
+
+#[test]
+fn doctor_fix_quarantines_torn_fragment_and_preserves_exact_backup() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    add(&file, "valid");
+    #[cfg(unix)]
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let complete = std::fs::read(&file).unwrap();
+    let mut writer = OpenOptions::new().append(true).open(&file).unwrap();
+    writer.write_all(b"{\"kind\":").unwrap();
+    drop(writer);
+    let original = std::fs::read(&file).unwrap();
+
+    let doctor = doctor_response(&run_file(&file, &["doctor", "--fix"]), 0);
+    let fix = doctor.data.fix.as_ref().unwrap();
+    assert!(doctor.data.healthy, "findings: {:?}", doctor.data.findings);
+    assert!(fix.changed);
+    assert!(!fix.dry_run);
+    assert_eq!(fix.applied.len(), 1);
+    assert_eq!(fix.applied[0].line, 2);
+    assert_eq!(fix.applied[0].kind, "torn_line");
+    assert_eq!(fix.applied[0].action, "quarantined");
+    let backup = std::path::PathBuf::from(fix.backup.as_ref().unwrap());
+    let quarantine = std::path::PathBuf::from(fix.quarantine.as_ref().unwrap());
+    assert_eq!(
+        backup,
+        std::path::PathBuf::from(format!("{}.bak-20260709T183000123Z", file.display()))
+    );
+    assert_eq!(std::fs::read(&backup).unwrap(), original);
+    assert_eq!(std::fs::read(&quarantine).unwrap(), b"{\"kind\":\n");
+    assert_eq!(std::fs::read(&file).unwrap(), complete);
+    #[cfg(unix)]
+    for output in [&backup, &quarantine, &file] {
+        assert_eq!(permissions_mode(output), 0o600, "{}", output.display());
+    }
+    let expected_restore = format!("cp '{}' '{}'", backup.display(), file.display());
+    assert_eq!(fix.restore_hint.as_deref(), Some(expected_restore.as_str()));
+}
+
+#[test]
+fn doctor_fix_quarantines_malformed_and_conflict_marker_lines() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    add(&file, "valid");
+    let complete = std::fs::read(&file).unwrap();
+    let mut writer = OpenOptions::new().append(true).open(&file).unwrap();
+    writer.write_all(b"not-json\n<<<<<<< HEAD\n").unwrap();
+    drop(writer);
+    let original = std::fs::read(&file).unwrap();
+
+    let doctor = doctor_response(&run_file(&file, &["doctor", "--fix"]), 0);
+    let fix = doctor.data.fix.as_ref().unwrap();
+    assert!(doctor.data.healthy, "findings: {:?}", doctor.data.findings);
+    assert_eq!(
+        fix.applied
+            .iter()
+            .map(|applied| (applied.line, applied.kind.as_str(), applied.action.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (2, "malformed", "quarantined"),
+            (3, "conflict_marker", "quarantined"),
+        ]
+    );
+    let backup = std::path::PathBuf::from(fix.backup.as_ref().unwrap());
+    let quarantine = std::path::PathBuf::from(fix.quarantine.as_ref().unwrap());
+    assert_eq!(std::fs::read(&backup).unwrap(), original);
+    assert_eq!(
+        std::fs::read(&quarantine).unwrap(),
+        b"not-json\n<<<<<<< HEAD\n"
+    );
+    assert_eq!(std::fs::read(&file).unwrap(), complete);
+    assert!(
+        doctor_response(&run_file(&file, &["doctor"]), 0)
+            .data
+            .healthy
+    );
+}
+
+#[test]
+fn doctor_fix_leaves_diagnose_only_findings_unchanged() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let good = add(&file, "valid").data.record;
+    let good_line = std::fs::read_to_string(&file).unwrap();
+    let bad_id = json!({
+        "kind": "cut",
+        "id": "bl_000000000000",
+        "ts": good.cut_ts(),
+        "agent": "tester",
+        "text": "bad",
+        "tags": [],
+        "severity": "minor",
+        "cwd": "/tmp",
+        "repo": null
+    });
+    let mut writer = OpenOptions::new().append(true).open(&file).unwrap();
+    writer.write_all(good_line.as_bytes()).unwrap();
+    writeln!(writer, "{{\"kind\":\"future\"}}").unwrap();
+    writeln!(writer, "{{\"kind\":\"resolve\",\"id\":\"bl_deadbeef0000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
+    writeln!(writer, "{bad_id}").unwrap();
+    drop(writer);
+    let before = std::fs::read(&file).unwrap();
+
+    let doctor = doctor_response(&run_file(&file, &["doctor", "--fix"]), 1);
+    let fix = doctor.data.fix.as_ref().unwrap();
+    assert!(!fix.changed);
+    assert!(!fix.dry_run);
+    assert!(fix.applied.is_empty());
+    assert!(fix.backup.is_none());
+    assert!(fix.quarantine.is_none());
+    for kind in [
+        "unknown_kind",
+        "orphan_resolve",
+        "duplicate_cut",
+        "id_conflict",
+    ] {
+        assert!(
+            doctor
+                .data
+                .findings
+                .iter()
+                .any(|finding| finding.kind == kind),
+            "missing {kind}: {:?}",
+            doctor.data.findings
+        );
+    }
+    assert!(doctor.data.findings.iter().all(|finding| !finding.fixable));
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
+
+#[test]
+fn doctor_fix_rejects_a_backup_collision_without_changing_the_log() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let original = b"not-json\n";
+    std::fs::write(&file, original).unwrap();
+    let backup = std::path::PathBuf::from(format!("{}.bak-20260709T183000123Z", file.display()));
+    std::fs::write(&backup, b"existing backup").unwrap();
+
+    error(&run_file(&file, &["doctor", "--fix"]), 74, "io_error");
+    assert_eq!(std::fs::read(&file).unwrap(), original);
+    assert_eq!(std::fs::read(&backup).unwrap(), b"existing backup");
+    assert!(!std::path::PathBuf::from(format!("{}.quarantine.jsonl", file.display())).exists());
+}
+
+#[test]
+fn doctor_fix_is_deterministic_for_repeated_identical_input() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let original = b"not-json\n";
+    std::fs::write(&file, original).unwrap();
+
+    let first = run_file(&file, &["doctor", "--fix"]);
+    let first_data = doctor_response(&first, 0);
+    let first_fix = first_data.data.fix.as_ref().unwrap();
+    let first_repaired = std::fs::read(&file).unwrap();
+    let first_backup = std::path::PathBuf::from(first_fix.backup.as_ref().unwrap());
+    let first_quarantine = std::path::PathBuf::from(first_fix.quarantine.as_ref().unwrap());
+    let first_backup_name = first_backup.file_name().unwrap().to_owned();
+    let first_backup_bytes = std::fs::read(&first_backup).unwrap();
+
+    std::fs::write(&file, original).unwrap();
+    std::fs::remove_file(&first_backup).unwrap();
+    std::fs::remove_file(&first_quarantine).unwrap();
+
+    let second = run_file(&file, &["doctor", "--fix"]);
+    let second_data = doctor_response(&second, 0);
+    let second_fix = second_data.data.fix.as_ref().unwrap();
+    let second_backup = std::path::PathBuf::from(second_fix.backup.as_ref().unwrap());
+    assert_eq!(first.stdout, second.stdout);
+    assert_eq!(std::fs::read(&file).unwrap(), first_repaired);
+    assert_eq!(std::fs::read(&second_backup).unwrap(), first_backup_bytes);
+    assert_eq!(
+        second_backup.file_name().unwrap(),
+        first_backup_name.as_os_str()
+    );
+}
+
+#[test]
+fn doctor_fix_times_out_under_an_exclusive_lock() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    add(&file, "locked");
+    let locked = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&file)
+        .unwrap();
+    locked.lock().unwrap();
+    let output = run_file(&file, &["doctor", "--fix"]);
+    locked.unlock().unwrap();
+    let envelope = error(&output, 75, "lock_timeout");
+    assert!(envelope.error.retryable);
+}
+
+#[test]
+fn doctor_dry_run_requires_fix() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    error(
+        &run_file(&file, &["doctor", "--dry-run"]),
+        2,
+        "invalid_argument",
+    );
+}
+
+#[test]
+fn doctor_deny_requires_leaks() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let envelope = error(
+        &run_file(&file, &["doctor", "--deny", "credential"]),
+        2,
+        "invalid_argument",
+    );
+    assert!(envelope.error.message.contains("--leaks"));
+}
+
+#[test]
+fn doctor_rejects_empty_deny_literal() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let envelope = error(
+        &run_file(&file, &["doctor", "--leaks", "--deny", ""]),
+        2,
+        "invalid_argument",
+    );
+    assert!(envelope.error.message.contains("empty"));
+    assert!(envelope.error.suggested_fix.contains("non-empty"));
+}
+
+#[test]
+fn plain_doctor_healthy_output_remains_byte_identical() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    add(&file, "valid");
+
+    let output = run_file(&file, &["doctor"]);
+    let mut expected = serde_json::to_vec(&json!({
+        "ok": true,
+        "data": {"healthy": true, "findings": [], "checked_lines": 1},
+        "meta": {"contract": 5, "file": file.to_string_lossy()},
+    }))
+    .unwrap();
+    expected.push(b'\n');
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty());
+    assert_eq!(output.stdout, expected);
+}
+
+#[test]
+fn doctor_reports_pre_framing_bl_ids_as_conflicts_after_legacy_fallback_removal() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("legacy-v1.jsonl");
+    // Frozen v1 hash for this exact comma-joined, non-deduplicated tag fixture.
+    let legacy_cut = json!({
+        "kind": "cut",
+        "id": "bl_d7e14e635d21",
+        "ts": "2026-07-10T00:00:00.000Z",
+        "agent": "legacy",
+        "text": "legacy v1 cut",
+        "tags": ["a", "a", "b"],
+        "severity": "major",
+        "cwd": "/tmp",
+        "repo": null
+    });
+    std::fs::write(&file, format!("{legacy_cut}\n")).unwrap();
+
+    let output = run_file(&file, &["doctor"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stderr.is_empty());
+    let doctor: SuccessEnvelope<DoctorData> = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(!doctor.data.healthy);
+    assert_eq!(doctor.data.findings.len(), 1);
+    assert_eq!(doctor.data.findings[0].kind, "id_conflict");
+    assert_eq!(doctor.data.checked_lines, 1);
+}
+
+#[test]
+fn doctor_finding_counts_match_fold_bytes_warning_counts() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let valid_id = compute_id(
+        "2026-07-09T00:00:00.000Z",
+        "a",
+        "valid",
+        Severity::Minor,
+        &[],
+    );
+    let malformed = json!({
+        "kind": "cut",
+        "id": "bl_000000000000",
+        "ts": "not-a-time",
+        "agent": "a",
+        "text": "malformed",
+        "tags": [],
+        "severity": "minor",
+        "cwd": "/tmp",
+        "repo": null
+    })
+    .to_string();
+    let valid = json!({
+        "kind": "cut",
+        "id": valid_id,
+        "ts": "2026-07-09T00:00:00.000Z",
+        "agent": "a",
+        "text": "valid",
+        "tags": [],
+        "severity": "minor",
+        "cwd": "/tmp",
+        "repo": null
+    })
+    .to_string();
+    let orphan = json!({
+        "kind": "resolve",
+        "id": "bl_deadbeef0000",
+        "ts": "2026-07-09T00:00:00.000Z",
+        "agent": "a",
+        "note": null
+    })
+    .to_string();
+    let unknown = json!({"kind": "future"}).to_string();
+    let fixture = format!("{malformed}\n{valid}\n{orphan}\n{valid}\n{unknown}\n{{\"kind\":");
+    std::fs::write(&file, fixture).unwrap();
+
+    let folded = blotter::store::fold_bytes(&std::fs::read(&file).unwrap());
+    let doctor_output = run_file(&file, &["doctor"]);
+    assert_eq!(doctor_output.status.code(), Some(1));
+    assert!(doctor_output.stderr.is_empty());
+    let doctor: SuccessEnvelope<DoctorData> =
+        serde_json::from_slice(&doctor_output.stdout).unwrap();
+
+    let fold_counts = fold_warning_counts(&folded.warnings);
+    let doctor_counts = doctor_finding_counts(&doctor.data.findings);
+    let expected: HashMap<String, usize> = [
+        ("malformed", 1),
+        ("unknown", 1),
+        ("duplicate_cut", 1),
+        ("orphan_resolve", 1),
+        ("torn", 1),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
+    assert_eq!(
+        fold_counts, expected,
+        "fold warnings: {:?}",
+        folded.warnings
+    );
+    assert_eq!(
+        doctor_counts, expected,
+        "doctor findings: {:?}",
+        doctor.data.findings
+    );
+}
+
+fn fold_warning_counts(warnings: &[String]) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for warning in warnings {
+        let parts: Vec<_> = warning.splitn(3, ' ').collect();
+        let count: usize = parts[1].parse().unwrap();
+        let label = parts[2].trim_end_matches('s');
+        let key = if label.starts_with("malformed line") {
+            "malformed"
+        } else if label.starts_with("torn final line") {
+            "torn"
+        } else if label.starts_with("unknown event") {
+            "unknown"
+        } else if label.starts_with("duplicate cut") {
+            "duplicate_cut"
+        } else if label.starts_with("duplicate resolve") {
+            "duplicate_resolve"
+        } else if label.starts_with("orphan resolve") {
+            "orphan_resolve"
+        } else {
+            panic!("unknown fold warning label: {label}")
+        };
+        counts.insert(key.to_string(), count);
+    }
+    counts
+}
+
+fn doctor_finding_counts(
+    findings: &[blotter::commands::doctor::Finding],
+) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    for finding in findings {
+        let key = match finding.kind.as_str() {
+            "malformed" => "malformed",
+            "torn_line" => "torn",
+            "unknown_kind" => "unknown",
+            "duplicate_cut" => "duplicate_cut",
+            "orphan_resolve" => "orphan_resolve",
+            _ => continue,
+        };
+        *counts.entry(key.to_string()).or_insert(0) += 1;
+    }
+    counts
+}
+
+#[test]
+fn doctor_reports_gitignored_finding() {
+    let git_available = std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success());
+    if !git_available {
+        return;
+    }
+
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    assert!(
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .arg("init")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    std::fs::write(repo.join(".gitignore"), ".blotter.jsonl\n").unwrap();
+
+    let empty_output = command().current_dir(&repo).arg("doctor").output().unwrap();
+    let empty: SuccessEnvelope<DoctorData> = success(&empty_output);
+    assert!(empty.data.healthy);
+    assert!(
+        empty
+            .data
+            .findings
+            .iter()
+            .all(|finding| finding.kind != "gitignored")
+    );
+
+    let output = command()
+        .current_dir(&repo)
+        .args(["add", "gitignored cut", "--agent", "a"])
+        .output()
+        .unwrap();
+    success::<AddData>(&output);
+
+    let doctor_output = command().current_dir(&repo).arg("doctor").output().unwrap();
+    assert_eq!(doctor_output.status.code(), Some(1));
+    assert!(doctor_output.stderr.is_empty());
+    let doctor: SuccessEnvelope<DoctorData> =
+        serde_json::from_slice(&doctor_output.stdout).unwrap();
+    assert!(!doctor.data.healthy);
+    assert!(
+        doctor
+            .data
+            .findings
+            .iter()
+            .any(|finding| finding.kind == "gitignored")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn doctor_fix_resolves_symlinked_log_and_preserves_the_link() {
+    let temp = TempDir::new().unwrap();
+    let target = temp.path().join("real.jsonl");
+    let link = temp.path().join("link.jsonl");
+    add(&target, "valid");
+    let complete = std::fs::read(&target).unwrap();
+    let mut writer = OpenOptions::new().append(true).open(&target).unwrap();
+    writer.write_all(b"{\"kind\":").unwrap();
+    drop(writer);
+    std::os::unix::fs::symlink("real.jsonl", &link).unwrap();
+
+    let doctor = doctor_response(&run_file(&link, &["doctor", "--fix"]), 0);
+    let fix = doctor.data.fix.as_ref().unwrap();
+    assert!(fix.changed);
+    assert_eq!(
+        fix.backup.as_deref(),
+        Some(format!("{}.bak-20260709T183000123Z", target.display()).as_str())
+    );
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), complete);
+}
