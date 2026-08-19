@@ -36,8 +36,9 @@ pub(crate) struct Candidate {
     pub(crate) tokens: BTreeSet<String>,
 }
 
-pub(crate) struct TokenFrequencies {
-    counts: BTreeMap<String, usize>,
+pub(crate) struct CorpusFrequencies {
+    token_counts: BTreeMap<String, usize>,
+    tag_counts: BTreeMap<String, usize>,
     candidate_count: usize,
 }
 
@@ -67,10 +68,17 @@ struct OrderedCluster {
 /// `by_token` holds only tokens that two or more candidates share. A token in
 /// exactly one candidate can never raise the shared-token count between two
 /// different candidates, so indexing it would add an N-bit row that only ever
-/// counts a candidate against itself — and self is dropped by the
-/// `candidate <= representative` guard. Skipping those tokens keeps the index
-/// proportional to the shared vocabulary instead of the whole vocabulary,
-/// which is what bounds memory when every record brings new words.
+/// counts a candidate against itself — and self is below the floor every caller
+/// scans from. Skipping those tokens keeps the index proportional to the shared
+/// vocabulary instead of the whole vocabulary, which is what bounds memory when
+/// every record brings new words.
+///
+/// `by_tag` is bounded the same way. A tag counted once in the analyzed
+/// population is carried by exactly one record: either no representative
+/// carries it and its pool is never queried, or the sole carrier is the
+/// representative, whose own bit every caller discards. Either way the pool
+/// cannot change a result, and a log where most tags name a single record
+/// would otherwise pay a full N-bit row for each of them.
 ///
 /// `verify` reuses the index with resolved anchors as representatives and the
 /// open cuts as the indexed candidates. That stays sound as long as the
@@ -87,7 +95,7 @@ pub(crate) struct CandidateIndex {
 }
 
 impl CandidateIndex {
-    pub(crate) fn new(candidates: &[Candidate], frequencies: &TokenFrequencies) -> Self {
+    pub(crate) fn new(candidates: &[Candidate], frequencies: &CorpusFrequencies) -> Self {
         let words = candidates.len().div_ceil(64);
         let mut by_title = BTreeMap::new();
         let mut by_tag = BTreeMap::new();
@@ -106,10 +114,12 @@ impl CandidateIndex {
                 untagged.set(index);
             } else {
                 for tag in &candidate.tags {
-                    by_tag
-                        .entry(tag.clone())
-                        .or_insert_with(|| BitSet::empty(words))
-                        .set(index);
+                    if frequencies.is_shared_tag(tag) {
+                        by_tag
+                            .entry(tag.clone())
+                            .or_insert_with(|| BitSet::empty(words))
+                            .set(index);
+                    }
                 }
             }
             if !candidate.tokens.is_empty() {
@@ -163,32 +173,28 @@ impl BitSet {
         result
     }
 
-    fn clear(&mut self) {
-        self.words.fill(0);
+    fn clear_from(&mut self, word: usize) {
+        self.words[word..].fill(0);
     }
 
     fn set(&mut self, index: usize) {
         self.words[index / 64] |= 1_u64 << (index % 64);
     }
 
-    fn copy_from(&mut self, source: &Self) {
-        self.words.copy_from_slice(&source.words);
+    fn copy_from(&mut self, word: usize, source: &Self) {
+        self.words[word..].copy_from_slice(&source.words[word..]);
     }
 
-    fn or_assign(&mut self, source: &Self) {
-        for (target, source) in self.words.iter_mut().zip(&source.words) {
+    fn or_assign(&mut self, word: usize, source: &Self) {
+        for (target, source) in self.words[word..].iter_mut().zip(&source.words[word..]) {
             *target |= source;
         }
     }
 
-    fn and_assign(&mut self, source: &Self) {
-        for (target, source) in self.words.iter_mut().zip(&source.words) {
+    fn and_assign(&mut self, word: usize, source: &Self) {
+        for (target, source) in self.words[word..].iter_mut().zip(&source.words[word..]) {
             *target &= source;
         }
-    }
-
-    fn indices(&self) -> impl Iterator<Item = usize> + '_ {
-        self.indices_from(0)
     }
 
     /// Ascending set positions at or above `floor`. Callers whose candidates
@@ -235,7 +241,7 @@ impl BitSlicedCounter {
         }
     }
 
-    fn reset(&mut self, maximum: usize) {
+    fn reset(&mut self, word: usize, maximum: usize) {
         let required_planes = if maximum == 0 {
             0
         } else {
@@ -244,12 +250,12 @@ impl BitSlicedCounter {
         self.planes
             .resize_with(required_planes, || vec![0; self.words]);
         for plane in &mut self.planes {
-            plane.fill(0);
+            plane[word..].fill(0);
         }
     }
 
-    fn add(&mut self, source: &BitSet) {
-        for word_index in 0..self.words {
+    fn add(&mut self, word: usize, source: &BitSet) {
+        for word_index in word..self.words {
             let mut carry = source.words[word_index];
             for plane in &mut self.planes {
                 let next_carry = plane[word_index] & carry;
@@ -259,9 +265,9 @@ impl BitSlicedCounter {
         }
     }
 
-    fn add_at_least(&self, threshold: usize, allowed: &BitSet, target: &mut BitSet) {
+    fn add_at_least(&self, word: usize, threshold: usize, allowed: &BitSet, target: &mut BitSet) {
         debug_assert!(threshold > 0);
-        for word_index in 0..self.words {
+        for word_index in word..self.words {
             let mut equal = allowed.words[word_index];
             let mut greater = 0;
             for (bit, plane) in self.planes.iter().enumerate().rev() {
@@ -295,60 +301,34 @@ impl CandidateScratch {
         }
     }
 
+    /// Positions below `floor` are unspecified in the returned set: the caller
+    /// promises to read it with `indices_from(floor)` or tighter. Both callers
+    /// already discard that prefix — triage drops every candidate at or before
+    /// its representative, and verify drops everything up to the resolution —
+    /// so the whole bit-parallel count can start at the floor's word instead of
+    /// computing a prefix that is thrown away. It is the one bound that scales
+    /// with the representative's own position rather than the corpus size.
     pub(crate) fn matching_candidates<'a>(
         &'a mut self,
         representative: &Candidate,
         index: &CandidateIndex,
-        frequencies: &TokenFrequencies,
+        frequencies: &CorpusFrequencies,
+        floor: usize,
     ) -> &'a BitSet {
-        self.tag_pool.clear();
-        if representative.tags.is_empty() {
-            self.tag_pool.copy_from(&index.untagged);
-        } else {
-            for tag in &representative.tags {
-                if let Some(pool) = index.by_tag.get(tag) {
-                    self.tag_pool.or_assign(pool);
-                }
-            }
-        }
-
-        self.matches.clear();
-        if !representative.tokens.is_empty() {
-            self.overlap.reset(representative.tokens.len());
-            for token in &representative.tokens {
-                // An unshared token has no posting set; it could only have
-                // counted the representative against itself.
-                if let Some(posting) = index.by_token.get(token) {
-                    self.overlap.add(posting);
-                }
-            }
-            for (token_count, candidates) in &index.by_token_count {
-                let shorter = representative.tokens.len().min(*token_count);
-                let threshold = (shorter * MIN_OVERLAP_NUMERATOR).div_ceil(MIN_OVERLAP_DENOMINATOR);
-                self.overlap
-                    .add_at_least(threshold, candidates, &mut self.matches);
-            }
-
-            let rare_token_count = representative
-                .tokens
-                .iter()
-                .filter(|token| frequencies.is_rare(token))
-                .count();
-            if rare_token_count >= MIN_RARE_SHARED_TOKENS {
-                self.rare.reset(rare_token_count);
-                for token in representative
-                    .tokens
-                    .iter()
-                    .filter(|token| frequencies.is_rare(token))
-                {
-                    if let Some(posting) = index.by_token.get(token) {
-                        self.rare.add(posting);
+        let word = floor / 64;
+        self.matches.clear_from(word);
+        if self.score_tokens(representative, index, frequencies, word) {
+            self.tag_pool.clear_from(word);
+            if representative.tags.is_empty() {
+                self.tag_pool.copy_from(word, &index.untagged);
+            } else {
+                for tag in &representative.tags {
+                    if let Some(pool) = index.by_tag.get(tag) {
+                        self.tag_pool.or_assign(word, pool);
                     }
                 }
-                self.rare
-                    .add_at_least(MIN_RARE_SHARED_TOKENS, &index.all, &mut self.matches);
             }
-            self.matches.and_assign(&self.tag_pool);
+            self.matches.and_assign(word, &self.tag_pool);
         }
 
         if !representative.normalized_title.is_empty()
@@ -360,6 +340,94 @@ impl CandidateScratch {
         }
         &self.matches
     }
+
+    /// Runs whichever r19 scoring path can still reach its threshold, and
+    /// reports whether either ran. When neither can, the scored match set is
+    /// provably empty and the tag pool that would mask it is never built.
+    ///
+    /// Only a token with a posting set can raise a candidate's shared-token
+    /// count, so the number of the representative's indexed tokens is an upper
+    /// bound on every count this scan can produce. A threshold above that bound
+    /// is unreachable, and counting against it costs a full pass over the
+    /// candidate space to prove an answer already known. Both paths are skipped
+    /// on the bound instead. Records whose wording is mostly their own are the
+    /// common case in a real log, and they are exactly the ones the bound
+    /// retires.
+    fn score_tokens(
+        &mut self,
+        representative: &Candidate,
+        index: &CandidateIndex,
+        frequencies: &CorpusFrequencies,
+        word: usize,
+    ) -> bool {
+        if representative.tokens.is_empty() {
+            return false;
+        }
+        let reachable = representative
+            .tokens
+            .iter()
+            .filter(|token| index.by_token.contains_key(*token))
+            .count();
+        let mut scored = false;
+
+        // Thresholds rise with the candidate's token count, so the smallest
+        // indexed count carries the smallest threshold in the whole scan.
+        let lowest = index
+            .by_token_count
+            .keys()
+            .next()
+            .map(|count| overlap_threshold(representative.tokens.len(), *count));
+        if lowest.is_some_and(|threshold| threshold <= reachable) {
+            // `reachable`, not the token count, is the largest value a counter
+            // can hold, so it is what sizes the planes.
+            self.overlap.reset(word, reachable);
+            for token in &representative.tokens {
+                // An unshared token has no posting set; it could only have
+                // counted the representative against itself.
+                if let Some(posting) = index.by_token.get(token) {
+                    self.overlap.add(word, posting);
+                }
+            }
+            for (token_count, candidates) in &index.by_token_count {
+                let threshold = overlap_threshold(representative.tokens.len(), *token_count);
+                if threshold > reachable {
+                    break;
+                }
+                self.overlap
+                    .add_at_least(word, threshold, candidates, &mut self.matches);
+            }
+            scored = true;
+        }
+
+        // The same bound applies to the rare path, over the rare tokens alone.
+        let rare_reachable = representative
+            .tokens
+            .iter()
+            .filter(|token| frequencies.is_rare(token) && index.by_token.contains_key(*token))
+            .count();
+        if rare_reachable >= MIN_RARE_SHARED_TOKENS {
+            self.rare.reset(word, rare_reachable);
+            for token in representative
+                .tokens
+                .iter()
+                .filter(|token| frequencies.is_rare(token))
+            {
+                if let Some(posting) = index.by_token.get(token) {
+                    self.rare.add(word, posting);
+                }
+            }
+            self.rare
+                .add_at_least(word, MIN_RARE_SHARED_TOKENS, &index.all, &mut self.matches);
+            scored = true;
+        }
+
+        scored
+    }
+}
+
+fn overlap_threshold(representative_tokens: usize, candidate_tokens: usize) -> usize {
+    (representative_tokens.min(candidate_tokens) * MIN_OVERLAP_NUMERATOR)
+        .div_ceil(MIN_OVERLAP_DENOMINATOR)
 }
 
 pub fn run(args: TriageArgs, file: Option<PathBuf>, pretty: bool) -> AppResult<i32> {
@@ -426,7 +494,7 @@ pub(crate) fn chronic_clusters(items: Vec<ListItem>, min_count: usize) -> Chroni
     candidates.sort_by(candidate_order);
 
     let scanned = candidates.len();
-    let frequencies = token_frequencies(candidates.iter());
+    let frequencies = corpus_frequencies(candidates.iter());
     // Count every folded open cut by title. This is a recurrence signal, not
     // an ID deduplication pass, so independently materialized pc_/bl_ records
     // both contribute when their normalized titles match.
@@ -449,14 +517,19 @@ pub(crate) fn chronic_clusters(items: Vec<ListItem>, min_count: usize) -> Chroni
         // The earliest unclaimed candidate (then lowest ID) is the stable
         // representative. Members must link directly to it; unioning every
         // pair would turn an A~B~C chain into a transitive A/B/C cluster.
+        // Earlier candidates are already in a cluster or were already compared
+        // against this one, so the self-exclusion is a floor on the scan rather
+        // than a test inside it.
         let mut members = vec![representative];
         for candidate in scratch
-            .matching_candidates(&candidates[representative], &candidate_index, &frequencies)
-            .indices()
+            .matching_candidates(
+                &candidates[representative],
+                &candidate_index,
+                &frequencies,
+                representative + 1,
+            )
+            .indices_from(representative + 1)
         {
-            if candidate <= representative {
-                continue;
-            }
             if !claimed[candidate]
                 && linked(
                     &candidates[representative],
@@ -535,37 +608,57 @@ pub(crate) fn scoring_tokens(normalized_title: &str) -> BTreeSet<String> {
         .collect()
 }
 
-pub(crate) fn token_frequencies<'a>(
+/// Counts tokens and tags over the whole analyzed population — the candidates
+/// plus any representative that is not one of them, as `verify` has. Both
+/// counts decide what the index is allowed to leave out, so both must see the
+/// representatives: a tag or token shared by a representative and one candidate
+/// has to count as shared.
+pub(crate) fn corpus_frequencies<'a>(
     candidates: impl IntoIterator<Item = &'a Candidate>,
-) -> TokenFrequencies {
-    let mut counts = BTreeMap::new();
+) -> CorpusFrequencies {
+    let mut token_counts = BTreeMap::new();
+    let mut tag_counts = BTreeMap::new();
     let mut candidate_count = 0;
     for candidate in candidates {
         candidate_count += 1;
         for token in &candidate.tokens {
-            *counts.entry(token.clone()).or_insert(0) += 1;
+            *token_counts.entry(token.clone()).or_insert(0) += 1;
+        }
+        for tag in &candidate.tags {
+            *tag_counts.entry(tag.clone()).or_insert(0) += 1;
         }
     }
-    TokenFrequencies {
-        counts,
+    CorpusFrequencies {
+        token_counts,
+        tag_counts,
         candidate_count,
     }
 }
 
-impl TokenFrequencies {
+impl CorpusFrequencies {
     /// True when at least two candidates carry the token, so it can take part
     /// in a shared-token count between two different candidates.
     fn is_shared(&self, token: &str) -> bool {
-        self.counts
+        self.token_counts
             .get(token)
             .copied()
             .expect("tokens being indexed were counted")
             > 1
     }
 
+    /// True when at least two records carry the tag, so its pool can hold a
+    /// record other than the representative that queries it.
+    fn is_shared_tag(&self, tag: &str) -> bool {
+        self.tag_counts
+            .get(tag)
+            .copied()
+            .expect("tags being indexed were counted")
+            > 1
+    }
+
     fn is_rare(&self, token: &str) -> bool {
         let rare_limit = self.candidate_count.div_ceil(4).max(2);
-        self.counts
+        self.token_counts
             .get(token)
             .copied()
             .expect("tokens being scored were counted")
@@ -573,7 +666,7 @@ impl TokenFrequencies {
     }
 }
 
-pub(crate) fn linked(left: &Candidate, right: &Candidate, frequencies: &TokenFrequencies) -> bool {
+pub(crate) fn linked(left: &Candidate, right: &Candidate, frequencies: &CorpusFrequencies) -> bool {
     // Identical non-empty normalized titles always link: recurrence of the
     // exact same title is the strongest chronic signal, so tags must not
     // suppress it.
@@ -593,7 +686,7 @@ pub(crate) fn linked(left: &Candidate, right: &Candidate, frequencies: &TokenFre
 fn similar_enough(
     left: &BTreeSet<String>,
     right: &BTreeSet<String>,
-    frequencies: &TokenFrequencies,
+    frequencies: &CorpusFrequencies,
 ) -> bool {
     if left.is_empty() || right.is_empty() {
         return false;
@@ -740,14 +833,14 @@ mod tests {
             candidate(15, "wholly unshared vocabulary xyzzy", &["ops"]),
         ];
         candidates.sort_by(candidate_order);
-        let frequencies = token_frequencies(candidates.iter());
+        let frequencies = corpus_frequencies(candidates.iter());
         let index = CandidateIndex::new(&candidates, &frequencies);
         let mut scratch = CandidateScratch::new(candidates.len());
 
         for (representative_index, representative) in candidates.iter().enumerate() {
             let actual: Vec<_> = scratch
-                .matching_candidates(representative, &index, &frequencies)
-                .indices()
+                .matching_candidates(representative, &index, &frequencies, 0)
+                .indices_from(0)
                 .collect();
             let expected: Vec<_> = candidates
                 .iter()
@@ -761,6 +854,72 @@ mod tests {
                 "candidate index changed the direct-link set for representative {representative_index}"
             );
         }
+    }
+
+    #[test]
+    fn candidate_index_matches_the_direct_link_rule_for_external_representatives() {
+        // `verify` scores resolved anchors against an index built over the open
+        // cuts alone. A tag or token carried by exactly one anchor and one open
+        // cut is shared by two records but appears only once among the indexed
+        // candidates, so counting the representatives is what keeps its pool in
+        // the index at all.
+        let mut open = vec![
+            candidate(
+                0,
+                "cache endpoint returns alpha beta gamma",
+                &["shared-once"],
+            ),
+            candidate(1, "unrelated wording nothing repeats here", &["solo"]),
+            candidate(2, "cache endpoint returns alpha beta gamma", &["ops"]),
+        ];
+        open.sort_by(candidate_order);
+        let anchors = [
+            candidate(
+                10,
+                "cache endpoint returns alpha beta delta",
+                &["shared-once"],
+            ),
+            candidate(
+                11,
+                "cache endpoint returns alpha beta delta",
+                &["absent-tag"],
+            ),
+        ];
+
+        let frequencies = corpus_frequencies(open.iter().chain(anchors.iter()));
+        let index = CandidateIndex::new(&open, &frequencies);
+        let mut scratch = CandidateScratch::new(open.len());
+        for (anchor_index, anchor) in anchors.iter().enumerate() {
+            let actual: Vec<_> = scratch
+                .matching_candidates(anchor, &index, &frequencies, 0)
+                .indices_from(0)
+                .collect();
+            let expected: Vec<_> = open
+                .iter()
+                .enumerate()
+                .filter_map(|(candidate_index, candidate)| {
+                    linked(anchor, candidate, &frequencies).then_some(candidate_index)
+                })
+                .collect();
+            assert_eq!(
+                actual, expected,
+                "anchor {anchor_index} diverged from the pair rule"
+            );
+        }
+        assert!(
+            !expected_is_empty(&open, &anchors[0], &frequencies),
+            "the anchor sharing a once-carried tag must link, or this test proves nothing"
+        );
+    }
+
+    fn expected_is_empty(
+        open: &[Candidate],
+        anchor: &Candidate,
+        frequencies: &CorpusFrequencies,
+    ) -> bool {
+        !open
+            .iter()
+            .any(|candidate| linked(anchor, candidate, frequencies))
     }
 
     /// A tiny deterministic generator. The suite must stay reproducible, and
@@ -813,13 +972,13 @@ mod tests {
             }
             candidates.sort_by(candidate_order);
 
-            let frequencies = token_frequencies(candidates.iter());
+            let frequencies = corpus_frequencies(candidates.iter());
             let index = CandidateIndex::new(&candidates, &frequencies);
             let mut scratch = CandidateScratch::new(candidates.len());
             for (representative_index, representative) in candidates.iter().enumerate() {
                 let actual: Vec<_> = scratch
-                    .matching_candidates(representative, &index, &frequencies)
-                    .indices()
+                    .matching_candidates(representative, &index, &frequencies, 0)
+                    .indices_from(0)
                     .collect();
                 let expected: Vec<_> = candidates
                     .iter()

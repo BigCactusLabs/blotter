@@ -157,7 +157,7 @@ pub(crate) fn recurrence_groups(items: Vec<ListItem>) -> RecurrenceAnalysis {
 
     open.sort_by(triage::candidate_order);
     let scanned = open.len();
-    let frequencies = triage::token_frequencies(
+    let frequencies = triage::corpus_frequencies(
         open.iter()
             .chain(anchors.iter().map(|anchor| &anchor.candidate)),
     );
@@ -178,7 +178,7 @@ pub(crate) fn recurrence_groups(items: Vec<ListItem>) -> RecurrenceAnalysis {
         let floor =
             open.partition_point(|candidate| candidate.timestamp <= anchor.resolution_timestamp);
         let recurring: Vec<_> = scratch
-            .matching_candidates(&anchor.candidate, &index, &frequencies)
+            .matching_candidates(&anchor.candidate, &index, &frequencies, floor)
             .indices_from(floor)
             .filter(|&candidate| triage::linked(&anchor.candidate, &open[candidate], &frequencies))
             .map(|candidate| open[candidate].clone())

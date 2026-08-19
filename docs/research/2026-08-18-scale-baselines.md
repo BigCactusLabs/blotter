@@ -428,3 +428,198 @@ where line numbers shift, a leading empty segment survives, or the repair emptie
 the log.
 
 <!-- END TASK-46 -->
+<!-- BEGIN TASK-45 (prefilter budget above 10k). Appended as a self-contained
+     section; nothing above this line is edited. -->
+
+## Triage and retrospect prefilter budget above 10k (TASK-45, 2026-08-19)
+
+The 10k budget at the top of this document is met and is not the question here.
+This section answers a different one: what does the residual prefilter cost
+above 10k, and what bounds it. It supersedes the closing note of the verify
+section — "that is triage's own residual prefilter cost, and it is filed
+separately" — which is this task.
+
+**Do not compare these numbers to the audit that opened the task** (triage
+54.85 s / 1,440 MiB at 300k). That audit ran on `opt-level = "z"` and before
+`verify` was indexed. Everything below is re-measured on the current profile and
+the current batch branch, before and after, on one host and one binary layout.
+
+### Fixture and method
+
+The committed generator emits 1k and 10k only, so its `build_fixture` was called
+with larger sizes from a scratch wrapper — composition ratios, IDs, clocks, and
+byte layout are the generator's, unchanged:
+
+```python
+spec = importlib.util.spec_from_file_location(
+    "gen", root / "scripts/dev/generate-scale-fixtures.py")
+gen = importlib.util.module_from_spec(spec); spec.loader.exec_module(gen)
+for label, size in (("10k", 10_000), ("30k", 30_000),
+                    ("100k", 100_000), ("300k", 300_000)):
+    (out / f"scale-{label}.jsonl").write_bytes(gen.build_fixture(size)["bytes"])
+```
+
+| Fixture | Bytes | SHA-256 |
+| --- | ---: | --- |
+| 10k | 1,815,735 | `fe9db229c3c438a43033c8be065597c301a178ba4067a62b30025fa7a6425a42` |
+| 30k | 5,462,996 | `b1f87249c65f3c03110d814ac85b5b1f04cc6344c76ffc60514243c6baac7975` |
+| 100k | 18,261,236 | `6f6093d1297b786be4fe4072c8a532b701b7d88a8964e39f61fd611215a882dc` |
+| 300k | 55,074,854 | `c690507dc1b688656541d8a07c2179375231e8d07fd516ecd2c55580fd36f7ca` |
+
+The 10k, 100k, and 300k hashes reproduce the values recorded in the verify
+section above, so the two measurement sets share an input. Folded shape scales
+with the ratios: 8,300 / 24,900 / 83,000 / 249,000 open cuts.
+
+Method is this document's method — one untimed warm-up per command and fixture,
+then three timed invocations, `/usr/bin/time -l`, per-invocation wall and CPU,
+peak RSS as reported — run from a triage/retrospect/list harness because
+`bench-baseline.sh` iterates a fixed 1k/10k list. `list` is measured alongside as
+a **drift control**: it shares the fold and is untouched by this change, so a
+move in its numbers is a move in the machine. Runner: `blotter 0.15.0`,
+`rustc 1.97.1 (8bab26f4f 2026-07-14)`, `aarch64-apple-darwin`, release profile
+`opt-level = 3` + LTO + one codegen unit + `panic=abort` + stripped. Hardware:
+Apple M3 Max (Mac15,10), 36 GiB RAM, macOS 26.5.2. Base commit: `e0931cd`.
+
+### What the residual actually was
+
+Per representative, the prefilter did a fixed number of passes over the whole
+candidate bitset — clear, tag pool, one bit-sliced add per indexed token, one
+`add_at_least` per distinct candidate-token-count bucket, the rare-token pass,
+and the tag mask — so the scan cost `Theta(n^2/64)` word operations regardless
+of whether any candidate could match. On this fixture 76% of open cuts are
+"unrelated" records whose only repeated words are `unrelated` and `fixture`;
+each of them paid roughly 29 full-width passes to produce an empty match set.
+
+### The three bounds now applied
+
+All three are bounds on work that was provably not needed, not changes to the
+relation. `linked` remains the final pair predicate and is unmoved.
+
+1. **Reachability bound.** Only a token with a posting set can raise a
+   candidate's shared-token count, so the count of the representative's indexed
+   tokens is an upper bound on every counter the scan can produce. A threshold
+   above that bound is unreachable, and the bucket — or the whole scoring path —
+   is skipped rather than counted and discarded. The rare path gets the same
+   bound over its rare tokens alone. When neither path can run, the tag pool that
+   would mask the result is never built either.
+2. **Representative floor.** Both callers already discard a prefix of the result
+   — triage every candidate at or before its representative, verify everything up
+   to the resolution timestamp — so the bit-parallel count now starts at the
+   floor's word instead of computing a prefix that is thrown away. This is the
+   only bound that scales with the representative's own position, and it is what
+   turns the average scan into half the candidate space.
+3. **Singleton-tag pools dropped.** A tag counted once across the analyzed
+   population is carried by exactly one record: either no representative carries
+   it and its pool is never queried, or the sole carrier is the representative,
+   whose own bit every caller discards. Such pools are no longer built. This is
+   the memory bound, and it is the same rule `by_token` already applied to
+   unshared tokens. It requires the tag counts to include representatives that
+   are not candidates, which is why `TokenFrequencies` became `CorpusFrequencies`
+   and now counts tags as well — a tag shared by one `verify` anchor and one open
+   cut must still count as shared.
+
+### Output equivalence
+
+Release-mode stdout was captured for `triage`, `retrospect`, `verify`, and
+`digest` on all four fixtures, before and after, and compared byte for byte. All
+sixteen pairs are identical — same clusters, candidates, recurrences, member
+order, counts, and exit codes.
+
+| Fixture | triage | retrospect | verify | digest |
+| --- | --- | --- | --- | --- |
+| 10k | `6c0688f8…` | `08051106…` | `1d83f967…` | `2acff472…` |
+| 30k | `db8815bb…` | `8a61bee5…` | `b37430f3…` | `027952c6…` |
+| 100k | `671c1685…` | `1819e882…` | `5c6731e0…` | `c1941931…` |
+| 300k | `ee385c90…` | `a06ae739…` | `d6425439…` | `ee72308a…` |
+
+The full 266-test suite passed five consecutive times (`scripts/dev/gate-5x.sh`).
+Two unit tests check the prefilter against the public pair rule directly — one
+fixed mixed-pool corpus and 400 random corpora — and a third now does it with
+representatives that are not candidates, the shape `verify` has and the one where
+a candidate-only tag count would silently drop a real pool.
+
+### CPU and peak RSS
+
+Values are `min / median` over three invocations.
+
+| Fixture | Command | CPU ms before → after | Peak RSS KiB before → after |
+| --- | --- | ---: | ---: |
+| 10k | list (control) | 20 / 20 → 20 / 20 | 21,936 / 23,696 → 21,936 / 23,264 |
+| 10k | triage | 70 / 70 → 40 / 50 | 39,072 / 39,376 → 37,872 / 38,016 |
+| 10k | retrospect | 80 / 80 → 80 / 80 | 41,616 / 41,872 → 41,520 / 42,352 |
+| 30k | list (control) | 60 / 70 → 70 / 80 | 61,360 / 63,056 → 61,280 / 61,344 |
+| 30k | triage | 340 / 350 → 170 / 170 | 114,432 / 116,032 → 108,016 / 108,048 |
+| 30k | retrospect | 430 / 440 → 240 / 240 | 120,352 / 121,920 → 110,880 / 111,456 |
+| 100k | list (control) | 260 / 260 → 260 / 270 | 181,232 / 181,248 → 181,216 / 181,232 |
+| 100k | triage | 2,390 / 2,450 → 660 / 670 | 451,104 / 451,440 → 404,256 / 404,352 |
+| 100k | retrospect | 2,890 / 2,890 → 960 / 970 | 520,160 / 521,920 → 488,272 / 521,984 |
+| 300k | list (control) | 810 / 830 → 910 / 970 | 546,960 / 547,024 → 547,008 / 547,104 |
+| 300k | triage | 18,290 / 18,330 → 2,430 / 2,450 | 1,899,376 / 1,899,440 → 1,518,816 / 1,519,536 |
+| 300k | retrospect | 21,050 / 21,220 → 3,340 / 3,390 | 2,325,552 / 2,332,032 → 2,318,880 / 2,330,432 |
+
+Median CPU improves 1.40x / 2.06x / 3.66x / 7.48x for triage and
+1.00x / 1.83x / 2.98x / 6.26x for retrospect, at 10k / 30k / 100k / 300k. The
+control moved the wrong way at 300k (830 → 970 ms on untouched code), so the
+machine was busier during the after-run and these ratios are, if anything,
+understated.
+
+Subtracting the control approximates the analyzer residual: triage 17,500 →
+1,480 ms at 300k, an 11.8x reduction. For retrospect the subtraction is loose
+because it folds the log twice, but 20,390 → 2,420 ms is the same order.
+
+The growth shape is what matters more than any single number. Across the 30x
+step from 10k to 300k, triage median CPU grew 262x before and 49x after — an
+effective exponent falling from about 1.64 to about 1.14. Peak RSS grows 40x
+over the same step, an exponent of about 1.08, so memory is now the more
+linear of the two.
+
+Peak RSS falls 1.04x / 1.07x / 1.12x / 1.25x for triage, the gain rising with
+scale because singleton tags are a rising share of the tag vocabulary: at 300k
+12,000 of the 24,000 distinct open-cut tags name exactly one record, and each
+had been costing a full 249,000-bit row. That is 347 MiB returned at 300k.
+Retrospect's peak is unchanged, because it is set by holding two folds of the
+log at once, not by the index.
+
+### The budget
+
+These are regression ceilings for this fixture, host, and profile — a tripwire
+for the quadratic shape coming back, not a promise about anyone's hardware. CPU
+carries roughly 2x headroom over the measured median because CPU on a shared
+interactive machine is noisy; RSS carries roughly 1.3x because it is not.
+
+| Records | triage CPU | triage peak RSS | retrospect CPU | retrospect peak RSS |
+| ---: | ---: | ---: | ---: | ---: |
+| 10k | 100 ms | 50 MiB | 160 ms | 55 MiB |
+| 30k | 400 ms | 150 MiB | 500 ms | 150 MiB |
+| 100k | 1.5 s | 550 MiB | 2.0 s | 700 MiB |
+| 300k | 5.0 s | 2.0 GiB | 7.0 s | 3.0 GiB |
+
+The pre-existing 10k budget — 500 ms per command, 200 ms stretch — still holds
+and is met with a wide margin, so the row above tightens it rather than
+replacing it.
+
+**300k is where the analyzers stop being cheap, and memory is the reason.**
+`retrospect` needs about 2.3 GiB resident on a 300k log and this change does not
+move that; it is two folds of the log plus both analyzers' working sets, and no
+prefilter bound touches it. A log that large should be trimmed with `archive`.
+Publishing the ceiling is the honest form of that statement — the numbers say a
+300k log works and costs a few seconds and a couple of gigabytes, not that it is
+free.
+
+### Levers identified and not taken
+
+- **Sparse posting lists for low-frequency tokens.** Every posting set is a
+  bitset sized to the candidate count, about 31 KiB per entry at 300k, so a token
+  in two records costs the same as one in every record. A sorted `Vec<u32>` below
+  a crossover of roughly one candidate in 64 would cut the remaining index
+  memory substantially. It was not taken because it splits the posting
+  representation in two and every consumer — the bit-sliced counter above all —
+  would need both paths. That is a real redesign of the structure's core for a
+  memory win on logs that `archive` already answers.
+- **Filtering the index to the representative vocabulary in `verify`** remains
+  recorded in the verify section above as its next lever, and remains untaken.
+  The singleton-tag rule shipped here is adjacent but not the same thing: it
+  removes pools that cannot affect a result for any caller, whereas that lever
+  removes pools that this particular caller happens never to query.
+
+<!-- END TASK-45 -->
