@@ -141,10 +141,10 @@ fn input_paths(args: &SweepArgs) -> AppResult<Vec<PathBuf>> {
 }
 
 fn read_registry(registry: &Path) -> AppResult<Vec<PathBuf>> {
-    let registry =
-        fs::canonicalize(registry).map_err(|error| AppError::from_io(error, registry))?;
-    let contents =
-        fs::read_to_string(&registry).map_err(|error| AppError::from_io(error, &registry))?;
+    let registry = fs::canonicalize(registry)
+        .map_err(|error| AppError::from_registry_file(error, registry))?;
+    let contents = fs::read_to_string(&registry)
+        .map_err(|error| AppError::from_registry_file(error, &registry))?;
     let directory = registry.parent().unwrap_or(Path::new("."));
     Ok(contents
         .lines()
