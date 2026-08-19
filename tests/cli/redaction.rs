@@ -1151,3 +1151,132 @@ fn cwd_under_a_generic_home_root_is_redacted() {
     );
     assert!(doctor.data.healthy);
 }
+
+#[test]
+fn dogear_evidence_is_redacted_across_home_forms_and_leaves_other_text_verbatim() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let home = "/private/alice";
+    let evidence = format!(
+        "read {home}/notes /Users/other/desk /private/tmp/agent/-Users-someuser-somerepo/scratchpad and bench run 42"
+    );
+    let added: SuccessEnvelope<Value> = success(
+        &command()
+            .env("HOME", home)
+            .arg("--file")
+            .arg(&file)
+            .args(["dogear", "an idea", "--agent", "tester", "--evidence"])
+            .arg(&evidence)
+            .output()
+            .unwrap(),
+    );
+    let expected = "read ~/notes ~/desk /private/tmp/agent/~-somerepo/scratchpad and bench run 42";
+    assert_eq!(added.data["record"]["evidence"], expected);
+    let stored = std::fs::read_to_string(&file).unwrap();
+    let line: Value = serde_json::from_str(stored.trim_end()).unwrap();
+    assert_eq!(line["evidence"], expected);
+}
+
+#[test]
+fn dogear_evidence_without_a_home_path_stays_byte_identical() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let evidence = "benchmark run 42 in ./target/criterion";
+    let added: SuccessEnvelope<Value> = success(
+        &command()
+            .env("HOME", "/private/alice")
+            .arg("--file")
+            .arg(&file)
+            .args(["dogear", "an idea", "--agent", "tester", "--evidence"])
+            .arg(evidence)
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(added.data["record"]["evidence"], evidence);
+}
+
+#[test]
+fn resolve_note_is_redacted_in_the_base_event_and_in_an_amend() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let home = "/private/alice";
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", home)
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "a cut", "--agent", "tester"])
+            .output()
+            .unwrap(),
+    );
+    let id = added.data.record.cut_id().to_string();
+
+    let base_note = format!("fixed in {home}/repo/src and /Users/other/fork");
+    let resolved: SuccessEnvelope<Value> = success(
+        &command()
+            .env("HOME", home)
+            .arg("--file")
+            .arg(&file)
+            .args(["resolve", &id, "--agent", "tester", "--note"])
+            .arg(&base_note)
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(
+        resolved.data["records"][0]["resolution"]["note"],
+        "fixed in ~/repo/src and ~/fork"
+    );
+
+    let amend_note = "reopened; see /private/tmp/agent/-Users-someuser-somerepo/scratchpad";
+    let amended: SuccessEnvelope<Value> = success(
+        &command()
+            .env("HOME", home)
+            .arg("--file")
+            .arg(&file)
+            .args(["resolve", &id, "--agent", "tester", "--amend", "--note"])
+            .arg(amend_note)
+            .output()
+            .unwrap(),
+    );
+    let expected_amend = "reopened; see /private/tmp/agent/~-somerepo/scratchpad";
+    assert_eq!(
+        amended.data["records"][0]["resolution"]["note"],
+        expected_amend
+    );
+
+    let stored = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        !stored.contains(home),
+        "raw home leaked into the log: {stored}"
+    );
+    assert!(!stored.contains("/Users/other/fork"));
+    assert!(stored.contains(expected_amend));
+}
+
+#[test]
+fn resolve_note_without_a_home_path_stays_byte_identical() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", "/private/alice")
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "a cut", "--agent", "tester"])
+            .output()
+            .unwrap(),
+    );
+    let id = added.data.record.cut_id().to_string();
+    let note = "fixed in src/store.rs; see PR 12";
+    let resolved: SuccessEnvelope<Value> = success(
+        &command()
+            .env("HOME", "/private/alice")
+            .arg("--file")
+            .arg(&file)
+            .args(["resolve", &id, "--agent", "tester", "--note"])
+            .arg(note)
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(resolved.data["records"][0]["resolution"]["note"], note);
+}
