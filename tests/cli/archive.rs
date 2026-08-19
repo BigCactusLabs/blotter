@@ -574,6 +574,3 @@ fn archive_sole_newline_log_has_zero_physical_lines() {
     assert_eq!(archive.data["kept"], 0);
     assert_eq!(std::fs::read(&file).unwrap(), b"\n");
 }
-
-// --- store.rs log-path guard, amend ordering by timestamp, cwd redaction, and
-// --- the add/dogear stdin raw gate.

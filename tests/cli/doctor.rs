@@ -339,8 +339,6 @@ fn doctor_rejects_empty_deny_literal() {
     assert!(envelope.error.suggested_fix.contains("non-empty"));
 }
 
-// --- archive retention ---
-
 #[test]
 fn plain_doctor_healthy_output_remains_byte_identical() {
     let temp = TempDir::new().unwrap();

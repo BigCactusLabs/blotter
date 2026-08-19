@@ -176,25 +176,6 @@ pub fn add_at(file: &Path, now: &str, text: &str, tags: &[&str]) -> SuccessEnvel
     success(&cmd.output().unwrap())
 }
 
-pub fn add_with_cmd_at(
-    file: &Path,
-    now: &str,
-    text: &str,
-    tags: &[&str],
-    failed_command: &str,
-) -> SuccessEnvelope<AddData> {
-    let mut cmd = command();
-    cmd.env("BLOTTER_NOW", now)
-        .arg("--file")
-        .arg(file)
-        .args(["add", text, "--agent", "tester", "--cmd"])
-        .arg(failed_command);
-    for tag in tags {
-        cmd.arg("--tag").arg(*tag);
-    }
-    success(&cmd.output().unwrap())
-}
-
 pub fn dogear_at(file: &Path, now: &str, text: &str, tags: &[&str]) -> SuccessEnvelope<Value> {
     let mut cmd = command();
     cmd.env("BLOTTER_NOW", now)
@@ -221,10 +202,6 @@ pub fn triage_success(output: &std::process::Output, exit: i32) -> SuccessEnvelo
 }
 
 pub fn verify_success(output: &std::process::Output, exit: i32) -> SuccessEnvelope<Value> {
-    triage_success(output, exit)
-}
-
-pub fn retrospect_success(output: &std::process::Output, exit: i32) -> SuccessEnvelope<Value> {
     triage_success(output, exit)
 }
 

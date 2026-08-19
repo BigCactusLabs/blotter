@@ -1124,8 +1124,6 @@ fn schema_documents_hook_exec_payload_contract_and_explain_env() {
     );
 }
 
-// --- legacy record compatibility ---
-
 #[test]
 fn hook_install_repairs_stale_executable_path_without_touching_unmanaged_commands() {
     let temp = TempDir::new().unwrap();

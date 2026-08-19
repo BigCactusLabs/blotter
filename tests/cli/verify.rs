@@ -571,5 +571,3 @@ fn verify_exit_code_is_stable_when_amend_lines_are_swapped() {
         assert_eq!(verify.data["recurrences"], json!([]), "{name}");
     }
 }
-
-// --- README hook prose drift gate ---

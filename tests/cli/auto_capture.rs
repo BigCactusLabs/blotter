@@ -642,3 +642,59 @@ fn resolve_guidance_includes_auto_captures() {
     let missing = error(&run_file(&file, &["resolve", "bl_dead"]), 66, "not_found");
     assert!(missing.error.suggested_fix.contains("--include-auto"));
 }
+
+#[test]
+fn export_otlp_json_hides_auto_captures_unless_requested() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let manual = add_at(
+        &file,
+        "2026-08-18T10:00:00Z",
+        "manual export record",
+        &["manual"],
+    );
+    let auto = add_at(
+        &file,
+        "2026-08-18T10:01:00Z",
+        "auto export record",
+        &["auto"],
+    );
+
+    let default = run_file(&file, &["export", "--format", "otlp-json"]);
+    assert!(default.status.success());
+    assert!(default.stderr.is_empty());
+    let default: Value = serde_json::from_slice(&default.stdout).unwrap();
+    let default_ids = default["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|record| {
+            record["attributes"][0]["value"]["stringValue"]
+                .as_str()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(default_ids, [manual.data.record.cut_id()]);
+
+    let included = run_file(
+        &file,
+        &["export", "--format", "otlp-json", "--include-auto"],
+    );
+    assert!(included.status.success());
+    assert!(included.stderr.is_empty());
+    let included: Value = serde_json::from_slice(&included.stdout).unwrap();
+    let included_ids = included["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|record| {
+            record["attributes"][0]["value"]["stringValue"]
+                .as_str()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        included_ids,
+        [manual.data.record.cut_id(), auto.data.record.cut_id()]
+    );
+}

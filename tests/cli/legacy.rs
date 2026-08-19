@@ -393,5 +393,3 @@ fn doctor_accepts_legacy_pc_records_without_a_migration_field() {
         json!(["bl_", "pc_"])
     );
 }
-
-// --- phase 2b: hook stale-path repair ---
