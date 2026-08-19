@@ -6486,6 +6486,92 @@ fn verify_allows_one_open_cut_to_recur_against_two_resolved_anchors() {
 }
 
 #[test]
+fn verify_reports_one_open_cut_against_every_matching_anchor_and_link_path() {
+    // The recurrence scan prefilters open cuts per anchor, so this pins the
+    // parts a prefilter could quietly drop: an anchor whose tags miss the open
+    // cut still matches on an identical title, an anchor with a different title
+    // still matches through shared tokens plus a shared tag, no anchor claims
+    // the open cut away from the others, and an open cut that predates every
+    // resolution is still excluded even though it matches on title.
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let title_anchor = add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "Cache configuration missing",
+        &["alpha"],
+    );
+    let other_tag_anchor = add_at(
+        &file,
+        "2026-07-09T18:30:10Z",
+        "cache configuration MISSING",
+        &["beta"],
+    );
+    let token_anchor = add_at(
+        &file,
+        "2026-07-09T18:30:20Z",
+        "Cache configuration missing entirely",
+        &["gamma"],
+    );
+    let before_resolution = add_at(
+        &file,
+        "2026-07-09T18:30:30Z",
+        "cache configuration missing",
+        &["delta"],
+    );
+    for (index, anchor) in [&title_anchor, &other_tag_anchor, &token_anchor]
+        .iter()
+        .enumerate()
+    {
+        let _: SuccessEnvelope<ResolveData> = resolve_at(
+            &file,
+            &format!("2026-07-09T18:31:{:02}Z", index * 10),
+            anchor.data.record.cut_id(),
+            &["--agent", "fixer"],
+        );
+    }
+    let recurring = add_at(
+        &file,
+        "2026-07-09T18:32:00Z",
+        "CACHE CONFIGURATION MISSING!",
+        &["gamma"],
+    );
+
+    let verify = verify_success(&run_file(&file, &["verify"]), 1);
+    assert_eq!(verify.data["count"], 3);
+    assert_eq!(verify.data["scanned"], 2);
+    let recurrences = verify.data["recurrences"].as_array().unwrap();
+    let mut expected_resolved_ids = vec![
+        title_anchor.data.record.cut_id().to_owned(),
+        other_tag_anchor.data.record.cut_id().to_owned(),
+        token_anchor.data.record.cut_id().to_owned(),
+    ];
+    expected_resolved_ids.sort();
+    assert_eq!(
+        recurrences
+            .iter()
+            .map(|recurrence| recurrence["resolved_id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        expected_resolved_ids
+    );
+    for recurrence in recurrences {
+        assert_eq!(
+            recurrence["recurrence_ids"],
+            json!([recurring.data.record.cut_id()])
+        );
+        assert_eq!(recurrence["count"], 1);
+        assert_eq!(
+            recurrence["first_recurrence_ts"],
+            "2026-07-09T18:32:00.000Z"
+        );
+        assert_ne!(
+            recurrence["recurrence_ids"][0],
+            json!(before_resolution.data.record.cut_id())
+        );
+    }
+}
+
+#[test]
 fn verify_sorts_recurrence_ids_and_anchors_by_first_recurrence() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");

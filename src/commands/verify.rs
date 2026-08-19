@@ -161,14 +161,27 @@ pub(crate) fn recurrence_groups(items: Vec<ListItem>) -> RecurrenceAnalysis {
         open.iter()
             .chain(anchors.iter().map(|anchor| &anchor.candidate)),
     );
+    // The prefilter indexes the open cuts, but the frequencies stay the
+    // open-plus-anchor counts computed above. Rebuilding them over `open` alone
+    // would change document-frequency rarity — and so `linked`'s verdict — and
+    // would panic on an anchor token that no open cut carries, because the
+    // representative scored here is an anchor.
+    let index = triage::CandidateIndex::new(&open, &frequencies);
+    let mut scratch = triage::CandidateScratch::new(scanned);
     let mut recurrences = Vec::new();
     for anchor in anchors {
-        let recurring: Vec<_> = open
-            .iter()
-            .filter(|candidate| {
-                candidate.timestamp > anchor.resolution_timestamp
-                    && triage::linked(&anchor.candidate, candidate, &frequencies)
-            })
+        // `open` is sorted by (timestamp, id) and the prefilter returns
+        // positions into it, so the post-resolution cutoff is a floor on the
+        // bitset walk rather than a second pass. Triage's
+        // `candidate <= representative` self-exclusion has no counterpart: an
+        // anchor is never a member of `open`.
+        let floor =
+            open.partition_point(|candidate| candidate.timestamp <= anchor.resolution_timestamp);
+        let recurring: Vec<_> = scratch
+            .matching_candidates(&anchor.candidate, &index, &frequencies)
+            .indices_from(floor)
+            .filter(|&candidate| triage::linked(&anchor.candidate, &open[candidate], &frequencies))
+            .map(|candidate| open[candidate].clone())
             .collect();
         let Some(first) = recurring.first() else {
             continue;
@@ -177,7 +190,7 @@ pub(crate) fn recurrence_groups(items: Vec<ListItem>) -> RecurrenceAnalysis {
             first_recurrence_timestamp: first.timestamp,
             data: RecurrenceGroup {
                 anchor: anchor.candidate,
-                members: recurring.into_iter().cloned().collect(),
+                members: recurring,
             },
         });
     }
