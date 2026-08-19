@@ -1004,19 +1004,18 @@ fn non_utf8_blotter_agent_is_a_config_error_and_never_files_a_detected_agent() {
     assert!(envelope.error.message.contains("BLOTTER_AGENT"));
     assert!(!file.exists());
 
-    // The hook lane still fails open: it explains the gate and exits 0.
+    // The retired hook receiver still fails open: it resolves no agent at all (r32).
     std::fs::write(&file, "").unwrap();
     let hook = command()
         .env("BLOTTER_AGENT", agent)
-        .env("BLOTTER_HOOK_EXPLAIN", "1")
         .arg("--file")
         .arg(&file)
         .args(["hook", "exec", "claude-code"])
-        .write_stdin(claude_bash_failure("cargo test", temp.path()).to_string())
+        .write_stdin("{}")
         .output()
         .unwrap();
     assert_eq!(hook.status.code(), Some(0));
     assert!(hook.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&hook.stderr).contains("BLOTTER_AGENT"));
+    assert!(hook.stderr.is_empty());
     assert!(std::fs::read_to_string(&file).unwrap().is_empty());
 }

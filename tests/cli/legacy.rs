@@ -160,47 +160,6 @@ fn source_propagates_to_triage_digest_and_verify_json() {
 }
 
 #[test]
-fn hook_dedupe_matches_open_commands_regardless_of_source() {
-    for source in [None, Some("hook")] {
-        let temp = TempDir::new().unwrap();
-        let file = temp.path().join("dedupe-source.jsonl");
-        let command = "cargo test --workspace";
-        let id = compute_id(
-            NOW,
-            "existing",
-            command,
-            Severity::Minor,
-            &["auto".into(), "claude-code".into()],
-        );
-        let mut existing = json!({
-            "kind": "cut",
-            "id": id,
-            "ts": NOW,
-            "agent": "existing",
-            "text": command,
-            "tags": ["auto", "claude-code"],
-            "severity": "minor",
-            "cwd": "/tmp",
-            "evidence": {"cmd": command}
-        });
-        if let Some(source) = source {
-            existing["source"] = json!(source);
-        }
-        std::fs::write(&file, format!("{existing}\n")).unwrap();
-
-        hook_exec_is_silent(&hook_exec_claude_code(
-            &file,
-            claude_bash_failure(command, temp.path()).to_string(),
-        ));
-        assert_eq!(
-            std::fs::read_to_string(&file).unwrap().lines().count(),
-            1,
-            "source={source:?} must not affect open-command dedupe"
-        );
-    }
-}
-
-#[test]
 fn legacy_migration_inputs_are_ignored_without_warnings() {
     let temp = TempDir::new().unwrap();
     let root = temp.path().join("repo");
