@@ -1,7 +1,7 @@
 use crate::cli::AddArgs;
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
-use crate::redact::evidence_delimiter;
+use crate::redact::{evidence_delimiter, rewrite_home_paths};
 use crate::store;
 use crate::{Evidence, LogEvent, compute_id, format_timestamp, resolve_agent_checked};
 use jiff::Timestamp;
@@ -15,10 +15,6 @@ use std::io::{IsTerminal, Read};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-
-// The home-path scanner lives in `crate::redact` so `store::record_cwd` can
-// share it. Re-exported because `add` and `dogear` are its text-lane callers.
-pub(crate) use crate::redact::rewrite_home_paths;
 
 const STDERR_INPUT_LIMIT: u64 = 1024 * 1024;
 const STDIN_INPUT_LIMIT: u64 = 1024 * 1024;
