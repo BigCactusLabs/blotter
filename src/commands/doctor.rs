@@ -6,7 +6,7 @@ use crate::{LogEvent, compute_dogear_id, compute_id};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -210,25 +210,40 @@ fn apply_fixes(log: &mut File, path: &Path, now: Timestamp) -> AppResult<DoctorD
     // A symlinked log is locked and read through the link; the swap must land
     // on the target, not replace the link with a regular file.
     let path = &store::resolve_symlinked_log(path)?;
-    let backup = store::write_new_file(
-        &store::suffixed_path(path, &format!(".bak-{}", store::backup_timestamp(now))),
-        &original,
-        &permissions,
-    )?;
+    let backup_path = store::suffixed_path(path, &format!(".bak-{}", store::backup_timestamp(now)));
+    if backup_path.exists() {
+        return Err(AppError::stale_backup(&backup_path));
+    }
+    let backup = store::write_new_file(&backup_path, &original, &permissions)?;
+    let quarantine_path = store::suffixed_path(path, ".quarantine.jsonl");
+    // `append_file` extends an existing quarantine sidecar, so its rollback
+    // restores the prior length instead of deleting an earlier repair's lines.
+    let quarantine_len = fs::metadata(&quarantine_path)
+        .ok()
+        .map(|metadata| metadata.len());
     let quarantined = quarantined_bytes(&original, &applied);
-    let quarantine = store::append_file(
-        &store::suffixed_path(path, ".quarantine.jsonl"),
-        &quarantined,
-        &permissions,
-    )?;
+    let quarantine = match store::append_file(&quarantine_path, &quarantined, &permissions) {
+        Ok(quarantine) => quarantine,
+        Err(error) => {
+            undo_created_outputs(&[(backup.as_path(), None)]);
+            return Err(error);
+        }
+    };
     let repaired = repaired_bytes(&original, &applied);
-    store::replace_log(
+    if let Err(error) = store::replace_log(
         path,
         &repaired,
         &permissions,
         &format!(".tmp-fix-{}", std::process::id()),
-    )?;
-    let repaired = fs::read(path).map_err(|error| AppError::from_io(error, path))?;
+    ) {
+        undo_created_outputs(&[
+            (backup.as_path(), None),
+            (quarantine.as_path(), quarantine_len),
+        ]);
+        return Err(error);
+    }
+    // The swap renames a new inode over the path, so the held lock no longer
+    // covers the file there; diagnose the bytes just written, never a reread.
     Ok(with_fix(
         inspect(&repaired, None),
         FixData {
@@ -240,6 +255,26 @@ fn apply_fixes(log: &mut File, path: &Path, now: Timestamp) -> AppResult<DoctorD
             dry_run: false,
         },
     ))
+}
+
+/// Mirror of `archive::remove_created_outputs` for an aborted repair: a
+/// sidecar this run created is removed, and one it only extended is truncated
+/// back. Without it a failed repair leaves a backup that claims a repair which
+/// never happened, and the retry then fails on that leftover.
+fn undo_created_outputs(outputs: &[(&Path, Option<u64>)]) {
+    for (path, previous_len) in outputs {
+        match previous_len {
+            None => {
+                let _ = fs::remove_file(path);
+            }
+            Some(len) => {
+                let _ = OpenOptions::new()
+                    .write(true)
+                    .open(path)
+                    .and_then(|file| file.set_len(*len));
+            }
+        }
+    }
 }
 
 fn with_fix(mut data: DoctorData, fix: FixData) -> DoctorData {

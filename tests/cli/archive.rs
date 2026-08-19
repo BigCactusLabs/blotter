@@ -431,25 +431,10 @@ fn archive_cleans_created_outputs_when_replacement_fails() {
         .open(&file)
         .unwrap();
     locked.lock().unwrap();
-    let mut archive = std::process::Command::new(assert_cmd::cargo::cargo_bin!("blotter"));
+    let mut archive = spawn_command();
     archive
-        .env("BLOTTER_NOW", NOW)
-        .env_remove("BLOTTER_FILE")
-        .env_remove("BLOTTER_AGENT")
-        .env_remove("BLOTTER_HOOK_EXPLAIN")
-        .env_remove("PAPERCUTS_FILE")
-        .env_remove("PAPERCUTS_AGENT")
-        .env_remove("PAPERCUTS_NOW")
-        .env_remove("CLAUDECODE")
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("CODEX_")
-            || key.to_string_lossy().starts_with("CURSOR_")
-        {
-            archive.env_remove(key);
-        }
-    }
     let child = archive
         .arg("--file")
         .arg(&file)

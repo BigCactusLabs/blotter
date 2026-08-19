@@ -221,6 +221,20 @@ impl AppError {
         }
     }
 
+    /// A leftover repair backup blocks a copy-and-swap. Naming the file keeps
+    /// the retry from reporting the collision instead of the original failure.
+    pub fn stale_backup(path: &std::path::Path) -> Self {
+        Self::new(
+            "io_error",
+            format!("backup path already exists: {}", path.display()),
+            false,
+            format!(
+                "Remove or rename the leftover backup {}; it is from an aborted repair, not a completed one, then retry.",
+                path.display()
+            ),
+        )
+    }
+
     fn new(
         code: &'static str,
         message: impl Into<String>,

@@ -77,7 +77,13 @@ impl CutEventExt for LogEvent {
 }
 
 pub fn command() -> Command {
-    let mut command = assert_cmd::cargo::cargo_bin_cmd!("blotter");
+    Command::from_std(spawn_command())
+}
+
+/// The same clean environment as `command()`, as a `std::process::Command`,
+/// for tests that must spawn blotter and act while it runs.
+pub fn spawn_command() -> std::process::Command {
+    let mut command = std::process::Command::new(assert_cmd::cargo::cargo_bin!("blotter"));
     command
         .env("BLOTTER_NOW", NOW)
         .env_remove("BLOTTER_FILE")
