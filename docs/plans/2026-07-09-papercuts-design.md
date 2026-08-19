@@ -1,6 +1,6 @@
 # papercuts — design doc
 
-2026-07-09. Coordinator-authored. Status: r28 — see Amendments for review provenance and deliberate contract additions. Amendments accumulate and the newest wins; where an amendment contradicts an earlier section, the later text is the contract and the earlier is history.
+2026-07-09. Coordinator-authored. Status: see the last Amendments section for review provenance and deliberate contract additions. Amendments accumulate and the newest wins; where an amendment contradicts an earlier section, the later text is the contract and the earlier is history.
 
 ## Thesis and provenance
 
@@ -429,3 +429,15 @@ Additive: envelope `meta.contract` stays 5. `hook exec claude-code` gains one el
 A command that chains or substitutes is skipped. The gate scans the raw command bytes with single- and double-quote state (backslash escapes honored inside double quotes only) and skips the capture when `&&`, `||`, `;`, `|`, a newline, `$(`, or a backtick appears outside quotes. Bare `&`, heredocs, `$'…'`, and nested substitution are deliberately not recognized; as in r20 the hook does not parse the shell, and an ambiguous scan resolves toward skipping. A scan that reaches the end of the command still inside a quoted span — an unterminated quote, or a trailing backslash inside a double-quoted one — is exactly that ambiguity, because the operators it may hide cannot be ruled out, and skips.
 
 The rationale is r14's, generalized. The failed command becomes the cut's text verbatim, and a chain's non-zero exit names neither the failing step nor the friction: the Claude Code payload carries no per-segment status, so the stored text is an unreadable one-liner rather than a description. Measured against this repository's own log, every one of the 25 auto-captures filed to 2026-08-18 was a chain, r20's program gate matched none of them, and normalizing paths, quoted strings, and integers produced 17 distinct fingerprints from the 17 records filed after r20 — chained failures here are one-shot novelty, not repetition, so neither an extended program list nor fingerprint dedup bounds the lane. Restricting auto-capture to simple commands accepts a much smaller lane in exchange for entries whose text describes what failed. Skipping remains fail-open: stdout empty, exit 0, one `BLOTTER_HOOK_EXPLAIN` line naming the gate. No selector, output shape, or exit code changes, and stored history is untouched.
+
+### r30 (2026-08-19, cwd redaction parity)
+
+Corrective: envelope `meta.contract` stays 5. No selector, output-shape, or exit-code change.
+
+`record_cwd` implemented only the exact-`$HOME` strip, although r22's own cwd paragraph already ruled that a sibling such as `/Users/alicex` falls to the generic Unix-home rule. A cwd under a generic home that is not the current `$HOME`, or under an r23 dash-encoded harness slug, was therefore stored verbatim, and `doctor --leaks` flagged a line blotter itself wrote — with no repair path, because `--leaks` is diagnose-only and conflicts with `--fix`, the record is already appended, and no event rewrites a stored payload. A tool whose own writes trip its public-log gate is the defect, not the gate.
+
+The stored `cwd` therefore joins the redaction surface at write time, under the same whole-string `rewrite_home_paths` scanner that evidence already uses and in the same precedence order: r22 exact current home, r22 generic `/Users/<user>` and `/home/<user>`, then r23's dash-encoded forms with their boundary rules unchanged. The repo-relative branch is untouched and still decides first — a cwd inside the discovered repository stores as a repo-relative path and never reaches the scanner. The span-based secret pass does not apply, as it does not apply to authored text under r25.
+
+The resulting spelling is accepted deliberately. The r23 rule rewrites only the matched prefix and keeps the rest of the token verbatim, so a dash-encoded cwd stores as `/private/tmp/claude-501/~-Documents-GitHub-blotter/<session>/scratchpad` rather than collapsing the whole slug. It looks odd, and it is still the better answer: a whole-token rule for `cwd` alone would make one path spell two different ways depending on whether it arrived as a working directory or as evidence, and one scanner with one output is worth more than a tidier string.
+
+What does not move: `compute_id` ignores `cwd`, so IDs, dedupe, and the determinism guarantee are unaffected. The change is write-time only and stored history is never rewritten, so an already-leaking `cwd` stays as written and `doctor --leaks` keeps reporting it, correctly, as a line that predates the fix. `schema`'s published `cwd` description is updated to name the redaction.

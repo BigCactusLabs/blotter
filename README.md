@@ -89,7 +89,7 @@ blotter schema                    # full machine contract — agents self-orient
 
 Two other paths append besides the write commands: `blotter hook exec` (invoked by the harness after a failed tool call, never by hand) files the auto-tagged cuts described under [Hooks](#hooks), and `doctor --fix` appends in the course of a repair. `blotter schema` carries the authoritative `read_only`/`appends` annotation for every command.
 
-The five read commands — `list`, `triage`, `verify`, `digest`, and `sweep` — show hand-filed records by default; pass `--include-auto` to include records tagged `auto`. On `list`, `--tag auto` implies `--include-auto`, so you can ask for auto records by name without the extra flag.
+Six read commands — `list`, `triage`, `verify`, `digest`, `sweep`, and `export` — show hand-filed records by default; pass `--include-auto` to include records tagged `auto`. On `list`, `--tag auto` implies `--include-auto`, so you can ask for auto records by name without the extra flag.
 
 ## Cuts
 
@@ -212,7 +212,7 @@ Use `--settings PATH` for an explicit settings file, or `--global` for `~/.claud
 
 Claude Code then invokes `blotter hook exec claude-code` after a failed Bash tool call. The hook files a minor cut whose text and `evidence.cmd` are the same best-effort-redacted failed command (home-path rewrite followed by the secret pass), with tags `auto` and `claude-code` and `source:"hook"` — the one provenance value `add` cannot forge, marking the record as machine-observed rather than self-reported; its human-readable failure message becomes a best-effort-redacted evidence note. It never creates a blotter log, ignores interrupts and malformed or inapplicable payloads, and keeps stdout empty with exit 0 so a logging failure cannot disrupt the host session. Four noise guards apply. It skips an event when an **open** cut already has exactly the same redacted text — once that cut is resolved, the command can be filed again. It skips a raw command longer than 500 bytes before redaction: a sprawling debugging one-liner is log noise rather than a description of friction. It skips a command that is not a simple command — an unquoted `&&`, `||`, `;`, `|`, newline, `$(`, or backtick, or a command that ends inside a quote — because a chain's non-zero exit names neither the failing step nor the friction, so the stored text would be an unreadable one-liner; the scan tracks quote state but does not parse the shell, and an ambiguous read skips. And it skips read-only probe commands (`grep`, `rg`, `ls`, `find`, `tail`, `head`, `cat`, `stat`, `test`, `[`, `which`, `curl`, `gh`) whose non-zero exit is an expected answer rather than friction — matched best-effort on the first program word only, after leading `VAR=value` assignments and ignoring pipelines and chains.
 
-Auto-captured cuts are hidden from `list`, `triage`, `digest`, `verify`, and `sweep` by default. The hook captures that a command failed, not why it mattered, so those records are evidence rather than analysis; pass `--include-auto` when that evidence is needed.
+Auto-captured cuts are hidden from `list`, `triage`, `digest`, `verify`, `sweep`, and `export` by default. The hook captures that a command failed, not why it mattered, so those records are evidence rather than analysis; pass `--include-auto` when that evidence is needed.
 
 Silence makes the hook hard to debug, so set `BLOTTER_HOOK_EXPLAIN=1` to have `hook exec` write one line to stderr naming why it skipped — the failed gate, the duplicate cut, an unusable clock — or the id of the cut it filed. stdout stays empty and the exit code stays 0 either way. Any other value keeps the hook silent.
 
@@ -297,7 +297,7 @@ Duplicate lines after a merge are harmless — the fold is first-wins and `blott
 
 Everything an agent needs is in `blotter schema`: commands and flags with read-only/appends annotations, env vars (`BLOTTER_FILE`, `BLOTTER_AGENT`, `BLOTTER_NOW`, `BLOTTER_HOOK_EXPLAIN`), record shapes, error codes, and the exit-code dictionary (0 success · 1 command findings · 2 usage · 65 bad input · 66 not found · 70 internal · 74 I/O · 75 lock timeout, retryable · 77 permission denied · 78 config). Empty results are exit 0, never errors.
 
-Exit 1 is not an error — it is a finding count. `doctor` returns it for an unhealthy log, `triage` for at least one chronic cluster, and `verify` for at least one recurrence. Each command's own `exit_codes` entry in `blotter schema` says which meaning applies.
+Exit 1 is not an error — it is a finding count. `doctor` returns it for an unhealthy log, `triage` for at least one chronic cluster, `verify` for at least one recurrence, and `retrospect` for at least one promotion candidate. Each command's own `exit_codes` entry in `blotter schema` says which meaning applies.
 
 ## License
 
