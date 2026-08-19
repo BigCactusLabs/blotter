@@ -4,7 +4,7 @@ title: 'Republish gate v2: recreate repo fresh, CI, flip public'
 status: In Progress
 assignee: []
 created_date: '2026-08-19 02:56'
-updated_date: '2026-08-19 03:51'
+updated_date: '2026-08-19 03:55'
 labels: []
 dependencies: []
 ordinal: 46000
@@ -28,7 +28,7 @@ Successor to TASK-35: delete and recreate the GitHub repo with a single fresh in
 - [x] #8 Single fresh initial commit pushed; rev-list --count HEAD is 1 on the remote; fresh v0.15.0 tag created on the new root and pushed explicitly by name
 - [ ] #9 Codex review app re-installed on the new repo
 - [x] #10 TASK-37 CI workflow landed and green before any visibility change
-- [ ] #11 Owner gave explicit go immediately before the public flip
+- [x] #11 Owner gave explicit go immediately before the public flip
 - [ ] #12 Flipped public; protect-history ruleset applied post-flip and verified active; secret scanning + push protection confirmed on
 - [ ] #13 From a clean temporary clone: git fetch origin b8012f9 rejected AND https://github.com/BigCactusLabs/blotter/commit/b8012f9 returns 404; crates.io repo link resolves
 <!-- AC:END -->
@@ -36,5 +36,5 @@ Successor to TASK-35: delete and recreate the GitHub repo with a single fresh in
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-AC4-5 re-checked in the fresh clone 2026-08-19: the original tick landed in the old clone's working tree after the staging cut and never reached the published tree. Staging facts: root d7e011f5, tree verified byte-identical to old HEAD via ls-tree diff, zero tags, gates + doctor --leaks green pre-push.
+AC4-5 re-recorded in the fresh clone (original tick landed in the old clone post-staging). Staging facts: root d7e011f5, tree byte-identical to old HEAD, zero tags, gates + doctor --leaks green pre-push. AC11: owner go for public flip given 2026-08-19.
 <!-- SECTION:NOTES:END -->
