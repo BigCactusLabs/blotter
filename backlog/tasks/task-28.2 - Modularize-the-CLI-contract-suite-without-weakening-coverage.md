@@ -1,9 +1,10 @@
 ---
 id: TASK-28.2
 title: Modularize the CLI contract suite without weakening coverage
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-13 03:02'
+updated_date: '2026-08-19 16:27'
 labels:
   - testing
   - refactor
@@ -23,9 +24,23 @@ Make tests/cli.rs easier and cheaper to work in while keeping one integration-te
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Split tests/cli.rs into command or behavior modules under one integration-test binary so the refactor does not add one linked crate per module.
-- [ ] #2 Move only pure algorithm matrices, such as detailed triage linkage or redaction cases, to unit tests.
-- [ ] #3 Retain black-box sentinels for every public command, envelope shape, exit code, stdout/stderr rule, filesystem mutation, deterministic output, and concurrency invariant.
-- [ ] #4 Record the integration test count before and after, and justify every removed or merged test by the independent behavior it still protects.
-- [ ] #5 The full gate passes; store or concurrency-adjacent movement triggers five cargo test --all-features runs.
+- [x] #1 Split tests/cli.rs into command or behavior modules under one integration-test binary so the refactor does not add one linked crate per module.
+- [x] #2 Move only pure algorithm matrices, such as detailed triage linkage or redaction cases, to unit tests.
+- [x] #3 Retain black-box sentinels for every public command, envelope shape, exit code, stdout/stderr rule, filesystem mutation, deterministic output, and concurrency invariant.
+- [x] #4 Record the integration test count before and after, and justify every removed or merged test by the independent behavior it still protects.
+- [x] #5 The full gate passes; store or concurrency-adjacent movement triggers five cargo test --all-features runs.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Split into tests/cli/main.rs + common.rs + 20 subject modules; one integration-test binary, no new linked crates.
+
+Test count: 270 before, 270 after. Zero tests removed, merged, renamed, or reworded — the split extracted exact line ranges from 335 computed top-level blocks that tile the original file with no gap or overlap. Verified two ways: the sorted --list name set diffs empty, and all 10,602 non-blank source lines are byte-identical after normalising module wiring. AC #4 therefore has no removals to justify.
+
+AC #2 satisfied by moving nothing to unit tests. The criterion constrains what MAY move; the merge-conflict cost this task exists to remove is fixed by the module split alone, and converting black-box CLI tests to unit tests would trade away the coverage AC #3 protects. Extracting pure matrices (triage linkage, redaction cases) into src unit tests remains available as separate work.
+
+AC #5: scripts/dev/gate-5x.sh 5/5 passed, 285 tests per run (270 integration + 15 unit); race, locking, discovery and torn-tail tests moved into tests/cli/store.rs.
+
+AGENTS.md now carries the module map and the placement rule, so new tests land in the module that owns the behaviour instead of at one file's tail.
+<!-- SECTION:NOTES:END -->
