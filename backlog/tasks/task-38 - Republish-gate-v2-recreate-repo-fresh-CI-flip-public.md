@@ -29,12 +29,12 @@ Successor to TASK-35: delete and recreate the GitHub repo with a single fresh in
 - [ ] #9 Codex review app re-installed on the new repo
 - [x] #10 TASK-37 CI workflow landed and green before any visibility change
 - [x] #11 Owner gave explicit go immediately before the public flip
-- [ ] #12 Flipped public; protect-history ruleset applied post-flip and verified active; secret scanning + push protection confirmed on
-- [ ] #13 From a clean temporary clone: git fetch origin b8012f9 rejected AND https://github.com/BigCactusLabs/blotter/commit/b8012f9 returns 404; crates.io repo link resolves
+- [x] #12 Flipped public; protect-history ruleset applied post-flip and verified active; secret scanning + push protection confirmed on
+- [x] #13 From a clean temporary clone: git fetch origin b8012f9 rejected AND https://github.com/BigCactusLabs/blotter/commit/b8012f9 returns 404; crates.io repo link resolves
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-AC4-5 re-recorded in the fresh clone (original tick landed in the old clone post-staging). Staging facts: root d7e011f5, tree byte-identical to old HEAD, zero tags, gates + doctor --leaks green pre-push. AC11: owner go for public flip given 2026-08-19.
+AC12 2026-08-19: flipped public; protect-history ruleset id 21023465 (non_fast_forward + deletion, ~ALL branches, active, no bypass); secret scanning + push protection were DISABLED after the private-created flip (unlike a public-created repo) — enabled explicitly via PATCH, both now enabled. AC13 verified from a clean clone: fetch of b8012f9 rejected 'not our ref', commit page 404, repo page 200, homepage links crates.io. AC9 (Codex app re-install) remains — owner action at chatgpt.com/codex settings; task stays open until then.
 <!-- SECTION:NOTES:END -->
