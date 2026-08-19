@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- `hook exec claude-code` gains a fourth noise guard (TASK-39): a failed command that is not a simple command is skipped instead of filed. The gate scans the raw bytes with single- and double-quote state and skips on an unquoted `&&`, `||`, `;`, `|`, newline, `$(`, or backtick, or when the scan ends inside a quote. The failed command becomes the cut's text verbatim, and a chain's non-zero exit names neither the failing step nor the friction, so the entry read as an unreadable one-liner; measured against this repository's own log, all 25 auto-captures filed to 2026-08-18 were chains, the r20 probe gate matched none of them, and fingerprint normalization collapsed nothing. It runs after the 500-byte gate and before the probe gate, does not parse the shell (bare `&`, heredocs, `$'...'`, and nested substitution are not recognized), and resolves an ambiguous scan toward skipping. Published in `schema` as `tool_input.command_shape`; skipping stays fail-open (stdout empty, exit 0) and `BLOTTER_HOOK_EXPLAIN=1` names the gate. Envelope `meta.contract` stays 5. Design doc r29.
+
 ## [0.15.0] - 2026-08-18
 
 ### Added

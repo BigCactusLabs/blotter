@@ -83,6 +83,7 @@ enum HookExecOutcome {
     Interrupted,
     MissingCommand,
     CommandTooLong(usize),
+    CompoundCommand,
     CommandRejected(String),
     ProbeCommand(String),
     MissingLog(PathBuf),
@@ -115,6 +116,9 @@ impl HookExecOutcome {
             Self::CommandTooLong(bytes) => format!(
                 "hook exec: tool_input.command is {bytes} bytes; exceeds the {HOOK_COMMAND_LIMIT}-byte limit; skipped"
             ),
+            Self::CompoundCommand => {
+                "hook exec: tool_input.command is not a simple command (chain, substitution, or unterminated quote); its exit does not name the friction; skipped".into()
+            }
             Self::CommandRejected(reason) => {
                 format!("hook exec: tool_input.command failed cut validation ({reason:?}); skipped")
             }
@@ -154,6 +158,44 @@ pub(crate) fn leading_program(command: &str) -> Option<&str> {
                 .and_then(|name| name.to_str())
                 .unwrap_or(word)
         })
+}
+
+/// Reports whether the command chains, substitutes, or ends inside a quote. A chain's non-zero
+/// exit names neither the failing step nor the friction, so the hook declines it. Like
+/// `leading_program` this does not parse the shell: bare `&`, heredocs, `$'...'`, and nested
+/// substitution are deliberately not recognized, and an ambiguous scan resolves toward skipping.
+pub(crate) fn is_compound_command(command: &str) -> bool {
+    let bytes = command.as_bytes();
+    let mut index = 0;
+    let mut in_single = false;
+    let mut in_double = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_single {
+            in_single = byte != b'\'';
+        } else if in_double {
+            match byte {
+                // POSIX honours backslash escapes inside double quotes only.
+                b'\\' => index += 1,
+                b'"' => in_double = false,
+                _ => {}
+            }
+        } else {
+            match byte {
+                b'\'' => in_single = true,
+                b'"' => in_double = true,
+                b'|' | b';' | b'\n' | b'`' => return true,
+                b'&' if bytes.get(index + 1) == Some(&b'&') => return true,
+                b'$' if bytes.get(index + 1) == Some(&b'(') => return true,
+                _ => {}
+            }
+        }
+        index += 1;
+    }
+    // An unterminated quote (or a trailing backslash inside one) leaves the scan
+    // unable to say where the quoted span ends, which is exactly the ambiguity
+    // r29 resolves toward skipping.
+    in_single || in_double
 }
 
 fn is_environment_assignment(word: &str) -> bool {
@@ -213,6 +255,9 @@ fn exec_claude_code(file: Option<PathBuf>, now: Timestamp) -> AppResult<HookExec
     };
     if raw_command.len() > HOOK_COMMAND_LIMIT {
         return Ok(HookExecOutcome::CommandTooLong(raw_command.len()));
+    }
+    if is_compound_command(&raw_command) {
+        return Ok(HookExecOutcome::CompoundCommand);
     }
     if let Some(program) = leading_program(&raw_command)
         && PROBE_COMMANDS.contains(&program)

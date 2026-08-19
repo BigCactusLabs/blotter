@@ -8098,6 +8098,182 @@ fn hook_exec_claude_code_files_non_probe_commands() {
     assert_eq!(lines[0]["evidence"]["cmd"], command);
 }
 
+const HOOK_CHAIN_EXPLANATION: &str = "hook exec: tool_input.command is not a simple command (chain, substitution, or unterminated quote); its exit does not name the friction; skipped";
+
+#[test]
+fn hook_exec_claude_code_skips_chained_commands_and_explains_the_gate() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, "").unwrap();
+    let command = "cargo build --release && cargo test";
+
+    hook_exec_explains(
+        &hook_exec_claude_code_with_explain(
+            &file,
+            claude_bash_failure(command, temp.path()).to_string(),
+            "1",
+        ),
+        HOOK_CHAIN_EXPLANATION,
+    );
+    assert!(std::fs::read_to_string(&file).unwrap().is_empty());
+}
+
+#[test]
+fn hook_exec_claude_code_skips_piped_and_sequenced_commands() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, "").unwrap();
+
+    for command in [
+        "cargo test | tail -3",
+        "cargo build; cargo test",
+        "cargo build || cargo test",
+        "cargo build\ncargo test",
+        "echo $(date)",
+        "echo `date`",
+    ] {
+        hook_exec_explains(
+            &hook_exec_claude_code_with_explain(
+                &file,
+                claude_bash_failure(command, temp.path()).to_string(),
+                "1",
+            ),
+            HOOK_CHAIN_EXPLANATION,
+        );
+        assert!(
+            std::fs::read_to_string(&file).unwrap().is_empty(),
+            "command={command:?} must not be filed"
+        );
+    }
+}
+
+#[test]
+fn hook_exec_claude_code_skips_commands_that_end_inside_a_quote() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, "").unwrap();
+
+    // A scan that ends mid-quote cannot rule out an operator the quote hides,
+    // so the ambiguity resolves toward skipping.
+    for command in [
+        r#"git commit -m "unterminated"#,
+        r#"jq '.[] | {id} report.json"#,
+        // A trailing backslash inside the double-quoted span consumes the end of
+        // input, so the span never closes.
+        r#"git commit -m "trailing escape \"#,
+    ] {
+        hook_exec_explains(
+            &hook_exec_claude_code_with_explain(
+                &file,
+                claude_bash_failure(command, temp.path()).to_string(),
+                "1",
+            ),
+            HOOK_CHAIN_EXPLANATION,
+        );
+        assert!(
+            std::fs::read_to_string(&file).unwrap().is_empty(),
+            "command={command:?} must not be filed"
+        );
+    }
+}
+
+#[test]
+fn hook_exec_claude_code_files_commands_whose_operators_are_quoted() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, "").unwrap();
+
+    // jq stands in for the design's `gh api --jq` example: gh is a read-only
+    // probe, so it never reaches the filing path whatever the shape gate says.
+    for command in [
+        r#"git commit -m "a && b""#,
+        r#"jq '.[] | {id}' report.json"#,
+        r#"git commit -m "escaped \" quote; still simple""#,
+    ] {
+        hook_exec_is_silent(&hook_exec_claude_code(
+            &file,
+            claude_bash_failure(command, temp.path()).to_string(),
+        ));
+    }
+
+    let lines: Vec<Value> = std::fs::read_to_string(&file)
+        .unwrap()
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(lines.len(), 3);
+    assert_eq!(lines[0]["text"], r#"git commit -m "a && b""#);
+    assert_eq!(lines[1]["text"], r#"jq '.[] | {id}' report.json"#);
+    assert_eq!(
+        lines[2]["text"],
+        r#"git commit -m "escaped \" quote; still simple""#
+    );
+}
+
+#[test]
+fn hook_exec_claude_code_files_redirected_simple_commands() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, "").unwrap();
+    let command = "cargo test 2>&1";
+
+    hook_exec_is_silent(&hook_exec_claude_code(
+        &file,
+        claude_bash_failure(command, temp.path()).to_string(),
+    ));
+    let lines: Vec<Value> = std::fs::read_to_string(&file)
+        .unwrap()
+        .lines()
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0]["text"], command);
+
+    // The same command piped is a chain.
+    hook_exec_explains(
+        &hook_exec_claude_code_with_explain(
+            &file,
+            claude_bash_failure("cargo test 2>&1 | tail -3", temp.path()).to_string(),
+            "1",
+        ),
+        HOOK_CHAIN_EXPLANATION,
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 1);
+}
+
+#[test]
+fn hook_exec_claude_code_reports_the_byte_gate_before_the_shape_gate() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, "").unwrap();
+
+    let over_limit = format!("cargo build && {}", "x".repeat(500));
+    hook_exec_explains(
+        &hook_exec_claude_code_with_explain(
+            &file,
+            claude_bash_failure(&over_limit, temp.path()).to_string(),
+            "1",
+        ),
+        &format!(
+            "hook exec: tool_input.command is {} bytes; exceeds the 500-byte limit; skipped",
+            over_limit.len()
+        ),
+    );
+
+    // The shape gate does not shadow the program gate for a simple probe.
+    hook_exec_explains(
+        &hook_exec_claude_code_with_explain(
+            &file,
+            claude_bash_failure("grep -r x src/", temp.path()).to_string(),
+            "1",
+        ),
+        "hook exec: grep is a read-only probe; non-zero exit is an expected answer; skipped",
+    );
+    assert!(std::fs::read_to_string(&file).unwrap().is_empty());
+}
+
 #[test]
 fn hook_exec_claude_code_stores_repo_relative_payload_cwd_without_repo() {
     let temp = TempDir::new().unwrap();
@@ -8687,6 +8863,7 @@ fn schema_documents_hook_exec_payload_contract_and_explain_env() {
                 "is_interrupt": "must not be true",
                 "tool_input.command": "must be non-empty",
                 "tool_input.command_bytes": "must be at most 500; longer commands are noise and are skipped",
+                "tool_input.command_shape": "best-effort scan with single- and double-quote state must find no unquoted &&, ||, ;, |, newline, $(, or backtick and must not end inside a quote; a chain's exit does not name the friction, so chained, substituting, and unterminated-quote commands are skipped",
                 "tool_input.command_program": "best-effort first program after leading VAR=value assignments (basename only) must not be a read-only probe; non-zero exit is an expected answer and grep, rg, ls, find, tail, head, cat, stat, test, [, which, curl, and gh are skipped",
                 "resolved_log_file": "must already exist"
             }
