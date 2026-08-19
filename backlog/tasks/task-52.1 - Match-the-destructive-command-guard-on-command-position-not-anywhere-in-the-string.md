@@ -3,9 +3,10 @@ id: TASK-52.1
 title: >-
   Match the destructive-command guard on command position, not anywhere in the
   string
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-19 17:38'
+updated_date: '2026-08-19 20:52'
 labels:
   - tooling
   - hooks

@@ -1,9 +1,10 @@
 ---
 id: TASK-52.2
 title: Change the destructive-command guard from deny to ask
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-19 17:39'
+updated_date: '2026-08-19 20:52'
 labels:
   - tooling
   - hooks
