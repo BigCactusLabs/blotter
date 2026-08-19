@@ -39,6 +39,17 @@ pub struct FoldResult {
     pub warnings: Vec<String>,
     records: BTreeMap<String, LogEvent>,
     winning_amends: HashMap<String, LogEvent>,
+    lines: Vec<FoldedLine>,
+}
+
+/// One physical line that carried a parsed record, in file order. Archive needs
+/// the line numbers and per-ID groupings the fold already walks past; carrying
+/// them out of the fold is what keeps `plan_archive` to a single parse.
+#[derive(Debug, Clone)]
+pub struct FoldedLine {
+    pub line: usize,
+    pub id: String,
+    pub ts: jiff::Timestamp,
 }
 
 pub struct LoadedFold {
@@ -49,6 +60,12 @@ pub struct LoadedFold {
 impl FoldResult {
     pub fn record(&self, id: &str) -> Option<&LogEvent> {
         self.records.get(id)
+    }
+
+    /// Physical lines carrying a parsed record, in file order. Empty unless the
+    /// fold was asked for them by `fold_bytes_with_lines`.
+    pub fn lines(&self) -> &[FoldedLine] {
+        &self.lines
     }
 
     /// Materialize a resolve against the fold that made the append decision,
@@ -847,6 +864,20 @@ fn fold_records(bytes: &[u8]) -> BTreeMap<String, LogEvent> {
 }
 
 pub fn fold_bytes(bytes: &[u8]) -> FoldResult {
+    fold_bytes_inner(bytes, false)
+}
+
+/// The same fold, additionally carrying the `(line, id, ts)` tuple of every
+/// physical line that parsed into a record. Only `archive` needs them, and the
+/// tuples cost one owned ID per physical line, so every other caller keeps the
+/// cheaper `fold_bytes`. Collecting them changes no fold verdict: the tuples are
+/// written from the scanner's own output and nothing reads them back.
+pub fn fold_bytes_with_lines(bytes: &[u8]) -> FoldResult {
+    fold_bytes_inner(bytes, true)
+}
+
+fn fold_bytes_inner(bytes: &[u8], collect_lines: bool) -> FoldResult {
+    let mut lines = Vec::new();
     let mut records = BTreeMap::<String, LogEvent>::new();
     let mut resolves = HashMap::<String, LogEvent>::new();
     // Amends carry their parsed timestamp so the winner is chosen by clock, not
@@ -854,63 +885,78 @@ pub fn fold_bytes(bytes: &[u8]) -> FoldResult {
     let mut amends = HashMap::<String, (jiff::Timestamp, LogEvent)>::new();
     let mut counts = WarningCounts::default();
     for scanned in scan(bytes) {
+        let line = scanned.line;
         match scanned.event {
             Err(ScanIssue::Malformed(_)) => counts.malformed += 1,
             Err(ScanIssue::Unknown(_)) => counts.unknown += 1,
             Err(ScanIssue::Torn) => counts.torn += 1,
-            Ok(mut event) => match &mut event {
-                LogEvent::Cut { tags, .. } => {
-                    // Fold normalizes legacy tag arrays for list output. Doctor
-                    // receives the scanner's unmodified parsed event instead.
-                    tags.sort();
-                    tags.dedup();
-                    let id = event.id().expect("parsed cuts have IDs").to_owned();
-                    if let std::collections::btree_map::Entry::Vacant(entry) = records.entry(id) {
-                        entry.insert(event);
-                    } else {
-                        counts.duplicate_cuts += 1;
-                    }
+            Ok(mut event) => {
+                if collect_lines
+                    && let Some(id) = event.id()
+                    && let Some(ts) = event_timestamp(&event)
+                {
+                    lines.push(FoldedLine {
+                        line,
+                        id: id.to_owned(),
+                        ts,
+                    });
                 }
-                LogEvent::Dogear { tags, .. } => {
-                    tags.sort();
-                    tags.dedup();
-                    let id = event.id().expect("parsed dogears have IDs").to_owned();
-                    if let std::collections::btree_map::Entry::Vacant(entry) = records.entry(id) {
-                        entry.insert(event);
-                    } else {
-                        counts.duplicate_dogears += 1;
+                match &mut event {
+                    LogEvent::Cut { tags, .. } => {
+                        // Fold normalizes legacy tag arrays for list output. Doctor
+                        // receives the scanner's unmodified parsed event instead.
+                        tags.sort();
+                        tags.dedup();
+                        let id = event.id().expect("parsed cuts have IDs").to_owned();
+                        if let std::collections::btree_map::Entry::Vacant(entry) = records.entry(id)
+                        {
+                            entry.insert(event);
+                        } else {
+                            counts.duplicate_cuts += 1;
+                        }
                     }
-                }
-                LogEvent::Resolve { id, ts, amend, .. } => {
-                    let id = id.clone();
-                    let amend = *amend;
-                    if amend {
-                        let timestamp = ts
-                            .parse::<jiff::Timestamp>()
-                            .expect("parsed resolves have valid RFC3339 timestamps");
-                        match amends.entry(id) {
-                            std::collections::hash_map::Entry::Occupied(mut entry) => {
-                                // `>=`, not `>`: equal timestamps are reachable
-                                // under a frozen BLOTTER_NOW, and there the last
-                                // amend in file order keeps winning.
-                                if timestamp >= entry.get().0 {
+                    LogEvent::Dogear { tags, .. } => {
+                        tags.sort();
+                        tags.dedup();
+                        let id = event.id().expect("parsed dogears have IDs").to_owned();
+                        if let std::collections::btree_map::Entry::Vacant(entry) = records.entry(id)
+                        {
+                            entry.insert(event);
+                        } else {
+                            counts.duplicate_dogears += 1;
+                        }
+                    }
+                    LogEvent::Resolve { id, ts, amend, .. } => {
+                        let id = id.clone();
+                        let amend = *amend;
+                        if amend {
+                            let timestamp = ts
+                                .parse::<jiff::Timestamp>()
+                                .expect("parsed resolves have valid RFC3339 timestamps");
+                            match amends.entry(id) {
+                                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                                    // `>=`, not `>`: equal timestamps are reachable
+                                    // under a frozen BLOTTER_NOW, and there the last
+                                    // amend in file order keeps winning.
+                                    if timestamp >= entry.get().0 {
+                                        entry.insert((timestamp, event));
+                                    }
+                                }
+                                std::collections::hash_map::Entry::Vacant(entry) => {
                                     entry.insert((timestamp, event));
                                 }
                             }
-                            std::collections::hash_map::Entry::Vacant(entry) => {
-                                entry.insert((timestamp, event));
-                            }
+                        } else if let std::collections::hash_map::Entry::Vacant(entry) =
+                            resolves.entry(id)
+                        {
+                            entry.insert(event);
+                        } else {
+                            counts.duplicate_resolves += 1;
                         }
-                    } else if let std::collections::hash_map::Entry::Vacant(entry) =
-                        resolves.entry(id)
-                    {
-                        entry.insert(event);
-                    } else {
-                        counts.duplicate_resolves += 1;
                     }
+                    LogEvent::Unknown => counts.unknown += 1,
                 }
-                LogEvent::Unknown => counts.unknown += 1,
-            },
+            }
         }
     }
 
@@ -992,6 +1038,18 @@ pub fn fold_bytes(bytes: &[u8]) -> FoldResult {
         warnings,
         records,
         winning_amends,
+        lines,
+    }
+}
+
+/// The parsed timestamp of a record-carrying event. `parse_event` already
+/// rejected an unparseable one, so `None` only covers `Unknown`.
+fn event_timestamp(event: &LogEvent) -> Option<jiff::Timestamp> {
+    match event {
+        LogEvent::Cut { ts, .. } | LogEvent::Dogear { ts, .. } | LogEvent::Resolve { ts, .. } => {
+            ts.parse().ok()
+        }
+        LogEvent::Unknown => None,
     }
 }
 
