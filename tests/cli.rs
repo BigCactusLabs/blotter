@@ -2953,6 +2953,14 @@ fn stdout_write_failures_are_structured_for_all_output_paths() {
         .unwrap();
     assert_stdout_write_error(&digest_markdown);
 
+    let export = command_with_read_only_stdout(&read_only_stdout)
+        .arg("--file")
+        .arg(&file)
+        .args(["export", "--format", "otlp-json"])
+        .output()
+        .unwrap();
+    assert_stdout_write_error(&export);
+
     let schema = command_with_read_only_stdout(&read_only_stdout)
         .arg("schema")
         .output()
@@ -8595,7 +8603,15 @@ fn hook_exec_claude_code_dedupes_open_commands_but_refiles_resolved_cuts() {
         success(&run_file(&file, &["resolve", id, "--agent", "tester"]));
     assert!(resolved.data.changed);
 
-    hook_exec_is_silent(&hook_exec_claude_code(&file, payload));
+    let refiled = command()
+        .env("BLOTTER_NOW", "2026-07-10T18:30:00.123456Z")
+        .arg("--file")
+        .arg(&file)
+        .args(["hook", "exec", "claude-code"])
+        .write_stdin(payload)
+        .output()
+        .unwrap();
+    hook_exec_is_silent(&refiled);
     assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 3);
 }
 
@@ -10461,4 +10477,139 @@ fn archive_sole_newline_log_has_zero_physical_lines() {
     assert_eq!(archive.data["archived"], 0);
     assert_eq!(archive.data["kept"], 0);
     assert_eq!(std::fs::read(&file).unwrap(), b"\n");
+}
+
+#[test]
+fn sweep_missing_registry_is_not_found_66() {
+    let temp = TempDir::new().unwrap();
+    let missing = temp.path().join("repos.txt");
+
+    let output = command()
+        .args(["sweep", "--registry"])
+        .arg(&missing)
+        .output()
+        .unwrap();
+    let envelope = error(&output, 66, "not_found");
+    assert!(envelope.error.message.contains("registry file not found"));
+    assert!(envelope.error.suggested_fix.contains("--registry"));
+}
+
+#[cfg(unix)]
+#[test]
+fn sweep_unreadable_registry_is_permission_denied_77() {
+    let temp = TempDir::new().unwrap();
+    let registry = temp.path().join("repos.txt");
+    std::fs::write(&registry, "").unwrap();
+    std::fs::set_permissions(&registry, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let output = command()
+        .args(["sweep", "--registry"])
+        .arg(&registry)
+        .output()
+        .unwrap();
+    std::fs::set_permissions(&registry, std::fs::Permissions::from_mode(0o600)).unwrap();
+    error(&output, 77, "permission_denied");
+}
+
+#[test]
+fn invalid_since_is_reported_before_the_log_file_for_every_command() {
+    let temp = TempDir::new().unwrap();
+    let missing = temp.path().join("missing.jsonl");
+
+    for args in [
+        &["list", "--since", "banana"][..],
+        &["export", "--format", "otlp-json", "--since", "banana"][..],
+        &["digest", "--since", "banana"][..],
+    ] {
+        let envelope = error(&run_file(&missing, args), 2, "invalid_argument");
+        assert!(
+            envelope.error.message.contains("--since"),
+            "message={}",
+            envelope.error.message
+        );
+    }
+
+    // sweep rejects --file, so its equivalent missing input is --registry.
+    let sweep = command()
+        .args(["sweep", "--since", "banana", "--registry"])
+        .arg(temp.path().join("repos.txt"))
+        .output()
+        .unwrap();
+    let envelope = error(&sweep, 2, "invalid_argument");
+    assert!(envelope.error.message.contains("--since"));
+}
+
+#[cfg(unix)]
+#[test]
+fn non_utf8_blotter_agent_is_a_config_error_and_never_files_a_detected_agent() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let agent = std::ffi::OsStr::from_bytes(b"agent-\xff");
+
+    let output = command()
+        .env("BLOTTER_AGENT", agent)
+        .arg("--file")
+        .arg(&file)
+        .args(["add", "a cut filed under an unreadable agent"])
+        .output()
+        .unwrap();
+    let envelope = error(&output, 78, "config_error");
+    assert!(envelope.error.message.contains("BLOTTER_AGENT"));
+    assert!(!file.exists());
+
+    // The hook lane still fails open: it explains the gate and exits 0.
+    std::fs::write(&file, "").unwrap();
+    let hook = command()
+        .env("BLOTTER_AGENT", agent)
+        .env("BLOTTER_HOOK_EXPLAIN", "1")
+        .arg("--file")
+        .arg(&file)
+        .args(["hook", "exec", "claude-code"])
+        .write_stdin(claude_bash_failure("cargo test", temp.path()).to_string())
+        .output()
+        .unwrap();
+    assert_eq!(hook.status.code(), Some(0));
+    assert!(hook.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&hook.stderr).contains("BLOTTER_AGENT"));
+    assert!(std::fs::read_to_string(&file).unwrap().is_empty());
+}
+
+#[test]
+fn hook_exec_never_appends_a_second_line_with_an_existing_cut_id() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, "").unwrap();
+    let payload = claude_bash_failure("cargo test", temp.path()).to_string();
+
+    hook_exec_is_silent(&hook_exec_claude_code(&file, payload.clone()));
+    let first: Value = serde_json::from_str(
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    let id = first["id"].as_str().unwrap().to_owned();
+    let resolved: SuccessEnvelope<ResolveData> =
+        success(&run_file(&file, &["resolve", &id, "--agent", "tester"]));
+    assert!(resolved.data.changed);
+
+    // Same frozen clock, same command: the replay recomputes the resolved cut's
+    // ID, so the append is skipped rather than duplicating the ID.
+    let replay = hook_exec_claude_code_with_explain(&file, payload, "1");
+    hook_exec_explains(
+        &replay,
+        &format!("hook exec: computed cut ID {id} already exists in the log; skipped"),
+    );
+    let cut_lines = std::fs::read_to_string(&file)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap())
+        .filter(|line| line["id"] == id.as_str() && line["kind"] == "cut")
+        .count();
+    assert_eq!(cut_lines, 1);
+    assert_eq!(std::fs::read_to_string(&file).unwrap().lines().count(), 2);
 }

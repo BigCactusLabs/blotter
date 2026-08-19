@@ -6,6 +6,7 @@
 
 use crate::cli::{ExportArgs, ExportFormat};
 use crate::error::{AppError, AppResult};
+use crate::output;
 use crate::store;
 use crate::{ListItem, Severity, parse_since};
 use jiff::Timestamp;
@@ -34,15 +35,15 @@ pub fn run(
     now: Timestamp,
 ) -> AppResult<i32> {
     validate(&args)?;
-
-    let resolved = store::discover(file)?;
-    let store::LoadedFold { items, warnings: _ } = store::load_folded(&resolved)?;
-    let (items, _) = crate::partition_auto_captures(items, args.include_auto);
     let since = args
         .since
         .as_deref()
         .map(|value| parse_since(value, now))
         .transpose()?;
+
+    let resolved = store::discover(file)?;
+    let store::LoadedFold { items, warnings: _ } = store::load_folded(&resolved)?;
+    let (items, _) = crate::partition_auto_captures(items, args.include_auto);
 
     let data = LogsData::from_items(items, since)?;
     write_otlp_json(&data)?;
@@ -235,7 +236,8 @@ struct ArrayValue {
 }
 
 fn write_otlp_json(data: &LogsData) -> AppResult<()> {
-    let mut output = std::io::BufWriter::new(std::io::stdout().lock());
+    let mut output =
+        output::stdout_writer().map_err(|error| AppError::from_io(error, Path::new("stdout")))?;
     serde_json::to_writer(&mut output, data)
         .map_err(|error| AppError::from_io(std::io::Error::other(error), Path::new("stdout")))?;
     writeln!(output).map_err(|error| AppError::from_io(error, Path::new("stdout")))?;
