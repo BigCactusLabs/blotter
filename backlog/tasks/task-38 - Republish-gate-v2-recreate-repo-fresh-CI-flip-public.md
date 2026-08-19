@@ -4,7 +4,7 @@ title: 'Republish gate v2: recreate repo fresh, CI, flip public'
 status: To Do
 assignee: []
 created_date: '2026-08-19 02:56'
-updated_date: '2026-08-19 03:10'
+updated_date: '2026-08-19 03:43'
 labels: []
 dependencies: []
 ordinal: 46000
@@ -23,9 +23,9 @@ Successor to TASK-35: delete and recreate the GitHub repo with a single fresh in
 - [x] #3 Residue pass on HEAD decided and executed per owner direction before the tree is staged (see private notes for the itemized list)
 - [ ] #4 Fresh commit built in a NEW directory (git init, tracked tree copied without .git), deterministic author/committer dates; the old clone never gains the new remote and no --tags/--follow-tags/--mirror push is ever used; local v0.15.0 tag deleted from the staging path before any push
 - [ ] #5 All four gates + doctor --leaks green on the staged tree BEFORE the first push
-- [ ] #6 Owner gave explicit go immediately before repo deletion
-- [ ] #7 Repo deleted and recreated PRIVATE as BigCactusLabs/blotter with wiki disabled; description/topics/homepage applied; Actions workflow permissions verified read-only
-- [ ] #8 Single fresh initial commit pushed; rev-list --count HEAD is 1 on the remote; fresh v0.15.0 tag created on the new root and pushed explicitly by name
+- [x] #6 Owner gave explicit go immediately before repo deletion
+- [x] #7 Repo deleted and recreated PRIVATE as BigCactusLabs/blotter with wiki disabled; description/topics/homepage applied; Actions workflow permissions verified read-only
+- [x] #8 Single fresh initial commit pushed; rev-list --count HEAD is 1 on the remote; fresh v0.15.0 tag created on the new root and pushed explicitly by name
 - [ ] #9 Codex review app re-installed on the new repo
 - [ ] #10 TASK-37 CI workflow landed and green before any visibility change
 - [ ] #11 Owner gave explicit go immediately before the public flip
@@ -36,5 +36,5 @@ Successor to TASK-35: delete and recreate the GitHub repo with a single fresh in
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-AC1-2 done 2026-08-19: issue #1 body, PR #2 body + review threads + reviews, and settings snapshot saved to private notes (github-preservation-2026-08-19.md). PR #1 does not exist — issue #1 holds that number. AC3: owner decided leave references as-is; no tree changes. Amendments from the adversarial plan review applied same day; review detail in private notes (task-38-review-2026-08-19.md).
+Executed 2026-08-19: owner deleted the repo by hand (AC6). Recreated private, wiki off, description/topics/homepage applied, workflow perms verified read-only (AC7). Fresh root d7e011f5 pushed, remote commit count 1, fresh v0.15.0 tag pushed by name (AC8). Old clone's origin remote removed — it can no longer push anywhere; dev continues in the fresh clone. Old sha b8012f9 already 422s via API; full AC13 check runs post-flip from a clean clone.
 <!-- SECTION:NOTES:END -->
