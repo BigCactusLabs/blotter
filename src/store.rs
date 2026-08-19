@@ -168,23 +168,70 @@ pub fn record_cwd(cwd: &Path, repo: Option<&Path>, home: Option<&Path>) -> Strin
     crate::redact::rewrite_home_paths(&cwd.to_string_lossy(), home)
 }
 
+/// Absolutize a log path. `.` folds away textually, but `..` cannot: when a
+/// component is a symlink to a directory elsewhere, the OS resolves `..`
+/// against the link's target, and a lexical `pop()` would name a different file
+/// than the one every later open, lock, backup, and `meta.file` acts on. A path
+/// carrying `..` therefore resolves through the OS — the longest existing
+/// ancestor is canonicalized and only the components that do not exist yet fold
+/// lexically. The final component is never canonicalized: a final-component
+/// symlink is `resolve_symlinked_log`'s policy, not this function's. A path with
+/// no `..` keeps its spelling, because the lexical join already names what the
+/// OS opens.
 fn absolute(cwd: &Path, path: PathBuf) -> PathBuf {
     let joined = if path.is_absolute() {
         path
     } else {
         cwd.join(path)
     };
-    let mut normalized = PathBuf::new();
-    for component in joined.components() {
+    let components: Vec<Component> = joined.components().collect();
+    if !components
+        .iter()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return fold_lexically(PathBuf::new(), &components);
+    }
+    let trailing = match components.last() {
+        Some(Component::Normal(_)) => components.len() - 1,
+        _ => components.len(),
+    };
+    let mut resolved = resolve_existing_prefix(&components[..trailing]);
+    if let Some(Component::Normal(name)) = components.get(trailing) {
+        resolved.push(name);
+    }
+    resolved
+}
+
+/// Canonicalize the longest prefix of `components` that exists, then fold the
+/// remainder lexically. A path that exists resolves exactly as the OS resolves
+/// it; one that does not yet exist still resolves, with the lexical fold applied
+/// only to the components no directory backs.
+fn resolve_existing_prefix(components: &[Component]) -> PathBuf {
+    for split in (1..=components.len()).rev() {
+        // Verbatim, never folded: canonicalize must see `..` itself, or the
+        // fold would answer for the link instead of for its target.
+        let mut candidate = PathBuf::new();
+        for component in &components[..split] {
+            candidate.push(component.as_os_str());
+        }
+        if let Ok(canonical) = fs::canonicalize(&candidate) {
+            return fold_lexically(canonical, &components[split..]);
+        }
+    }
+    fold_lexically(PathBuf::new(), components)
+}
+
+fn fold_lexically(mut base: PathBuf, components: &[Component]) -> PathBuf {
+    for component in components {
         match component {
             Component::CurDir => {}
             Component::ParentDir => {
-                normalized.pop();
+                base.pop();
             }
-            other => normalized.push(other.as_os_str()),
+            other => base.push(other.as_os_str()),
         }
     }
-    normalized
+    base
 }
 
 pub fn with_shared<T>(path: &Path, action: impl FnOnce(&mut File) -> AppResult<T>) -> AppResult<T> {
@@ -293,14 +340,19 @@ fn open_locked(
     mut open: impl FnMut() -> AppResult<File>,
 ) -> AppResult<File> {
     let mut file = Some(regular_file(open()?, path)?);
+    // The last reopen that found nothing. Kept so an exhausted budget whose
+    // final failure was a vanished log answers not_found (66) instead of
+    // blaming contention that never happened; any later failure clears it.
+    let mut missing: Option<AppError> = None;
     for attempt in 0..LOCK_ATTEMPTS {
         if file.is_none() {
             match open() {
+                // A reopen that succeeds needs no clear: the lock attempt below
+                // ends this iteration in a branch that returns or clears.
                 Ok(opened) => file = Some(regular_file(opened, path)?),
                 Err(error) if error.code == "not_found" => {
-                    if attempt + 1 < LOCK_ATTEMPTS {
-                        thread::sleep(LOCK_DELAY);
-                    }
+                    missing = Some(error);
+                    delay_before_retry(attempt);
                     continue;
                 }
                 Err(error) => return Err(error),
@@ -318,19 +370,32 @@ fn open_locked(
                 }
                 let stale = file.take().expect("file is open");
                 let _ = stale.unlock();
+                // The path names another inode now. Reopening costs the same
+                // delay every other retry pays, so the attempt budget cannot
+                // burn through in microseconds and report a timeout nobody
+                // waited for.
+                missing = None;
+                delay_before_retry(attempt);
             }
             Err(error) => {
                 let error: std::io::Error = error.into();
                 if error.kind() != std::io::ErrorKind::WouldBlock {
                     return Err(AppError::from_io(error, path));
                 }
-                if attempt + 1 < LOCK_ATTEMPTS {
-                    thread::sleep(LOCK_DELAY);
-                }
+                missing = None;
+                delay_before_retry(attempt);
             }
         }
     }
-    Err(AppError::lock_timeout(path))
+    Err(missing.unwrap_or_else(|| AppError::lock_timeout(path)))
+}
+
+/// Pay the retry delay unless this was the last attempt, where the caller
+/// returns instead of retrying.
+fn delay_before_retry(attempt: usize) {
+    if attempt + 1 < LOCK_ATTEMPTS {
+        thread::sleep(LOCK_DELAY);
+    }
 }
 
 /// Reject a log path that is not a regular file, before the lock and before any
@@ -604,7 +669,7 @@ fn append_bytes_with(
         .map_err(|error| AppError::from_io(error, path))?
         .len();
     let mut bytes = Vec::new();
-    if !prior.is_empty() && !prior.ends_with(b"\n") {
+    if !is_empty_log(prior) && !prior.ends_with(b"\n") {
         bytes.push(b'\n');
     }
     bytes.extend_from_slice(record_bytes);
@@ -627,12 +692,23 @@ fn append_bytes_with(
     Ok(())
 }
 
+/// A log holding no physical line: an empty file, or the single newline that
+/// `scan` reads as a terminator rather than a line (r26). The append path and
+/// `scan` share this predicate so a log both call empty stays empty for both:
+/// the appender adds no tear-healing separator to it, and the leading empty
+/// segment the append leaves behind is never counted as a line.
+pub(crate) fn is_empty_log(bytes: &[u8]) -> bool {
+    bytes.is_empty() || bytes == b"\n"
+}
+
 /// Scan physical JSONL lines once. A final non-newline line is accepted only
 /// when its decoded JSON carries a recognized kind, so consumers cannot
 /// disagree on torn tails.
 pub(crate) fn scan(bytes: &[u8]) -> impl Iterator<Item = ScannedLine<'_>> + '_ {
-    // A sole empty segment is an empty file or a file holding only "\n", so
-    // it is not a physical line. An empty segment after a record is malformed.
+    // A leading empty segment is the terminator of an empty log, not a physical
+    // line: the log was empty or held only "\n" when the record was appended,
+    // and an append-only writer cannot remove the byte that precedes it. An
+    // empty segment after a record is still malformed.
     let terminated = bytes.ends_with(b"\n");
     let body = if terminated {
         &bytes[..bytes.len() - 1]
@@ -644,7 +720,7 @@ pub(crate) fn scan(bytes: &[u8]) -> impl Iterator<Item = ScannedLine<'_>> + '_ {
         .enumerate()
         .filter_map(move |(index, raw)| {
             let final_line = index + 1 == line_count;
-            if raw.is_empty() && final_line && index == 0 {
+            if raw.is_empty() && index == 0 {
                 return None;
             }
             let decoded = serde_json::from_slice::<Value>(raw);
@@ -1007,6 +1083,67 @@ mod tests {
         writer.join().unwrap();
 
         assert_eq!(std::fs::read(&path).unwrap(), b"replacement\nwriter\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_permanent_path_identity_mismatch_still_pays_the_retry_delay() {
+        // The locked descriptor never names the requested path, so every
+        // attempt mismatches. The budget must still span the published bound
+        // rather than burning through in microseconds.
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("cuts.jsonl");
+        let other = temp.path().join("other.jsonl");
+        std::fs::write(&path, b"").unwrap();
+        std::fs::write(&other, b"").unwrap();
+
+        let started = std::time::Instant::now();
+        let error = open_locked(&path, true, || {
+            OpenOptions::new()
+                .read(true)
+                .append(true)
+                .open(&other)
+                .map_err(|error| AppError::from_log_open(error, &other))
+        })
+        .expect_err("a permanent identity mismatch never locks the path");
+        let elapsed = started.elapsed();
+
+        assert_eq!(error.code, "lock_timeout");
+        assert_eq!(error.exit_code, 75);
+        assert!(
+            elapsed >= LOCK_DELAY * (LOCK_ATTEMPTS as u32 - 1),
+            "gave up after {elapsed:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_log_that_vanishes_during_the_retry_budget_reports_not_found() {
+        // First open lands on another inode, so the identity check rejects it;
+        // every reopen then finds nothing. Exhaustion must name the missing
+        // log, not contention that never happened.
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("cuts.jsonl");
+        let other = temp.path().join("other.jsonl");
+        std::fs::write(&other, b"").unwrap();
+
+        let mut first = true;
+        let error = open_locked(&path, true, || {
+            let target = if std::mem::take(&mut first) {
+                other.as_path()
+            } else {
+                path.as_path()
+            };
+            OpenOptions::new()
+                .read(true)
+                .append(true)
+                .open(target)
+                .map_err(|error| AppError::from_log_open(error, target))
+        })
+        .expect_err("a log that never appears cannot be locked");
+
+        assert_eq!(error.code, "not_found");
+        assert_eq!(error.exit_code, 66);
     }
 
     #[test]
