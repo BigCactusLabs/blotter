@@ -21,13 +21,13 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 ```
 
-All four must pass before any commit. Run the test suite 5x when touching store.rs or anything concurrency-adjacent — a single green run proves nothing about races.
+All four must pass before any commit. Run the test suite 5x when touching store.rs or anything concurrency-adjacent — a single green run proves nothing about races. `scripts/dev/gate-5x.sh` does exactly that and keeps every run's output, so a failure that does not reproduce still names the test that failed; counting `ok` lines and discarding the rest loses the one thing the fifth run exists to capture.
 
 For a fast iterative test loop, run `scripts/dev/test-fast.sh`. It uses `cargo nextest run --all-features` when cargo-nextest is installed and safely falls back to `cargo test --all-features`. This does not replace the required pre-commit `cargo test --all-features` gate above.
 
 The minimum supported Rust version (MSRV) is the `rust-version` in `Cargo.toml`, currently 1.89. It is a compatibility floor, not a moving latest-stable target: raise it only when a required language or dependency feature justifies narrowing installability. After dependency changes and before a release, install the declared toolchain with `rustup toolchain install 1.89.0 --profile minimal` and run `scripts/dev/check-msrv.sh`; the script tests the locked all-features tree with that exact toolchain.
 
-For focused Rust tests, `cargo test` accepts one positional filter: use one shared substring or separate invocations.
+For focused Rust tests, `cargo test` accepts one positional filter. To run several unrelated tests in one invocation, pass the extra filters to libtest after `--`: `cargo test --test cli first_filter -- second_filter` runs the union of both.
 
 ## Layout
 
