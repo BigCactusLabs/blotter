@@ -11174,3 +11174,139 @@ fn readme_hook_prose_describes_every_published_hook_gate() {
         "README ## Hooks must say {phrase:?}: one guard per published tool_input.command_* gate plus the open-cut dedupe guard"
     );
 }
+
+// --- Codex PR #2 review: the resolve envelope and the raw stdin gate must agree
+// --- with what a complete subsequent fold produces.
+
+#[test]
+fn resolve_amend_response_reports_the_timestamp_winning_amend() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let id = add_at(
+        &file,
+        "2026-01-01T00:00:00.000Z",
+        "backdated amend case",
+        &[],
+    )
+    .data
+    .record
+    .cut_id()
+    .to_string();
+    resolve_at(
+        &file,
+        "2026-02-01T00:00:00.000Z",
+        &id,
+        &["--agent", "tester", "--note", "base"],
+    );
+    resolve_at(
+        &file,
+        "2026-05-01T00:00:00.000Z",
+        &id,
+        &["--agent", "tester", "--amend", "--note", "may amend"],
+    );
+
+    // A backdated amend appends, but the fold keeps the later stored amend. The
+    // dry run predicts the same thing, so it cannot promise what apply will not do.
+    let planned = resolve_at(
+        &file,
+        "2026-03-01T00:00:00.000Z",
+        &id,
+        &[
+            "--agent",
+            "tester",
+            "--amend",
+            "--note",
+            "march amend",
+            "--dry-run",
+        ],
+    );
+    let planned = planned.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(planned.note.as_deref(), Some("may amend"));
+    assert_eq!(planned.ts, "2026-05-01T00:00:00.000Z");
+
+    let applied = resolve_at(
+        &file,
+        "2026-03-01T00:00:00.000Z",
+        &id,
+        &["--agent", "tester", "--amend", "--note", "march amend"],
+    );
+    let applied = applied.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(applied.note.as_deref(), Some("may amend"));
+    assert_eq!(applied.ts, "2026-05-01T00:00:00.000Z");
+
+    let listed = success::<ListData>(&run_file(&file, &["list", "--status", "all"]));
+    let listed = listed.data.items[0].resolution.as_ref().unwrap();
+    assert_eq!(listed.note.as_deref(), Some("may amend"));
+    assert_eq!(listed.ts, "2026-05-01T00:00:00.000Z");
+
+    // A later amend still wins, and an exact tie still falls to the appended
+    // event as the last in file order.
+    let later = resolve_at(
+        &file,
+        "2026-09-01T00:00:00.000Z",
+        &id,
+        &["--agent", "tester", "--amend", "--note", "september amend"],
+    );
+    assert_eq!(
+        later.data.records[0]
+            .resolution
+            .as_ref()
+            .unwrap()
+            .note
+            .as_deref(),
+        Some("september amend")
+    );
+    let tie = resolve_at(
+        &file,
+        "2026-09-01T00:00:00.000Z",
+        &id,
+        &["--agent", "tester", "--amend", "--note", "tie amend"],
+    );
+    assert_eq!(
+        tie.data.records[0]
+            .resolution
+            .as_ref()
+            .unwrap()
+            .note
+            .as_deref(),
+        Some("tie amend")
+    );
+    let listed = success::<ListData>(&run_file(&file, &["list", "--status", "all"]));
+    assert_eq!(
+        listed.data.items[0]
+            .resolution
+            .as_ref()
+            .unwrap()
+            .note
+            .as_deref(),
+        Some("tie amend")
+    );
+}
+
+#[test]
+fn stdin_text_at_the_read_limit_followed_by_a_newline_and_more_input_is_rejected() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    // The reader stops at the cap having consumed a trailing newline. Trimming
+    // that newline before the length test would drop the buffer back to the
+    // limit and accept, silently discarding everything past it.
+    let mut oversized = vec![b'x'; 1024 * 1024];
+    oversized.push(b'\n');
+    oversized.extend_from_slice(b"discarded suffix");
+
+    let output = command()
+        .arg("--file")
+        .arg(&file)
+        .args(["add", "-", "--agent", "tester"])
+        .write_stdin(oversized)
+        .output()
+        .unwrap();
+    let envelope = error(&output, 65, "invalid_input");
+    assert!(
+        envelope
+            .error
+            .message
+            .contains("exceeds the 1048576-byte read limit")
+    );
+    assert!(!file.exists());
+}

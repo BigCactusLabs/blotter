@@ -293,22 +293,22 @@ pub(crate) fn read_text(
         // r25 validates the *redacted* text, so `validate_text`'s 10000-byte
         // limit cannot gate the raw read: oversized input that redacts below it
         // is accepted. Gate this lane at the sibling stdin/stderr scale instead,
-        // so an endless producer cannot grow the buffer without bound. Trim
-        // before the length test (10000 content bytes plus a newline is valid)
-        // and test length before decoding (a stream cut mid-codepoint would
-        // otherwise report a misleading UTF-8 error).
+        // so an endless producer cannot grow the buffer without bound.
+        //
+        // The budget is on bytes *read*, so it is measured before the trailing
+        // newline is trimmed, exactly as `--stderr-file` measures the whole
+        // file. Trimming first would leave a hole at the boundary: a stream of
+        // exactly the limit, then a newline, then more data fills the reader to
+        // the cap, and the trim would drop that newline back to the limit and
+        // accept — silently discarding everything the reader never reached.
+        // Test length before decoding, too: a stream cut mid-codepoint at the
+        // cap would otherwise report a misleading UTF-8 error.
         let mut input = Vec::new();
         std::io::stdin()
             .lock()
             .take(STDIN_INPUT_LIMIT + 1)
             .read_to_end(&mut input)
             .map_err(|error| AppError::from_io(error, std::path::Path::new("stdin")))?;
-        while input
-            .last()
-            .is_some_and(|byte| matches!(byte, b'\n' | b'\r'))
-        {
-            input.pop();
-        }
         if input.len() > STDIN_INPUT_LIMIT as usize {
             return Err(AppError::invalid_input(
                 format!(

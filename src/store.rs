@@ -38,7 +38,7 @@ pub struct FoldResult {
     pub items: Vec<ListItem>,
     pub warnings: Vec<String>,
     records: BTreeMap<String, LogEvent>,
-    orphan_amends: HashMap<String, LogEvent>,
+    winning_amends: HashMap<String, LogEvent>,
 }
 
 pub struct LoadedFold {
@@ -51,18 +51,22 @@ impl FoldResult {
         self.records.get(id)
     }
 
-    /// Materialize a just-appended resolve from the fold that made the append
-    /// decision. A new base resolve activates the latest earlier orphan amend,
-    /// exactly as a complete subsequent fold would; an appended amend itself
-    /// is necessarily the latest materialized amend.
+    /// Materialize a resolve against the fold that made the append decision,
+    /// reporting what a complete subsequent fold would show. A base resolve
+    /// activates an earlier orphan amend. An appended amend does *not* simply
+    /// win: the fold picks the amend with the latest timestamp, so a stored
+    /// amend carrying a later clock keeps the materialized fields, and only an
+    /// exact tie falls to the appended event as the last in file order.
+    /// Reached with a backdated `BLOTTER_NOW`, where the envelope would
+    /// otherwise report a note that no read command agrees with.
     pub(crate) fn materialized_appended_resolution(&self, event: &LogEvent) -> Resolution {
         let LogEvent::Resolve { id, amend, .. } = event else {
             unreachable!("only resolve events materialize resolutions")
         };
-        let effective = if *amend {
-            event
-        } else {
-            self.orphan_amends.get(id).unwrap_or(event)
+        let effective = match self.winning_amends.get(id) {
+            Some(stored) if !*amend => stored,
+            Some(stored) if later_resolve(stored, event) => stored,
+            _ => event,
         };
         resolution_from_event(effective)
     }
@@ -698,6 +702,21 @@ fn parse_event(value: Value, known: Option<&'static str>) -> Result<LogEvent, Sc
     }
 }
 
+/// Is `stored` strictly later than `candidate`? Only strictly: the fold breaks
+/// an exact tie toward the last event in file order, and `candidate` is the one
+/// being appended. An unparseable timestamp never wins, so this cannot panic on
+/// a hand-edited log the way the fold's validated parse would.
+fn later_resolve(stored: &LogEvent, candidate: &LogEvent) -> bool {
+    let timestamp = |event: &LogEvent| match event {
+        LogEvent::Resolve { ts, .. } => ts.parse::<jiff::Timestamp>().ok(),
+        _ => None,
+    };
+    match (timestamp(stored), timestamp(candidate)) {
+        (Some(stored), Some(candidate)) => stored > candidate,
+        _ => false,
+    }
+}
+
 fn resolution_from_event(event: &LogEvent) -> Resolution {
     let LogEvent::Resolve {
         ts,
@@ -823,19 +842,20 @@ pub fn fold_bytes(bytes: &[u8]) -> FoldResult {
     // latest timestamp, with the last in file order breaking an exact tie; file
     // position never decides, because a `merge=union` log concatenates branches
     // in branch order. A latest amend only materializes when the full scan found
-    // a base resolve, so merge-reordered base resolves work. `orphan_amends`
-    // inherits the same winner, keeping `materialized_appended_resolution` in
-    // step with a full re-fold.
-    let mut orphan_amends = HashMap::new();
+    // a base resolve, so merge-reordered base resolves work. Every winner is
+    // also kept in `winning_amends`, whether or not a base resolve claimed it,
+    // so `materialized_appended_resolution` can apply the same rule to an amend
+    // that has not been folded yet.
+    let mut winning_amends = HashMap::new();
     for (id, (_, amend)) in amends {
+        winning_amends.insert(id.clone(), amend.clone());
         match resolves.entry(id) {
             std::collections::hash_map::Entry::Occupied(mut entry) => {
                 entry.insert(amend);
             }
-            std::collections::hash_map::Entry::Vacant(entry) => {
-                counts.orphans += 1;
-                orphan_amends.insert(entry.into_key(), amend);
-            }
+            // An amend with no base resolve stays out of `resolves`, so the
+            // record remains open, exactly as before.
+            std::collections::hash_map::Entry::Vacant(_) => counts.orphans += 1,
         }
     }
 
@@ -895,7 +915,7 @@ pub fn fold_bytes(bytes: &[u8]) -> FoldResult {
         items,
         warnings,
         records,
-        orphan_amends,
+        winning_amends,
     }
 }
 
