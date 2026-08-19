@@ -1,10 +1,10 @@
 ---
 id: TASK-38
 title: 'Republish gate v2: recreate repo fresh, CI, flip public'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-19 02:56'
-updated_date: '2026-08-19 03:45'
+updated_date: '2026-08-19 03:51'
 labels: []
 dependencies: []
 ordinal: 46000
@@ -21,8 +21,8 @@ Successor to TASK-35: delete and recreate the GitHub repo with a single fresh in
 - [x] #1 Issue #1, PR #1 and PR #2 bodies AND the PR #2 review comment threads saved verbatim to blotter-private-notes/ before deletion
 - [x] #2 Description and topics captured from the API before deletion; ruleset spec taken from its written definition (rulesets API is 403 while private on free plan)
 - [x] #3 Residue pass on HEAD decided and executed per owner direction before the tree is staged (see private notes for the itemized list)
-- [ ] #4 Fresh commit built in a NEW directory (git init, tracked tree copied without .git), deterministic author/committer dates; the old clone never gains the new remote and no --tags/--follow-tags/--mirror push is ever used; local v0.15.0 tag deleted from the staging path before any push
-- [ ] #5 All four gates + doctor --leaks green on the staged tree BEFORE the first push
+- [x] #4 Fresh commit built in a NEW directory (git init, tracked tree copied without .git), deterministic author/committer dates; the old clone never gains the new remote and no --tags/--follow-tags/--mirror push is ever used; local v0.15.0 tag deleted from the staging path before any push
+- [x] #5 All four gates + doctor --leaks green on the staged tree BEFORE the first push
 - [x] #6 Owner gave explicit go immediately before repo deletion
 - [x] #7 Repo deleted and recreated PRIVATE as BigCactusLabs/blotter with wiki disabled; description/topics/homepage applied; Actions workflow permissions verified read-only
 - [x] #8 Single fresh initial commit pushed; rev-list --count HEAD is 1 on the remote; fresh v0.15.0 tag created on the new root and pushed explicitly by name
@@ -36,5 +36,5 @@ Successor to TASK-35: delete and recreate the GitHub repo with a single fresh in
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Executed 2026-08-19: owner deleted the repo by hand (AC6). Recreated private, wiki off, description/topics/homepage applied, workflow perms verified read-only (AC7). Fresh root d7e011f5 pushed, remote commit count 1, fresh v0.15.0 tag pushed by name (AC8). Old clone's origin remote removed — it can no longer push anywhere; dev continues in the fresh clone. Old sha b8012f9 already 422s via API; full AC13 check runs post-flip from a clean clone.
+AC4-5 re-checked in the fresh clone 2026-08-19: the original tick landed in the old clone's working tree after the staging cut and never reached the published tree. Staging facts: root d7e011f5, tree verified byte-identical to old HEAD via ls-tree diff, zero tags, gates + doctor --leaks green pre-push.
 <!-- SECTION:NOTES:END -->
