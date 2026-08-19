@@ -4,6 +4,7 @@ title: 'record_cwd applies only the exact-HOME rule, so cwd leaks the home direc
 status: In Progress
 assignee: []
 created_date: '2026-08-19 14:44'
+updated_date: '2026-08-19 15:12'
 labels:
   - bug
   - redaction
@@ -28,3 +29,9 @@ record_cwd (src/store.rs:153) does an exact HOME strip_prefix and, on failure, s
 - [ ] #5 schema's published cwd description and the test pinning it are updated; a design-doc amendment records the change
 - [ ] #6 All four gates pass; store.rs change, so the suite runs five times
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fixed in the 2026-08-19 batch PR: rewrite_home_paths and its helpers moved verbatim from src/commands/add.rs to a new src/redact.rs, and record_cwd runs the cwd through it after the repo-relative branch. Design doc r30 records the rule and the accepted matched-prefix spelling. The published schema string for cwd changed for both cut and dogear records, with its pinned assertion updated. Confirmed rather than assumed: the existing adjacent-home test (<temp>/Users/alicex) still passes — the exact-home branch fails path_prefix_boundary on the trailing x and the generic rule fails the preceding-character boundary, so that path stays absolute. Both new cwd tests also assert doctor --leaks reports healthy.
+<!-- SECTION:NOTES:END -->

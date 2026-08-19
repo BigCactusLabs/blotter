@@ -4,7 +4,7 @@ title: Gate README hook-guard prose against the published schema
 status: In Progress
 assignee: []
 created_date: '2026-08-19 13:54'
-updated_date: '2026-08-19 14:44'
+updated_date: '2026-08-19 15:12'
 labels:
   - docs
   - tooling
@@ -27,3 +27,9 @@ The README paragraph describing hook exec claude-code's noise guards drifts sile
 - [ ] #4 Deliberately undocumented gates, if any are ever wanted, have a single explicit allowlist in the test rather than silent omission
 - [ ] #5 All four gates pass; no src/ behaviour, envelope, or contract change
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Closed by the 2026-08-19 batch PR. tests/cli.rs::readme_hook_prose_describes_every_published_hook_gate reads README.md from CARGO_MANIFEST_DIR, extracts the ## Hooks section, reads data.commands.hook.exec.payload.gates from blotter schema, and asserts a distinctive prose phrase for each of the eight published gate keys. A published gate with no table entry fails and names the key; a marker whose phrase has left the README fails and names both. One explicit allowlist constant covers deliberately undocumented gates and is empty today. The count check derives the expected number from the published tool_input.command_* gates plus one for the open-cut dedupe guard, which is not a payload gate, and asserts the number word in 'Four noise guards apply'. Both failure modes were verified by patch-and-revert against the merged tree: rewording 'not a simple command' fails naming tool_input.command_shape, and changing 'Four' to 'Three' fails naming the expected phrase — the exact slip that shipped in PR #1.
+<!-- SECTION:NOTES:END -->

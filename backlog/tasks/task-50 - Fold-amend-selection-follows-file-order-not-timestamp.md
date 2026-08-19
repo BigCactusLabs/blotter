@@ -4,6 +4,7 @@ title: 'Fold amend selection follows file order, not timestamp'
 status: In Progress
 assignee: []
 created_date: '2026-08-19 14:44'
+updated_date: '2026-08-19 15:12'
 labels:
   - bug
   - store
@@ -26,3 +27,9 @@ fold_bytes collects amend resolves with a plain amends.insert(id, event) (src/st
 - [ ] #4 Tests cover decreasing-timestamp amends, equal-timestamp tie direction, and verify's exit code being invariant to swapping two amend lines
 - [ ] #5 All four gates pass; store.rs change, so the suite runs five times
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Fixed in the 2026-08-19 batch PR: fold_bytes keeps amends in a HashMap<String, (jiff::Timestamp, LogEvent)> and replaces the incumbent on >=, so the latest-timestamp amend wins and two amends sharing a timestamp still resolve last-in-file (preserving frozen-clock behaviour). Deduping inside the amends map means orphan_amends can only ever see one amend per ID, so materialized_appended_resolution agrees with a full re-fold without a second comparison. Base resolve selection is untouched. Guard value verified by forcing the old behaviour: both the list test and the verify test fail.
+<!-- SECTION:NOTES:END -->
