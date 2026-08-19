@@ -168,23 +168,70 @@ pub fn record_cwd(cwd: &Path, repo: Option<&Path>, home: Option<&Path>) -> Strin
     crate::redact::rewrite_home_paths(&cwd.to_string_lossy(), home)
 }
 
+/// Absolutize a log path. `.` folds away textually, but `..` cannot: when a
+/// component is a symlink to a directory elsewhere, the OS resolves `..`
+/// against the link's target, and a lexical `pop()` would name a different file
+/// than the one every later open, lock, backup, and `meta.file` acts on. A path
+/// carrying `..` therefore resolves through the OS — the longest existing
+/// ancestor is canonicalized and only the components that do not exist yet fold
+/// lexically. The final component is never canonicalized: a final-component
+/// symlink is `resolve_symlinked_log`'s policy, not this function's. A path with
+/// no `..` keeps its spelling, because the lexical join already names what the
+/// OS opens.
 fn absolute(cwd: &Path, path: PathBuf) -> PathBuf {
     let joined = if path.is_absolute() {
         path
     } else {
         cwd.join(path)
     };
-    let mut normalized = PathBuf::new();
-    for component in joined.components() {
+    let components: Vec<Component> = joined.components().collect();
+    if !components
+        .iter()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return fold_lexically(PathBuf::new(), &components);
+    }
+    let trailing = match components.last() {
+        Some(Component::Normal(_)) => components.len() - 1,
+        _ => components.len(),
+    };
+    let mut resolved = resolve_existing_prefix(&components[..trailing]);
+    if let Some(Component::Normal(name)) = components.get(trailing) {
+        resolved.push(name);
+    }
+    resolved
+}
+
+/// Canonicalize the longest prefix of `components` that exists, then fold the
+/// remainder lexically. A path that exists resolves exactly as the OS resolves
+/// it; one that does not yet exist still resolves, with the lexical fold applied
+/// only to the components no directory backs.
+fn resolve_existing_prefix(components: &[Component]) -> PathBuf {
+    for split in (1..=components.len()).rev() {
+        // Verbatim, never folded: canonicalize must see `..` itself, or the
+        // fold would answer for the link instead of for its target.
+        let mut candidate = PathBuf::new();
+        for component in &components[..split] {
+            candidate.push(component.as_os_str());
+        }
+        if let Ok(canonical) = fs::canonicalize(&candidate) {
+            return fold_lexically(canonical, &components[split..]);
+        }
+    }
+    fold_lexically(PathBuf::new(), components)
+}
+
+fn fold_lexically(mut base: PathBuf, components: &[Component]) -> PathBuf {
+    for component in components {
         match component {
             Component::CurDir => {}
             Component::ParentDir => {
-                normalized.pop();
+                base.pop();
             }
-            other => normalized.push(other.as_os_str()),
+            other => base.push(other.as_os_str()),
         }
     }
-    normalized
+    base
 }
 
 pub fn with_shared<T>(path: &Path, action: impl FnOnce(&mut File) -> AppResult<T>) -> AppResult<T> {

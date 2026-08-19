@@ -397,6 +397,59 @@ fn relative_file_resolves_against_cwd() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_parent_link_resolves_dot_dot_the_way_the_os_does() {
+    let temp = TempDir::new().unwrap();
+    let inner = temp.path().join("real/inner");
+    std::fs::create_dir_all(&inner).unwrap();
+    let work = temp.path().join("work");
+    std::fs::create_dir(&work).unwrap();
+    std::os::unix::fs::symlink(&inner, work.join("link")).unwrap();
+
+    // `link/../cuts.jsonl`: the OS resolves `..` against the link's target, so
+    // the log belongs beside the link target in real/, not in work/.
+    let output = command()
+        .current_dir(&work)
+        .arg("--file")
+        .arg("link/../cuts.jsonl")
+        .args(["add", "through a symlinked parent", "--agent", "a"])
+        .output()
+        .unwrap();
+    let envelope: SuccessEnvelope<AddData> = success(&output);
+    let expected = temp
+        .path()
+        .canonicalize()
+        .unwrap()
+        .join("real")
+        .join("cuts.jsonl");
+    assert_eq!(
+        Path::new(envelope.meta.file.as_deref().unwrap()),
+        expected,
+        "meta.file = {:?}",
+        envelope.meta.file
+    );
+    assert!(expected.exists());
+    assert!(!work.join("cuts.jsonl").exists());
+
+    // A `..` under a component that does not exist yet still resolves: only the
+    // nonexistent tail folds lexically.
+    let planned = command()
+        .current_dir(&work)
+        .arg("--file")
+        .arg("missing/../planned.jsonl")
+        .args(["add", "not yet", "--agent", "a", "--dry-run"])
+        .output()
+        .unwrap();
+    let planned: SuccessEnvelope<AddData> = success(&planned);
+    assert_eq!(
+        Path::new(planned.meta.file.as_deref().unwrap()),
+        work.canonicalize().unwrap().join("planned.jsonl"),
+        "meta.file = {:?}",
+        planned.meta.file
+    );
+}
+
 #[test]
 fn a_blank_line_after_a_record_is_malformed() {
     let temp = TempDir::new().unwrap();
