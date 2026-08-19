@@ -259,6 +259,37 @@ fn archive_dry_run_reports_the_plan_without_writing() {
 }
 
 #[test]
+fn archive_skips_the_leading_empty_segment_in_the_kept_count() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let (id, cut) = archive_cut("2026-07-01T00:00:00Z", "leading newline old");
+    let resolve = archive_resolution(&id, "2026-07-02T00:00:00Z", false, false);
+    let (_, open) = archive_cut("2026-07-03T00:00:00Z", "leading newline open");
+    let original = [b"\n".to_vec(), cut, resolve, open.clone()].concat();
+    std::fs::write(&file, &original).unwrap();
+
+    let dry: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &["archive", "--before", "2026-08-01T00:00:00Z", "--dry-run"],
+    ));
+    assert_eq!(dry.data["archived"], 2);
+    assert_eq!(dry.data["kept"], 1);
+
+    let apply: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &["archive", "--before", "2026-08-01T00:00:00Z"],
+    ));
+    assert_eq!(apply.data["archived"], 2);
+    assert_eq!(apply.data["kept"], 1);
+    // The leading empty segment's byte survives the swap even though it is
+    // not a physical line under the scan contract.
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        [b"\n".to_vec(), open].concat()
+    );
+}
+
+#[test]
 fn archive_with_no_eligible_lines_leaves_no_backup_or_sidecar() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");

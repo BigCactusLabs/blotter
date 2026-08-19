@@ -225,7 +225,12 @@ fn apply_fixes(log: &mut File, path: &Path, now: Timestamp) -> AppResult<DoctorD
     let quarantine = match store::append_file(&quarantine_path, &quarantined, &permissions) {
         Ok(quarantine) => quarantine,
         Err(error) => {
-            undo_created_outputs(&[(backup.as_path(), None)]);
+            // A failed append into a pre-existing sidecar leaves partial
+            // bytes behind; truncate back alongside removing the backup.
+            undo_created_outputs(&[
+                (backup.as_path(), None),
+                (quarantine_path.as_path(), quarantine_len),
+            ]);
             return Err(error);
         }
     };

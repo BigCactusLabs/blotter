@@ -710,10 +710,10 @@ fn append_bytes_with(
 }
 
 /// A log holding no physical line: an empty file, or the single newline that
-/// `scan` reads as a terminator rather than a line (r26). The append path and
-/// `scan` share this predicate so a log both call empty stays empty for both:
-/// the appender adds no tear-healing separator to it, and the leading empty
-/// segment the append leaves behind is never counted as a line.
+/// `scan` reads as a terminator rather than a line (r26). The appender uses
+/// this so it adds no tear-healing separator to such a log; `scan` encodes
+/// the same rule structurally by skipping an empty first segment, so a log
+/// the appender calls empty stays empty for the reader.
 pub(crate) fn is_empty_log(bytes: &[u8]) -> bool {
     bytes.is_empty() || bytes == b"\n"
 }

@@ -1196,6 +1196,111 @@ fn dogear_evidence_without_a_home_path_stays_byte_identical() {
 }
 
 #[test]
+fn dogear_evidence_and_resolve_note_run_the_secret_span_pass() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let added: SuccessEnvelope<Value> = success(
+        &command()
+            .env("HOME", "/private/alice")
+            .arg("--file")
+            .arg(&file)
+            .args([
+                "dogear",
+                "an idea",
+                "--agent",
+                "tester",
+                "--evidence",
+                "retry with api_key=abcdef0123456789 next time",
+            ])
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(
+        added.data["record"]["evidence"],
+        "retry with api_key=<redacted> next time"
+    );
+
+    let cut: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", "/private/alice")
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "a cut", "--agent", "tester"])
+            .output()
+            .unwrap(),
+    );
+    let id = cut.data.record.cut_id().to_string();
+    let resolved: SuccessEnvelope<Value> = success(
+        &command()
+            .env("HOME", "/private/alice")
+            .arg("--file")
+            .arg(&file)
+            .args([
+                "resolve",
+                &id,
+                "--agent",
+                "tester",
+                "--note",
+                "rotated DB_PASSWORD=hunter22hunter22 afterwards",
+            ])
+            .output()
+            .unwrap(),
+    );
+    // The env-assignment shape redacts as one span, key included.
+    assert_eq!(
+        resolved.data["records"][0]["resolution"]["note"],
+        "rotated <redacted> afterwards"
+    );
+}
+
+#[test]
+fn resolve_dry_run_note_reports_the_same_bytes_an_apply_stores() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let home = "/private/alice";
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", home)
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "a cut", "--agent", "tester"])
+            .output()
+            .unwrap(),
+    );
+    let id = added.data.record.cut_id().to_string();
+    let before = std::fs::read(&file).unwrap();
+
+    let note = format!("fixed in {home}/repo and api_key=abcdef0123456789");
+    let dry: SuccessEnvelope<Value> = success(
+        &command()
+            .env("HOME", home)
+            .arg("--file")
+            .arg(&file)
+            .args(["resolve", &id, "--agent", "tester", "--dry-run", "--note"])
+            .arg(&note)
+            .output()
+            .unwrap(),
+    );
+    let dry_note = dry.data["records"][0]["resolution"]["note"].clone();
+    assert_eq!(dry_note, "fixed in ~/repo and api_key=<redacted>");
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+
+    success::<Value>(
+        &command()
+            .env("HOME", home)
+            .arg("--file")
+            .arg(&file)
+            .args(["resolve", &id, "--agent", "tester", "--note"])
+            .arg(&note)
+            .output()
+            .unwrap(),
+    );
+    let stored = std::fs::read_to_string(&file).unwrap();
+    let last: Value = serde_json::from_str(stored.lines().last().unwrap()).unwrap();
+    assert_eq!(last["note"], dry_note);
+}
+
+#[test]
 fn resolve_note_is_redacted_in_the_base_event_and_in_an_amend() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");

@@ -202,7 +202,11 @@ fn plan_archive(bytes: &[u8], cutoff: Timestamp) -> ArchivePlan {
             archived += 1;
         } else {
             kept_bytes.extend_from_slice(raw);
-            kept += 1;
+            // A leading empty segment has zero physical lines under the scan
+            // contract (r33/TASK-42): its byte survives, its count does not.
+            if !(index == 0 && raw == b"\n") {
+                kept += 1;
+            }
         }
     }
 
