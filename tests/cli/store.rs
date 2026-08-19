@@ -435,6 +435,33 @@ fn a_file_holding_only_a_newline_folds_with_no_line_warnings() {
 }
 
 #[test]
+fn adding_to_a_file_holding_only_a_newline_keeps_the_log_healthy() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, "\n").unwrap();
+    let added = add(&file, "after the lone newline");
+    assert!(added.data.changed);
+
+    let output = run_file(&file, &["doctor"]);
+    assert_eq!(output.status.code(), Some(0));
+    let doctor: SuccessEnvelope<DoctorData> = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(doctor.data.healthy, "findings: {:?}", doctor.data.findings);
+    assert_eq!(doctor.data.checked_lines, 1);
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
+    assert_eq!(listed.data.items.len(), 1);
+    assert!(
+        !listed
+            .meta
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("malformed")),
+        "warnings: {:?}",
+        listed.meta.warnings
+    );
+}
+
+#[test]
 fn default_log_path_uses_repo_default_name() {
     let temp = TempDir::new().unwrap();
     assert_eq!(

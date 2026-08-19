@@ -604,7 +604,7 @@ fn append_bytes_with(
         .map_err(|error| AppError::from_io(error, path))?
         .len();
     let mut bytes = Vec::new();
-    if !prior.is_empty() && !prior.ends_with(b"\n") {
+    if !is_empty_log(prior) && !prior.ends_with(b"\n") {
         bytes.push(b'\n');
     }
     bytes.extend_from_slice(record_bytes);
@@ -627,12 +627,23 @@ fn append_bytes_with(
     Ok(())
 }
 
+/// A log holding no physical line: an empty file, or the single newline that
+/// `scan` reads as a terminator rather than a line (r26). The append path and
+/// `scan` share this predicate so a log both call empty stays empty for both:
+/// the appender adds no tear-healing separator to it, and the leading empty
+/// segment the append leaves behind is never counted as a line.
+pub(crate) fn is_empty_log(bytes: &[u8]) -> bool {
+    bytes.is_empty() || bytes == b"\n"
+}
+
 /// Scan physical JSONL lines once. A final non-newline line is accepted only
 /// when its decoded JSON carries a recognized kind, so consumers cannot
 /// disagree on torn tails.
 pub(crate) fn scan(bytes: &[u8]) -> impl Iterator<Item = ScannedLine<'_>> + '_ {
-    // A sole empty segment is an empty file or a file holding only "\n", so
-    // it is not a physical line. An empty segment after a record is malformed.
+    // A leading empty segment is the terminator of an empty log, not a physical
+    // line: the log was empty or held only "\n" when the record was appended,
+    // and an append-only writer cannot remove the byte that precedes it. An
+    // empty segment after a record is still malformed.
     let terminated = bytes.ends_with(b"\n");
     let body = if terminated {
         &bytes[..bytes.len() - 1]
@@ -644,7 +655,7 @@ pub(crate) fn scan(bytes: &[u8]) -> impl Iterator<Item = ScannedLine<'_>> + '_ {
         .enumerate()
         .filter_map(move |(index, raw)| {
             let final_line = index + 1 == line_count;
-            if raw.is_empty() && final_line && index == 0 {
+            if raw.is_empty() && index == 0 {
                 return None;
             }
             let decoded = serde_json::from_slice::<Value>(raw);
