@@ -238,38 +238,3 @@ pub fn append_lines(file: &Path, lines: &[String]) {
     }
     std::fs::write(file, log).unwrap();
 }
-
-pub fn hook_exec_claude_code(file: &Path, stdin: impl Into<Vec<u8>>) -> std::process::Output {
-    command()
-        .arg("--file")
-        .arg(file)
-        .args(["hook", "exec", "claude-code"])
-        .write_stdin(stdin)
-        .output()
-        .unwrap()
-}
-
-pub fn hook_exec_is_silent(output: &std::process::Output) {
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "stderr={}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(output.stdout.is_empty());
-    assert!(output.stderr.is_empty());
-}
-
-pub fn claude_bash_failure(command: &str, cwd: &Path) -> Value {
-    json!({
-        "hook_event_name": "PostToolUseFailure",
-        "tool_name": "Bash",
-        "tool_input": {"command": command, "description": "run a command"},
-        "tool_use_id": "toolu_123",
-        "error": "Command exited with non-zero status code 1; API_KEY=super-secret-token",
-        "is_interrupt": false,
-        "duration_ms": 42,
-        "cwd": cwd,
-        "session_id": "session_123"
-    })
-}

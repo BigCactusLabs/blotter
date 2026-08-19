@@ -225,28 +225,43 @@ fn retrospect_does_not_promote_a_single_recurrence() {
 fn retrospect_includes_auto_captures_without_a_flag() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
-    // The hand-filed text must differ from the captured command: r25 skips a
-    // capture whose command equals an open cut's text. Linkage rides a shared
-    // tag instead, and the cut stays untagged by auto so scanned == 2 still
-    // proves the auto capture is included without a flag.
+    // r32 retired the capture lane, but stored auto records remain, so retrospect's
+    // inverted default still has to hold. The hand-filed text differs from the auto
+    // record's command text; linkage rides the shared tag, and the hand-filed cut
+    // stays untagged by auto so scanned == 2 proves the auto record is included
+    // without a flag.
     let hand_filed = add_at(
         &file,
         "2026-07-09T18:30:00Z",
         "cargo build --release fails on a clean tree",
         &["claude-code"],
     );
-    hook_exec_is_silent(&hook_exec_claude_code(
+    let auto_ts = "2026-07-09T18:31:00.000Z";
+    let auto_text = "cargo build --release";
+    let auto_id = compute_id(
+        auto_ts,
+        "hook",
+        auto_text,
+        Severity::Minor,
+        &["auto".into(), "claude-code".into()],
+    );
+    append_lines(
         &file,
-        claude_bash_failure("cargo build --release", temp.path()).to_string(),
-    ));
-    let auto: Value = serde_json::from_str(
-        std::fs::read_to_string(&file)
-            .unwrap()
-            .lines()
-            .last()
-            .unwrap(),
-    )
-    .unwrap();
+        &[json!({
+            "kind": "cut",
+            "id": auto_id,
+            "ts": auto_ts,
+            "agent": "hook",
+            "text": auto_text,
+            "tags": ["auto", "claude-code"],
+            "severity": "minor",
+            "cwd": ".",
+            "source": "hook",
+            "evidence": {"cmd": auto_text}
+        })
+        .to_string()],
+    );
+    let auto = json!({"id": auto_id});
 
     let retrospect = retrospect_success(&run_file(&file, &["retrospect"]), 1);
     assert_eq!(retrospect.meta.warnings, Vec::<String>::new());

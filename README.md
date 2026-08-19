@@ -18,7 +18,7 @@ It is an agent-only tool by design: JSON envelopes on stdout, structured errors 
 
 The friction-log idea comes from [a tool Steve Ruiz built](https://x.com/steveruizok) for his own repos: once agents had a place to complain, they immediately surfaced real workflow defects — quoting bugs, wrong test working directories, YAML footguns — that they'd been eating silently for months.
 
-This project began as a fork of [treygoff24/papercuts](https://github.com/treygoff24/papercuts) and owes its core design — the append-only journal, the agent-first envelope contract, the concurrency model — to that upstream project. The fork added dogears, structured resolve provenance, chronic-cut triage and its analysis family, and Claude Code hook integration, then took the name **blotter** to stand on its own. `cargo install papercuts` still installs the upstream crate, which has none of those additions. Other tools explore the same space with different bets — e.g. wevm's frog takes a remote-canonical approach where blotter stays local and append-only.
+This project began as a fork of [treygoff24/papercuts](https://github.com/treygoff24/papercuts) and owes its core design — the append-only journal, the agent-first envelope contract, the concurrency model — to that upstream project. The fork added dogears, structured resolve provenance, chronic-cut triage and its analysis family, and a Claude Code hook integration (since retired), then took the name **blotter** to stand on its own. `cargo install papercuts` still installs the upstream crate, which has none of those additions. Other tools explore the same space with different bets — e.g. wevm's frog takes a remote-canonical approach where blotter stays local and append-only.
 
 ## Install
 
@@ -83,13 +83,12 @@ blotter archive --before 180d     # move fully closed, fully old history to a si
 **Integrate** — harness plumbing and the machine contract:
 
 ```bash
-blotter hook install claude-code  # auto-file cuts from failed Bash tool calls
 blotter schema                    # full machine contract — agents self-orient with this
 ```
 
-Two other paths append besides the write commands: `blotter hook exec` (invoked by the harness after a failed tool call, never by hand) files the auto-tagged cuts described under [Hooks](#hooks), and `doctor --fix` appends in the course of a repair. `blotter schema` carries the authoritative `read_only`/`appends` annotation for every command.
+One other path appends besides the write commands: `doctor --fix` appends in the course of a repair. `blotter schema` carries the authoritative `read_only`/`appends` annotation for every command.
 
-Six read commands — `list`, `triage`, `verify`, `digest`, `sweep`, and `export` — show hand-filed records by default; pass `--include-auto` to include records tagged `auto`. On `list`, `--tag auto` implies `--include-auto`, so you can ask for auto records by name without the extra flag.
+Six read commands — `list`, `triage`, `verify`, `digest`, `sweep`, and `export` — show hand-filed records by default; pass `--include-auto` to include records tagged `auto`. On `list`, `--tag auto` implies `--include-auto`, so you can ask for auto records by name without the extra flag. Nothing writes an `auto` record any more — see [Hooks](#hooks) — so those flags now reach stored history only.
 
 ## Cuts
 
@@ -155,7 +154,7 @@ The JSON envelope includes each anchor's resolution timestamp and optional task,
 blotter retrospect
 ```
 
-Retrospect takes no window and no flags: chronic signal is long-horizon, so a window would hide the evidence it looks for. It also **includes auto-captured records by default**, inverting the rule the other read commands follow — the repeated-command-failure signal behind `wrapper_alias` lives in the auto lane, so excluding it would remove the point of the command.
+Retrospect takes no window and no flags: chronic signal is long-horizon, so a window would hide the evidence it looks for. It also **includes auto-captured records by default**, inverting the rule the other read commands follow — the repeated-command-failure signal behind `wrapper_alias` lives in the `auto` lane, so excluding it would remove the point of the command. That lane is [retired](#hooks) and no longer grows, so this default now reaches stored history only.
 
 Each candidate carries its record IDs, first and last timestamps, and bounded evidence: at most 10 member texts and 5 resolution notes, never a record's evidence command, stderr, or note. `occurrences` counts each distinct normalized title in the candidate once, so members that share a title do not multiply the count. Exit 1 means candidates were found, exit 0 means none.
 
@@ -204,19 +203,13 @@ Output is deterministic: records sort by timestamp, then by id, and an empty sel
 
 ## Hooks
 
-Install the Claude Code failure hook in the current repository's `.claude/settings.json`:
+**The Claude Code auto-capture lane is retired.** `blotter hook install claude-code` no longer exists, and `blotter hook exec claude-code` files nothing.
 
-```bash
-blotter hook install claude-code
-```
+It used to auto-file a minor `auto`-tagged cut for every failed Bash tool call. Ten days of dogfooding produced 27 such records and no reader: they were hidden from every read command by default, and what they stored was a failed command line with no statement of why the failure mattered. A non-zero exit is not a claim that something got in the way, and successive gates narrowed the lane without ever making a captured record worth reading. File friction by hand with `blotter add` — one or two sentences saying what you were doing and what got in the way. That is the channel.
 
-Use `--settings PATH` for an explicit settings file, or `--global` for `~/.claude/settings.json`; `--dry-run` reports the exact command and path without writing. The installer preserves all unrelated JSON content and atomically replaces the settings file using a temporary file and rename; it is idempotent. If the executable has moved since the hook was installed (a rebuild, a rename, a new install path), re-running `hook install` detects the stale path and atomically repairs it, reporting `changed:true`.
+Records already tagged `auto` stay in the log, because the log is append-only. They remain hidden from `list`, `triage`, `digest`, `verify`, `sweep`, and `export` by default; pass `--include-auto` to read them. `retrospect` still includes them without a flag.
 
-Claude Code then invokes `blotter hook exec claude-code` after a failed Bash tool call. The hook files a minor cut whose text and `evidence.cmd` are the same best-effort-redacted failed command (home-path rewrite followed by the secret pass), with tags `auto` and `claude-code` and `source:"hook"` — the one provenance value `add` cannot forge, marking the record as machine-observed rather than self-reported; its human-readable failure message becomes a best-effort-redacted evidence note. It never creates a blotter log, ignores interrupts and malformed or inapplicable payloads, and keeps stdout empty with exit 0 so a logging failure cannot disrupt the host session. Four noise guards apply. It skips an event when an **open** cut already has exactly the same redacted text — once that cut is resolved, the command can be filed again. It skips a raw command longer than 500 bytes before redaction: a sprawling debugging one-liner is log noise rather than a description of friction. It skips a command that is not a simple command — an unquoted `&&`, `||`, `;`, `|`, newline, `$(`, or backtick, or a command that ends inside a quote — because a chain's non-zero exit names neither the failing step nor the friction, so the stored text would be an unreadable one-liner; the scan tracks quote state but does not parse the shell, and an ambiguous read skips. And it skips read-only probe commands (`grep`, `rg`, `ls`, `find`, `tail`, `head`, `cat`, `stat`, `test`, `[`, `which`, `curl`, `gh`) whose non-zero exit is an expected answer rather than friction — matched best-effort on the first program word only, after leading `VAR=value` assignments and ignoring pipelines and chains.
-
-Auto-captured cuts are hidden from `list`, `triage`, `digest`, `verify`, `sweep`, and `export` by default. The hook captures that a command failed, not why it mattered, so those records are evidence rather than analysis; pass `--include-auto` when that evidence is needed.
-
-Silence makes the hook hard to debug, so set `BLOTTER_HOOK_EXPLAIN=1` to have `hook exec` write one line to stderr naming why it skipped — the failed gate, the duplicate cut, an unusable clock — or the id of the cut it filed. stdout stays empty and the exit code stays 0 either way. Any other value keeps the hook silent.
+`blotter hook exec claude-code` survives as a no-op receiver so a settings file installed against an older binary cannot break the session it was meant to observe: it reads and discards stdin, resolves no clock, opens no log, keeps stdout empty, and always exits 0. `BLOTTER_HOOK_EXPLAIN=1` makes it write one stderr line naming the retirement; any other value keeps it silent. Delete the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from your Claude Code settings — blotter no longer writes another program's configuration at all.
 
 ## Doctor
 

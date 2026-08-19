@@ -330,34 +330,12 @@ pub struct HookArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum HookCommand {
-    Install(HookInstallArgs),
     Exec(HookExecArgs),
 }
 
 #[derive(Debug, Args)]
-pub struct HookInstallArgs {
-    #[arg(value_enum, help = "Hook integration to install")]
-    pub target: HookTarget,
-    #[arg(
-        long,
-        value_name = "PATH",
-        conflicts_with = "global",
-        help = "Explicit Claude Code settings file"
-    )]
-    pub settings: Option<PathBuf>,
-    #[arg(
-        long,
-        conflicts_with = "settings",
-        help = "Use ~/.claude/settings.json"
-    )]
-    pub global: bool,
-    #[arg(long, help = "Report changes without writing settings")]
-    pub dry_run: bool,
-}
-
-#[derive(Debug, Args)]
 pub struct HookExecArgs {
-    #[arg(value_enum, help = "Hook integration payload to process")]
+    #[arg(value_enum, help = "Retired hook integration target; nothing is filed")]
     pub target: HookTarget,
 }
 
@@ -492,18 +470,6 @@ mod tests {
         assert!(Cli::try_parse_from(["blotter", "sweep", "--kind", "other"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "add", "x", "--severity", "critical"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "resolve"]).is_err());
-        assert!(
-            Cli::try_parse_from([
-                "blotter",
-                "hook",
-                "install",
-                "claude-code",
-                "--global",
-                "--settings",
-                "x",
-            ])
-            .is_err()
-        );
         assert!(Cli::try_parse_from(["blotter"]).is_err());
     }
 
@@ -521,7 +487,7 @@ mod tests {
             vec!["blotter", "sweep", "repo"],
             vec!["blotter", "resolve", "abcd"],
             vec!["blotter", "archive", "--before", "1d"],
-            vec!["blotter", "hook", "install", "claude-code"],
+            vec!["blotter", "hook", "exec", "claude-code"],
             vec!["blotter", "schema", "record"],
             vec!["blotter", "doctor"],
         ] {
@@ -532,6 +498,13 @@ mod tests {
     #[test]
     fn parser_rejects_removed_codex_hook_target() {
         assert!(Cli::try_parse_from(["blotter", "hook", "exec", "codex"]).is_err());
+    }
+
+    /// r32 retired the auto-capture lane. `hook exec` survives as a no-op for
+    /// already-installed harnesses; the installer that created them does not.
+    #[test]
+    fn parser_rejects_the_retired_hook_installer() {
+        assert!(Cli::try_parse_from(["blotter", "hook", "install", "claude-code"]).is_err());
     }
 
     #[test]
