@@ -1,10 +1,10 @@
 ---
 id: TASK-28.2
 title: Modularize the CLI contract suite without weakening coverage
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-13 03:02'
-updated_date: '2026-08-19 17:05'
+updated_date: '2026-08-19 17:24'
 labels:
   - testing
   - refactor
