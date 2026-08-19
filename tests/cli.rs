@@ -8098,7 +8098,7 @@ fn hook_exec_claude_code_files_non_probe_commands() {
     assert_eq!(lines[0]["evidence"]["cmd"], command);
 }
 
-const HOOK_CHAIN_EXPLANATION: &str = "hook exec: tool_input.command chains shell commands; a chain's exit does not name the friction; skipped";
+const HOOK_CHAIN_EXPLANATION: &str = "hook exec: tool_input.command is not a simple command (chain, substitution, or unterminated quote); its exit does not name the friction; skipped";
 
 #[test]
 fn hook_exec_claude_code_skips_chained_commands_and_explains_the_gate() {
@@ -8131,6 +8131,36 @@ fn hook_exec_claude_code_skips_piped_and_sequenced_commands() {
         "cargo build\ncargo test",
         "echo $(date)",
         "echo `date`",
+    ] {
+        hook_exec_explains(
+            &hook_exec_claude_code_with_explain(
+                &file,
+                claude_bash_failure(command, temp.path()).to_string(),
+                "1",
+            ),
+            HOOK_CHAIN_EXPLANATION,
+        );
+        assert!(
+            std::fs::read_to_string(&file).unwrap().is_empty(),
+            "command={command:?} must not be filed"
+        );
+    }
+}
+
+#[test]
+fn hook_exec_claude_code_skips_commands_that_end_inside_a_quote() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, "").unwrap();
+
+    // A scan that ends mid-quote cannot rule out an operator the quote hides,
+    // so the ambiguity resolves toward skipping.
+    for command in [
+        r#"git commit -m "unterminated"#,
+        r#"jq '.[] | {id} report.json"#,
+        // A trailing backslash inside the double-quoted span consumes the end of
+        // input, so the span never closes.
+        r#"git commit -m "trailing escape \"#,
     ] {
         hook_exec_explains(
             &hook_exec_claude_code_with_explain(
@@ -8833,7 +8863,7 @@ fn schema_documents_hook_exec_payload_contract_and_explain_env() {
                 "is_interrupt": "must not be true",
                 "tool_input.command": "must be non-empty",
                 "tool_input.command_bytes": "must be at most 500; longer commands are noise and are skipped",
-                "tool_input.command_shape": "best-effort scan with single- and double-quote state must find no unquoted &&, ||, ;, |, newline, $(, or backtick; a chain's exit does not name the friction and chained or substituting commands are skipped",
+                "tool_input.command_shape": "best-effort scan with single- and double-quote state must find no unquoted &&, ||, ;, |, newline, $(, or backtick and must not end inside a quote; a chain's exit does not name the friction, so chained, substituting, and unterminated-quote commands are skipped",
                 "tool_input.command_program": "best-effort first program after leading VAR=value assignments (basename only) must not be a read-only probe; non-zero exit is an expected answer and grep, rg, ls, find, tail, head, cat, stat, test, [, which, curl, and gh are skipped",
                 "resolved_log_file": "must already exist"
             }

@@ -117,7 +117,7 @@ impl HookExecOutcome {
                 "hook exec: tool_input.command is {bytes} bytes; exceeds the {HOOK_COMMAND_LIMIT}-byte limit; skipped"
             ),
             Self::CompoundCommand => {
-                "hook exec: tool_input.command chains shell commands; a chain's exit does not name the friction; skipped".into()
+                "hook exec: tool_input.command is not a simple command (chain, substitution, or unterminated quote); its exit does not name the friction; skipped".into()
             }
             Self::CommandRejected(reason) => {
                 format!("hook exec: tool_input.command failed cut validation ({reason:?}); skipped")
@@ -160,10 +160,10 @@ pub(crate) fn leading_program(command: &str) -> Option<&str> {
         })
 }
 
-/// Reports whether the command chains or substitutes. A chain's non-zero exit names neither the
-/// failing step nor the friction, so the hook declines it. Like `leading_program` this does not
-/// parse the shell: bare `&`, heredocs, `$'...'`, and nested substitution are deliberately not
-/// recognized, and an ambiguous scan resolves toward skipping.
+/// Reports whether the command chains, substitutes, or ends inside a quote. A chain's non-zero
+/// exit names neither the failing step nor the friction, so the hook declines it. Like
+/// `leading_program` this does not parse the shell: bare `&`, heredocs, `$'...'`, and nested
+/// substitution are deliberately not recognized, and an ambiguous scan resolves toward skipping.
 pub(crate) fn is_compound_command(command: &str) -> bool {
     let bytes = command.as_bytes();
     let mut index = 0;
@@ -192,7 +192,10 @@ pub(crate) fn is_compound_command(command: &str) -> bool {
         }
         index += 1;
     }
-    false
+    // An unterminated quote (or a trailing backslash inside one) leaves the scan
+    // unable to say where the quoted span ends, which is exactly the ambiguity
+    // r29 resolves toward skipping.
+    in_single || in_double
 }
 
 fn is_environment_assignment(word: &str) -> bool {
