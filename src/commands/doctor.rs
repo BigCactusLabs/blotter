@@ -243,9 +243,11 @@ fn apply_fixes(log: &mut File, path: &Path, now: Timestamp) -> AppResult<DoctorD
         return Err(error);
     }
     // The swap renames a new inode over the path, so the held lock no longer
-    // covers the file there; diagnose the bytes just written, never a reread.
+    // covers the file there; diagnose the bytes just written, never a reread —
+    // and derive that diagnosis from the pre-fix findings rather than parsing
+    // those bytes a second time.
     Ok(with_fix(
-        inspect(&repaired, None),
+        post_fix_data(&before, &applied),
         FixData {
             changed: true,
             applied,
@@ -274,6 +276,42 @@ fn undo_created_outputs(outputs: &[(&Path, Option<u64>)]) {
                     .and_then(|file| file.set_len(*len));
             }
         }
+    }
+}
+
+/// What `inspect` would report on the repaired bytes, derived from the pre-fix
+/// report instead of decoding the whole log again.
+///
+/// `repaired_bytes` only drops whole quarantined lines, so the surviving
+/// findings are exactly the ones no fix removed, each renumbered by the lines
+/// dropped ahead of it. Nothing that survives depended on a dropped line: only a
+/// scan error is fixable, a scan error is the only finding its line can carry,
+/// and a line that failed to parse contributes no record, no duplicate payload
+/// and no resolve target. Dropping a line also cannot tear the tail or orphan
+/// the leading empty segment, because each dropped line takes its own newline.
+fn post_fix_data(before: &DoctorData, applied: &[AppliedFix]) -> DoctorData {
+    let mut removed: Vec<usize> = applied
+        .iter()
+        .filter(|fix| fix.action == "quarantined")
+        .map(|fix| fix.line)
+        .collect();
+    removed.sort_unstable();
+    let findings: Vec<Finding> = before
+        .findings
+        .iter()
+        .filter(|finding| removed.binary_search(&finding.line).is_err())
+        .map(|finding| Finding {
+            line: finding.line - removed.partition_point(|line| *line < finding.line),
+            kind: finding.kind.clone(),
+            message: finding.message.clone(),
+            fixable: finding.fixable,
+        })
+        .collect();
+    DoctorData {
+        healthy: findings.is_empty(),
+        findings,
+        checked_lines: before.checked_lines - removed.len(),
+        fix: None,
     }
 }
 
@@ -625,6 +663,63 @@ fn add_leak_findings(
                 "leak",
                 format!("line {line} contains deny pattern {pattern:?}"),
             ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cut(id: &str) -> String {
+        format!(
+            r#"{{"kind":"cut","id":"{id}","ts":"2026-01-15T00:00:00.000Z","agent":"t","text":"x","tags":[],"severity":"minor","cwd":"."}}"#
+        )
+    }
+
+    fn resolve(id: &str) -> String {
+        format!(
+            r#"{{"kind":"resolve","id":"{id}","ts":"2026-01-15T00:00:01.000Z","agent":"t","note":null}}"#
+        )
+    }
+
+    /// The derived post-fix report must equal a full reinspection of the
+    /// repaired bytes on every shape, including the ones where line numbers
+    /// shift, the log keeps a leading empty segment, or the repair empties it.
+    #[test]
+    fn derived_post_fix_report_matches_a_full_reinspection() {
+        let cases: Vec<Vec<u8>> = vec![
+            b"".to_vec(),
+            b"\n".to_vec(),
+            b"not-json\n".to_vec(),
+            b"not-json".to_vec(),
+            format!("\n{}\nnot-json\n", cut("bl_aaaaaaaaaaaa")).into_bytes(),
+            format!("not-json\n{}\n{}\n", cut("bl_a"), cut("bl_a")).into_bytes(),
+            format!("{}\nnot-json\n{}\n", cut("bl_a"), cut("bl_a")).into_bytes(),
+            format!("{}\n{}\nnot-json", cut("bl_a"), resolve("bl_b")).into_bytes(),
+            format!(
+                "<<<<<<< HEAD\n{}\n>>>>>>> other\n{}\n",
+                cut("bl_a"),
+                resolve("bl_zzz")
+            )
+            .into_bytes(),
+            br#"{"kind":"nope"}"#.to_vec(),
+            format!("{{\"kind\":\"nope\"}}\nnot-json\n{}\n", cut("bl_a")).into_bytes(),
+            b"not-json\nnot-json\nnot-json\n".to_vec(),
+            format!("{}\n{}\n", cut("bl_a"), resolve("bl_a")).into_bytes(),
+        ];
+        for bytes in cases {
+            let before = inspect(&bytes, None);
+            let applied = planned_fixes(&before.findings);
+            let repaired = repaired_bytes(&bytes, &applied);
+            let expected = serde_json::to_value(inspect(&repaired, None)).unwrap();
+            let derived = serde_json::to_value(post_fix_data(&before, &applied)).unwrap();
+            assert_eq!(
+                derived,
+                expected,
+                "derived report drifted for {:?}",
+                String::from_utf8_lossy(&bytes)
+            );
         }
     }
 }
