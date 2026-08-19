@@ -1,0 +1,277 @@
+# Changelog
+
+## [0.15.0] - 2026-08-18
+
+### Added
+
+- `blotter export --format otlp-json` (TASK-25): a read-only bridge that emits the selected records as one raw OTLP 1.11.0 `LogsData` JSON line (lowerCamelCase fields, decimal-string `timeUnixNano`), with `eventName` `blotter.friction.reported` and `blotter.friction.*` attributes. Honors `--since` and the auto-capture exclusion; cuts of every status are exported, with the status mapped into the `blotter.friction.status` attribute (`open`/`resolved`/`dropped`) rather than selectable; never exports evidence, trace IDs, or a `schemaUrl`; deterministic sort and stable empty output. A record whose timestamp cannot be represented as an unsigned 64-bit nanosecond value rejects the whole export with `invalid_input` (exit 65), naming the record — no partial output. Design doc r28.
+
+- `blotter retrospect` (TASK-23): a read-only promotion-mining pass over one log that turns chronic signal into typed candidates for a human to judge. It reuses triage's clustering and verify's recurrence rules unchanged, and types each open-cut cluster by evidence shape — half-or-more sharing one failing leading program becomes `wrapper_alias`, half-or-more tagged `docs`/`documentation` becomes `doc_repair` (wrapper wins when both match), everything else emits nothing. Every recurrence of count two or more becomes a `skill_candidate`. The envelope carries bounded evidence (at most 10 member texts, 5 resolution notes; never evidence `cmd`, `stderr`, or `note`), so the CLI never writes a doc, skill, or alias. Retrospect takes no window — chronic signal is long-horizon — and deliberately includes auto-captures, inverting r17 for this one command. Exit 1 with candidates, 0 without, matching triage. Envelope `meta.contract` stays 5. Design doc r27.
+
+- `blotter archive --before <value>` trims closed history without breaking the journal (TASK-30). It removes only `bl_` record groups whose materialized state is resolved or dropped *and* whose every event predates the cutoff; open records, orphan resolves, malformed lines, unknown kinds, and legacy `pc_` records stay in the log verbatim. `--before` takes the same RFC3339-or-`Nd`/`Nh` grammar as `--since`, cutoff exclusive. Apply mode uses the copy-and-swap mechanic r15 established for `doctor --fix`: the original is kept as a timestamped backup, every removed physical line is written verbatim and newline-terminated in original order to `<log>.archive-<ts>.jsonl`, and the kept lines are atomically swapped in. The envelope carries `archived`/`kept` counts, `backup`, `archive_file`, and a paste-ready `restore_hint`. `--dry-run` plans under the shared lock and writes nothing. Nothing eligible means no rewrite, no files, `changed:false`, exit 0. The append-only invariant now names `archive` and `doctor --fix` as its only exceptions. Design doc r26.
+
+- TASK-24: cut records gain an optional `source` provenance field, serialized only when present; the sole writer is `hook exec claude-code`, which stamps `"hook"`. `add` cannot set it, `compute_id` ignores it, no selector keys on it, and it propagates through `list`, `triage`/`digest` clusters, and `verify` recurrences. Stored history is unchanged and unknown stored values pass through opaquely. Design doc r24.
+
+### Fixed
+
+- `doctor --fix` no longer strands a symlinked log. The log was locked and read through the link, but the atomic swap renamed the temporary over the link pathname, replacing the link with a regular file and leaving the real target untouched. Final-component symlinks are now resolved before the backup, sidecar, and replacement paths are derived, so the swap lands on the target and the link survives; parent components keep their spelling so envelope paths are unchanged for regular files. `archive` uses the same resolution. Design doc r26.
+- TASK-31.1: a `--since` duration whose hour count overflows the internal representation (for example `--since 99999999999999h`) no longer aborts the process; it reports the documented `invalid_argument` error (exit 2) like any other invalid `--since` value.
+- TASK-31.2: stdout write failures are no longer silently discarded. Envelope and `--format md` output flush explicitly and report the documented `io_error` (exit 74) when stdout cannot be written, so a broken pipe or closed descriptor can no longer produce a successful exit with lost output. On Unix and redirected Windows handles, output goes through a duplicated file descriptor so suppressed errors surface; interactive Windows consoles keep the console-aware writer, preserving non-ASCII output.
+- TASK-32: `list --limit 0` no longer emits the "no records matched" warning when the log has matching records; the empty-result warning now reflects the unfiltered total, not the truncated item count.
+- TASK-36: new `add` and `dogear` text rewrites r22/r23 home paths before validation and identity hashing; hook machine-captured command text and `evidence.cmd` use full evidence redaction, so the ID and text-keyed open dedupe use the same sanitized command. Hook failure notes now retain 1024 bytes after redaction instead of 4096; user-supplied `add --stderr-file` evidence remains bounded at 4096. No envelope, selector, exit-code, or flag changes.
+- Home-path leak detection and write-time evidence redaction now recognize the dash-encoded home slug that harness scratchpad and session paths embed, such as `/private/tmp/<session>/-Users-<name>-<repo>/...` (TASK-34). `doctor --leaks` reports it as a `leak` finding and `add`/`hook` evidence rewrites the slug prefix to `~`, matching the existing `/Users/<name>` and `/home/<name>` handling. No envelope, error-code, or contract changes.
+
+### Changed
+
+- Performance at scale (TASK-29.1/29.2/29.3): triage and digest replace their quadratic candidate scan with exact-normalized-title and tagged-pool indexing (7.5 s → ~0.18 s CPU at 10k records; identical outputs and exit codes), resolve materializes its response from the deciding fold instead of a second full read+fold, and fold ordering parses each timestamp once. All measured commands now run within a 500 ms CPU budget (met at the 200 ms stretch) at 10k records; baselines, budgets, and dispositions are recorded in docs/research/2026-08-18-scale-baselines.md. Triage/digest trade 2-4x peak memory at 10k for the speedup, depending on how much distinct vocabulary the record text carries; the index skips tokens that appear in only one candidate, which cannot affect any shared-token count, so index size tracks the shared vocabulary rather than growing with every new word. No envelope, ordering, or exit-code changes.
+
+- Publish-gate run and follow-up scrub (TASK-35): with the TASK-34 scanner, `doctor --leaks` plus the private deny list reports fully healthy, and a tree-wide token grep is clean outside accepted upstream attribution. Sanctioned append-only exception (owner-approved, 2026-08-18): five log records rewritten to the redacted form the new write-time redaction produces (IDs recomputed, one resolve ref updated), and one hook failure-note that had captured pre-scrub backlog prose neutralized. Backlog prose, the design doc's worked examples and review-provenance lines, and test fixtures no longer carry private identifiers.
+- One-time open-sourcing scrub of the tracked tree (TASK-33, PR #30): home-directory paths rewritten to `~/` in `.blotter.jsonl` and remaining docs, private identifiers redacted, and the tracked `_scratch/` drafts, the pre-fork remediation archive (`docs/archive/papercuts-remediation/`), and a dangling skill symlink removed. The dogfood log's content-derived cut IDs were recomputed where the scrub changed record text — a sanctioned one-time exception to append-only; `doctor` reports fully healthy. No code, envelope, or contract changes. History untouched; posture decided at publish time.
+
+## [0.14.0] - 2026-08-18
+
+Envelope `meta.contract` stays 5. Triage/verify linkage, raw `--format md` output, public-log storage, evidence hygiene, and flag-gated doctor inspection change observably; JSON envelope shapes, selectors, ordering, and exit codes are unchanged. Design doc r19–r22.
+
+### Fixed
+
+- `triage` (and `verify`/`digest`, which share its linkage) now clusters reworded repeats of the same friction (issue #22). Scoring drops tokens of two characters or fewer plus a fixed sixteen-word stopword list, then links on 80% overlap with the shorter token set or at least three shared locally rare tokens (document frequency ≤ `max(2, ceil(N/4))`, computed within the analyzed log — no new dependencies). The exact-title fast path, the tag gate, and the non-transitive representative clustering are unchanged. Design doc r19.
+- `list --format md` no longer breaks the Markdown list on multi-line record text (issue #24). Every interpolated field — text, agent, tags, timestamps, and all resolution fields, which accept embedded newlines — is whitespace-collapsed per rendered line, in `list` and `digest` md output alike. Design doc r21.
+- `list --format md` renders a resolved cut's resolution (issue #25): a nested sub-bullet with the resolve timestamp, agent, `--commit`/`--pr`/`--task` graduation provenance, and the note, all collapsed the same way. Design doc r21.
+
+### Added
+
+- `doctor --leaks` is a pre-push/CI gate for public logs: it scans every raw physical line for absolute home paths and reports diagnose-only `leak` findings. Repeat `--deny LITERAL` to block an additional literal substring; `--deny` requires `--leaks`, and both flags conflict with `doctor --fix` so the gate stays read-only. Per-repository deny-pattern configuration files are deliberately not added. Design doc r22.
+- `hook exec claude-code` gains a third noise guard (issue #23): read-only probe commands (`grep`, `rg`, `ls`, `find`, `tail`, `head`, `cat`, `stat`, `test`, `[`, `which`, `curl`, `gh`) are skipped at write time, matched best-effort on the first program word after leading `VAR=value` assignments. Their non-zero exit is an expected answer, and dogfood logs showed them dominating the auto-capture lane. Published in `schema` as the `tool_input.command_program` gate; `BLOTTER_HOOK_EXPLAIN=1` names it. Design doc r20.
+- The retention stance is written down (issue #23): append-only stays, no command trims the log in this release, the auto lane is bounded at the write side, and an archive/rotation command is deliberately deferred as backlog TASK-30. Design doc r20.
+
+### Changed
+
+- New cut and dogear records outside their discovered repository store `cwd` relative to `$HOME` as `~` or `~/…`; non-home paths remain absolute and existing records are unchanged. Evidence commands, stderr, and notes rewrite current and generic Unix home paths before the existing best-effort secret pass, so hook-filed failure notes receive the same hygiene. Design doc r22.
+
+## [0.13.1] - 2026-08-11
+
+Copy-only: envelope `meta.contract` stays 5 and no selector, fold, ordering, or exit code changes. Two published strings change; callers matching them by exact text need updating, but matching by numeric exit code and leading count is unaffected. Design doc r18.
+
+### Fixed
+
+- The global exit-code dictionary in `blotter schema` described exit 1 as `doctor findings`. `triage` (r7) and `verify` (r16) also exit 1, and both already published their own `exit_codes` entry. The global entry now reads `command findings: doctor unhealthy, triage clusters, or verify recurrences`.
+- The auto-capture warning agrees in number: a count of 1 now reads `1 auto-captured record hidden`, not `1 auto-captured records hidden`. Every other count is unchanged.
+- Documentation drift across the whole doc set, found by replaying every documented command against the 0.13.0 binary:
+  - `README.md`'s opening example printed `"contract":4`; the current envelope is 5.
+  - The README exit-code dictionary omitted exit 1 entirely.
+  - `resolve --amend` replaces the materialized resolution rather than merging field by field, so amending with only `--note` drops a previously recorded `--pr`. The README described it as carrying "the corrected fields", which reads as a merge; it now shows the whole-resolution replacement and how to repeat fields you want to keep.
+  - `sweep`'s directory form requires a git working tree and silently skips a non-git directory that holds a `.blotter.jsonl`, exiting 0 with an empty roll-up. The README now says so and names `totals.repos_swept` as the check.
+  - The README claimed both global flags apply to every subcommand; `sweep` rejects `--file`.
+  - `AGENTS.md` pinned the normative design doc at "through r14" while the file had reached r17. It no longer quotes a revision number, and points readers at the last amendment in the file instead.
+  - The design doc's own status line said r16 while r17 was present.
+  - Undocumented details now stated: `list --tag auto` implies `--include-auto`, `triage --min-count` must be at least 2, and `--stderr-file` follows a symlink to its target.
+
+### Added
+
+- A README `Doctor` section listing all nine finding kinds, which three `--fix` repairs, and what to do about the six it will not. Notably `id_conflict`, which this repository's own log carries twice from records filed before the `TASK-4` cut-ID change and which are correct history.
+- `.gitattributes` with the `.blotter.jsonl merge=union` setting the README has always recommended to users but the repository itself did not apply.
+
+### Changed
+
+- The shipped `angle` implementation plan moved to `docs/archive/` with a header noting it shipped as `dogear`; its original wording is preserved. The blotter rename spec moved there too — its `Status:` line said "approved for planning" long after the rename shipped in 0.8.0, and its migration surface was removed in 0.9.0. `docs/superpowers/specs/` now holds only specs for the current release, and the design doc's r9 pointer to the rename spec follows it to its new path. `AGENTS.md` states which paths under `docs/` are contract, which are history, and when to archive a spec.
+
+## [0.13.0] - 2026-08-09
+
+Breaking: envelope `meta.contract` bumps 4 → 5. `list`, `triage`, `digest`, `verify`, and `sweep` exclude records tagged `auto` by default; pass `--include-auto` for the previous behaviour.
+
+### Changed
+
+- The five reporting commands now omit auto-captured records from their default reads and report how many records they hid, so machine-filed failed commands remain available as evidence without diluting hand-filed analysis. Design doc r17.
+- Bump envelope `meta.contract` from 4 to 5 for the default-read behaviour change. Design doc r17.
+
+### Added
+
+- `--include-auto` restores auto-tagged records to `list`, `triage`, `digest`, `verify`, and `sweep`; `list --tag auto` implies it. Design doc r17.
+
+## [0.12.0] - 2026-08-09
+
+Additive: envelope `meta.contract` stays 4; existing logs, commands, and output shapes are unchanged.
+
+### Added
+
+- `verify` — a read-only recurrence check over one log. Each eligible resolved cut anchors later matching open cuts using the exact `triage` linkage rule; dogears, dropped resolutions, and empty normalized resolved titles are excluded. Results preserve resolution timestamp and optional task/PR/commit provenance, sort deterministically, and exit 1 when one or more recurrences are found. One open cut can recur against more than one resolved anchor. `schema` publishes the output and exit convention. Design doc r16.
+
+## [0.11.0] - 2026-08-09
+
+Additive: envelope `meta.contract` stays 4; existing logs, commands, and output shapes are unchanged apart from one new always-present field.
+
+### Added
+
+- `doctor --fix` — a bounded repair path for the three unreadable-line findings (`torn_line`, `malformed`, `conflict_marker`), each removed from a repaired copy and preserved verbatim in `<log>.quarantine.jsonl`. Every repair backs the original up to `<log>.bak-<timestamp>` (collision is `io_error` with the log untouched), fsyncs backup and quarantine, writes a same-directory temp file, and atomically renames it in; the envelope reports the post-fix diagnosis with a paste-ready restore hint. `--fix --dry-run` plans without writing. All other findings stay diagnose-only. `Finding` gains an always-serialized `fixable` field, and `schema` documents the destructive `fix` sub-entry. Lock acquisition now re-verifies path identity after locking, so writers serialized behind a repair land on the post-repair file instead of an orphaned inode. This is the append-only invariant's sole exception; design doc r15.
+
+### Changed
+
+- `hook exec claude-code` skips a failed command longer than 500 UTF-8 bytes instead of filing it. The command becomes the cut's text verbatim, so a long debugging one-liner produced an entry that diluted the log rather than describing friction. `schema` publishes the new gate as `tool_input.command_bytes`; skipping stays fail-open (stdout empty, exit 0) and `BLOTTER_HOOK_EXPLAIN=1` names the gate. Design doc r14.
+
+### Fixed
+
+- Documentation drift that made the design doc contradict the code: the r6 amendment's pre-rename `pc_`/`pc1` dogear identity is now marked superseded inline (current code emits `bl_` and hashes `bl1`), r10's pointer to that text named r7 instead of r6, and the doc's status line said r12. `AGENTS.md` now states that amendments accumulate and the newest wins, and that `CLAUDE.md` is a symlink to it.
+
+## [0.10.0] - 2026-08-08
+
+Additive only: envelope `meta.contract` stays 4 and every existing log, command, and output shape is unchanged.
+
+### Added
+
+- `digest` — a read-only periodic friction report over one log: chronic clusters (the triage analysis at min-count 2), open cuts filed inside the `--since` window grouped by tag, and all open dogears. `--since` defaults to `7d` and accepts a full RFC3339 timestamp or an `Nd`/`Nh` duration. `--format md` emits raw markdown and joins `list` as a raw-output exception; empty reports are exit 0.
+- `sweep` — a read-only roll-up across several repositories. Paths are repository directories or direct JSONL logs; `--registry FILE` reads a user-owned list of paths (one per line, `#` comments ignored, relative paths resolved from the registry's directory). `blotter` never creates or discovers a registry. Each log is read under its own shared lock, one at a time. `BLOTTER_FILE` is ignored and the global `--file` flag is rejected. A locked or unreadable repository becomes a skip warning with exit 0 and a `totals.repos_skipped` count — a deliberate, sweep-scoped deviation from the exit-75 lock-timeout rule.
+- `resolve --amend` — correctable resolutions. An amend appends a second resolve event instead of rewriting anything: the first non-amend resolve stays the base, the latest amend supplies the materialized user-set fields, and `resolution.amended` becomes `true`. `--amend` requires at least one resolution field and requires every named record to be resolved already. Orphan amends warn and do not materialize. Legacy logs fold byte-identically.
+- `BLOTTER_HOOK_EXPLAIN=1` — opts `hook exec claude-code` into one best-effort stderr line naming the gate it stopped at, the duplicate cut it found, an unresolvable clock, or the id it filed. stdout stays empty and the exit code stays 0. `schema` now publishes the hook payload contract (read fields, gates, 1 MiB stdin cap) and this variable.
+
+### Fixed
+
+- `hook install` preserves the existing key order of `settings.json` instead of rewriting it sorted (`serde_json/preserve_order`). The crate deliberately allows `clippy::result_large_err`: the resulting `IndexMap` grows `serde_json::Value` past the lint threshold, and boxing 53 `AppResult` signatures is not worth it for a short-lived CLI.
+
+## [0.9.0] - 2026-08-06
+
+### Changed (breaking)
+
+- Remove the temporary pre-rename migration surface: `PAPERCUTS_*` variables no longer produce warnings, `.papercuts.jsonl` is not probed, and `doctor` no longer emits `legacy_records` or recomputes the pre-0.8.0 cut-ID format. Existing `pc_` records remain opaque data that folds, lists, and resolves by explicit prefix.
+- The historical migration was the manual `mv .papercuts.jsonl .blotter.jsonl` rename (plus matching `.gitignore`/`.gitattributes` edits). In 0.8.0, `blotter doctor` reported `legacy_records` as informational and not affecting health or exit codes; users should already have completed that guidance before this release.
+- Store the sorted, deduplicated tag set in both cut and dogear records, and normalize duplicate tags while folding old records, so stored tags now agree with their identity hash.
+- Make every `resolve` response use `{changed,records:[...]}`, including a one-ID invocation; consumers no longer branch on `record` versus `records`.
+- Remove stored `repo` fields. New records use repository-relative `cwd` when their cwd is inside the discovered repository; global logs and hook payloads outside that repository retain absolute cwd. Existing logs with absolute cwd and `repo` fields still fold and resolve.
+- Make `schema` skip `BLOTTER_NOW` parsing. `BLOTTER_NOW=invalid blotter schema` now exits 0 with its contract envelope instead of exit 78 `config_error`; other commands retain clock validation.
+- Bump the crate to 0.9.0 and envelope `meta.contract` from 3 to 4.
+- Remove the unusable `codex` hook target until Codex exposes shell exit status (openai/codex#21753 remains open). `hook install codex` and `hook exec codex` are no longer accepted.
+
+### Redaction narrowed (TASK-17)
+
+- Redaction is now a best-effort hygiene pass, not a security boundary. It keeps direct sensitive-key `=`/`:` values, HTTP(S) URL userinfo, and one mixed-case-and-digit entropy rule.
+- Dropped camelCase and acronym key-segment inference; only the documented sensitive-key list is scanned.
+- Dropped per-scheme authorization parsing. An `authorization` assignment still covers the token after the scheme word, so `Authorization: Bearer <credential>` redacts the credential, not just the scheme.
+- Dropped `*_file`/`*_path` handling, space-separated CLI option values, and structural path, URL, extension, and schemeless-host exceptions.
+- Dropped escaped-quote and fullwidth-separator parsing. Entropy redaction no longer covers long single-category tokens.
+
+### Changed
+
+- `triage` clusters on direct similarity to a stable representative instead of a transitive union, and each cluster reports a new `occurrences` field: how many open cuts share the normalized title of the cluster's displayed `text`. Cuts with identical non-empty normalized titles now always link, regardless of tags. Same-input triage output and exit codes can differ from 0.8.0.
+- A file ending in one trailing newline is a terminated log, not a malformed final line: a file holding only `"\n"` folds with no warnings. A blank line following a record is still malformed.
+- `hook install` reports its outcome through `meta.warnings`: `hook created`, `hook amended`, or `dry run; hook would be <action>`.
+- Release builds abort on panic (`panic = "abort"`): a hypothetical panic now terminates via SIGABRT instead of exit 101. The release profile also enables LTO, single codegen unit, and symbol stripping (binary: 2.1 MB → ~0.85 MB).
+- The published crate no longer packages `tests/**`.
+
+## [0.8.0] - 2026-08-05
+
+### Changed (breaking)
+
+- Frame cut identity per tag, matching the dogear scheme: the digest now covers a `bl1` version literal, the `cut` kind, `ts`, `agent`, `text`, `severity`, a decimal tag count, and each sorted-unique tag as its own length-prefixed field. This closes the tag-boundary collision (`["a","b"]` vs `["a,b"]`) that the r7 amendment deliberately deferred, and the `cut` literal supplies domain separation from dogears. IDs stay `bl_` plus 12 hex (48 bits), so cut and dogear ID widths remain provably disjoint.
+- Duplicate tags no longer perturb cut identity — tags are deduplicated before hashing, as they already were for dogears.
+- The same cut text filed under different tags now yields different IDs, so it is filed as a separate cut rather than deduplicated.
+- Bump envelope `meta.contract` from 2 to 3.
+
+### Changed
+
+- `doctor` recomputes `bl_` cut IDs with the new scheme, then falls back to the frozen comma-joined v1 recomputation. A record matching the old scheme counts toward the informational `legacy_records` total instead of raising an `id_conflict`; only IDs matching neither scheme are conflicts. Exit codes are unaffected.
+
+### Migration
+
+- Existing `bl_` cut records stay valid and are never rewritten. `doctor` reports them under `legacy_records`, which is informational and does not affect health or exit codes.
+- Resolving an existing cut by ID or prefix is unchanged — recomputation is a `doctor` concern only.
+- Expect `meta.contract` 3 in envelopes; pin any consumer that asserts on the contract number.
+- If you re-file an already-logged cut with a different tag set, expect a new record rather than `changed:false`.
+
+## [0.7.0] - 2026-08-04
+
+### Changed (breaking)
+
+- Rename the project from papercuts to blotter: the binary is `blotter`, the crate is `blotter-cli` (crates.io `blotter` is squatted; the bin target is bound explicitly so the installed binary stays `blotter`).
+- Rename the environment contract: `PAPERCUTS_FILE`/`PAPERCUTS_AGENT`/`PAPERCUTS_NOW` → `BLOTTER_FILE`/`BLOTTER_AGENT`/`BLOTTER_NOW` (test-only `PAPERCUTS_BIN` → `BLOTTER_BIN`), with no legacy aliases. A set `PAPERCUTS_*` variable whose `BLOTTER_*` counterpart is unset triggers a `meta.warnings` stale-env entry.
+- Rename default discovery paths to `.blotter.jsonl` (repo) and `~/.blotter/log.jsonl` (global). Legacy `.papercuts.jsonl`/`~/.papercuts/log.jsonl` are never auto-discovered; when a legacy file sits next to a discovered default path, commands emit a `meta.warnings` migration nudge.
+- Emit `bl_`-prefixed IDs for new records; the dogear hash domain tag moves `pc1` → `bl1`. Legacy `pc_` IDs remain accepted as input, read-only, forever. `resolve` is namespace-aware: explicit `pc_`/`bl_` constrains matching, bare hex searches both namespaces.
+- Bump envelope `meta.contract` from 1 to 2.
+
+### Added
+
+- `doctor` reports skipped legacy `pc_` records as an informational `legacy_records` count (not a finding; exit codes unaffected), published through `schema`.
+- `hook install` repairs a stale executable path: a managed `hook exec claude-code` command pointing at a moved or renamed binary is atomically replaced and reported as `changed:true`.
+
+### Migration
+
+- Reinstall under the new name: `cargo install --git https://github.com/BigCactusLabs/blotter blotter-cli`.
+- `mv` your log file(s): `.papercuts.jsonl` → `.blotter.jsonl`, `~/.papercuts/log.jsonl` → `~/.blotter/log.jsonl`.
+- Update `.gitignore`/`.gitattributes` entries to the new file name.
+- Replace `PAPERCUTS_*` environment variables with their `BLOTTER_*` counterparts.
+- `cargo uninstall papercuts` — the old binary otherwise stays on PATH writing the old file.
+- Re-run `blotter hook install` to repair the stale hook path in your settings.
+- Expect `meta.contract` 2 in envelopes; new records use `bl_` IDs, and `pc_` remains accepted as input.
+
+## [0.6.0] - 2026-08-03
+
+### Added
+
+- Add `hook exec claude-code`, a silent, fail-open target for Claude Code `PostToolUseFailure` Bash events. It files eligible failures as minor cuts with `auto` and `claude-code` tags, command evidence, and redacted failure notes without ever creating a new log from a hook.
+- Add `hook install claude-code` with idempotent, atomic settings updates, explicit/global settings selection, and dry-run support.
+- Publish the hook install/exec contract, target support, and silent exit-0 behavior through `schema`.
+
+### Changed
+
+- Make the current Codex hook limitation explicit: `hook exec codex` is a silent no-op and `hook install codex` explains that Codex 0.146.x does not expose shell exit status to hooks (openai/codex#21753).
+- Mark `--url` and `--dropped` as dogear-only in `resolve --help`, matching the runtime restriction.
+
+## [0.5.0] - 2026-08-03
+
+### Added
+
+- Add read-only `triage` chronic-cut detection for connected clusters of similar open cuts, with a configurable `--min-count` threshold and a `graduate` suggested action.
+- Publish the `triage` flags, output shape, and its 0-empty / 1-findings exit convention through `schema`.
+
+## [0.4.0] - 2026-08-03
+
+### Added
+
+- Record optional task, pull-request, and commit provenance with `resolve --task`, `--pr`, and `--commit` for cuts or dogears.
+- Add dogear lifecycle resolution with `--url` for a published destination or `--dropped` for an explicit discard; mixed cut/dogear batches reject the lifecycle flags atomically.
+- Publish the new resolve flags, event fields, and materialized resolution fields through `schema`.
+
+## [0.3.0] - 2026-07-23 (fork)
+
+### Added
+
+- Add append-only `dogear` records for research and blog-post ideas with the `dogear` command (alias: `idea`).
+- Add `list --kind cut|dogear|all`; cuts remain the default, and `all` renders cuts before dogears.
+- Allow `resolve` and `doctor` to process valid dogear records, and publish the dogear contract through `schema`.
+
+### Changed
+
+- Reject `--severity` with `list --kind dogear` or `list --kind all`; severity is a cut-only property.
+- A dogear ID is an 80-bit SHA-256 digest (`pc_` + 20 hex) over a version literal, the kind, `ts`, `agent`, `text`, a tag count, and each sorted-unique tag as its own length-prefixed field. Per-tag framing prevents tag-boundary collisions (`["a","b"]` vs `["a,b"]`), and the wider digest keeps dogear IDs disjoint from the 48-bit cut namespace. Cut IDs are unchanged.
+- Accept a complete, valid final record that lacks a trailing newline instead of treating it as torn, so a crash-truncated-but-complete tail can never be silently resurrected by the next append.
+
+### Known limitations
+
+- The released cut ID keeps its 48-bit comma-joined-tags scheme; the same tag-boundary edge case remains latent there and is deferred to a future breaking release to preserve byte-compatibility.
+
+## [0.2.0] - 2026-07-16
+
+### Added
+
+- Attach bounded evidence to `add` with `--cmd`, `--exit`, `--stderr-file`, and `--evidence`.
+- Resolve multiple IDs or unique prefixes atomically in one `resolve` command.
+
+### Changed
+
+- Redact common credential assignments, authorization values, high-entropy tokens, and URL userinfo before evidence is returned or stored. Redaction remains best-effort.
+- Reject non-regular, non-UTF-8, and larger-than-1-MiB stderr inputs; truncate sanitized stored stderr to 4096 UTF-8 bytes.
+- Preserve the single-ID resolve response while returning sorted, deduplicated records for multi-ID resolves and warnings for already-resolved IDs.
+- Expand `schema` with the evidence record and multi-ID resolve contracts.
+- Expand doctor/fold test coverage for malformed records, duplicate cuts, ID conflicts, orphan resolves, conflict markers, torn lines, and append recovery.
+- Limit the published crate to source, tests, and release documentation.
+
+### Fixed
+
+- Roll back failed batch appends so partial multi-resolve writes do not corrupt the append-only log.
+- Accept leading-hyphen values for evidence and resolution notes without swallowing later options.
+- Preserve paths and URLs during best-effort credential redaction while covering token-only URL userinfo and lowercase compound credential keys.
+
+## [0.1.0] - 2026-07-10
+
+- Initial release.
+
+[0.2.0]: https://github.com/treygoff24/papercuts/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/treygoff24/papercuts/releases/tag/v0.1.0

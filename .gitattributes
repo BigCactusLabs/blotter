@@ -1,0 +1,5 @@
+# The dogfood log is append-only. Union merges keep both sides' cuts instead of
+# raising a conflict on every parallel branch; the fold is first-wins and
+# `blotter add` is duplicate-safe, so duplicate lines after a merge are harmless.
+# This is the same setting the README recommends to users.
+.blotter.jsonl merge=union

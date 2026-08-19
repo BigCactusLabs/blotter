@@ -1,0 +1,43 @@
+[package]
+name = "blotter-cli"
+version = "0.15.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT"
+description = "A tiny CLI for AI agents to log the cuts they hit during work."
+repository = "https://github.com/BigCactusLabs/blotter"
+include = ["src/**", "Cargo.toml", "Cargo.lock", "README.md", "CHANGELOG.md", "LICENSE"]
+
+[lib]
+name = "blotter"
+
+[[bin]]
+name = "blotter"
+path = "src/main.rs"
+
+[dependencies]
+# No "color" feature: help/error output must stay ANSI-free for agent consumers.
+# The old `color = ColorChoice::Never` builder setting is unavailable without the
+# feature, so re-enabling clap defaults would silently colorize an agent-facing tool.
+clap = { version = "4", default-features = false, features = ["derive", "std", "help", "usage", "error-context", "suggestions"] }
+jiff = { version = "0.2", default-features = false, features = ["std", "perf-inline"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.11"
+thiserror = "2"
+libc = "0.2"
+
+[dev-dependencies]
+assert_cmd = "2"
+tempfile = "3"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# preserve_order's IndexMap grows serde_json::Value past the lint threshold; boxing 53 AppResult signatures is not worth it for a short-lived CLI (r13).
+[lints.clippy]
+result_large_err = "allow"

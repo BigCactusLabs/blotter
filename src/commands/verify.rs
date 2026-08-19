@@ -1,0 +1,229 @@
+use crate::cli::VerifyArgs;
+use crate::commands::triage::{self, Candidate};
+use crate::error::{AppError, AppResult};
+use crate::output::{self, Meta};
+use crate::store;
+use crate::{ItemStatus, ListItem};
+use jiff::Timestamp;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VerifyData {
+    pub recurrences: Vec<Recurrence>,
+    pub count: usize,
+    pub scanned: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Recurrence {
+    pub resolved_id: String,
+    pub resolved_text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    pub resolution: VerifyResolution,
+    pub recurrence_ids: Vec<String>,
+    pub count: usize,
+    pub first_recurrence_ts: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct VerifyResolution {
+    pub ts: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+}
+
+struct ResolvedAnchor {
+    candidate: Candidate,
+    resolution_timestamp: Timestamp,
+}
+
+pub(crate) struct RecurrenceGroup {
+    pub(crate) anchor: Candidate,
+    pub(crate) members: Vec<Candidate>,
+}
+
+pub(crate) struct RecurrenceAnalysis {
+    pub(crate) recurrences: Vec<RecurrenceGroup>,
+    pub(crate) scanned: usize,
+}
+
+struct OrderedRecurrence {
+    data: RecurrenceGroup,
+    first_recurrence_timestamp: Timestamp,
+}
+
+fn is_verify_eligible(item: &ListItem) -> bool {
+    if item.kind != "cut" {
+        return false;
+    }
+
+    match item.status {
+        ItemStatus::Open => true,
+        ItemStatus::Resolved => {
+            let resolution = item
+                .resolution
+                .as_ref()
+                .expect("resolved folded items have a resolution");
+            !resolution.dropped && !triage::normalized_title(&item.text).is_empty()
+        }
+    }
+}
+
+pub fn run(args: VerifyArgs, file: Option<PathBuf>, pretty: bool) -> AppResult<i32> {
+    let resolved = store::discover(file)?;
+    let store::LoadedFold {
+        items,
+        mut warnings,
+    } = store::load_folded(&resolved)?;
+    let (items, auto_captures) = crate::partition_auto_captures(items, args.include_auto);
+    let hidden = auto_captures
+        .iter()
+        .filter(|item| is_verify_eligible(item))
+        .count();
+    if hidden > 0 {
+        warnings.push(crate::auto_capture_warning(hidden));
+    }
+
+    let data = verify(items);
+    let exit = i32::from(!data.recurrences.is_empty());
+    let mut meta = Meta::new();
+    meta.file = Some(resolved.path.to_string_lossy().into_owned());
+    meta.warnings = warnings;
+    output::write_success(data, pretty, meta)
+        .map_err(|error| AppError::from_io(error, std::path::Path::new("stdout")))?;
+    Ok(exit)
+}
+
+fn verify(items: Vec<ListItem>) -> VerifyData {
+    let analysis = recurrence_groups(items);
+    let recurrences: Vec<_> = analysis
+        .recurrences
+        .iter()
+        .map(materialize_recurrence)
+        .collect();
+
+    VerifyData {
+        count: recurrences.len(),
+        recurrences,
+        scanned: analysis.scanned,
+    }
+}
+
+pub(crate) fn recurrence_groups(items: Vec<ListItem>) -> RecurrenceAnalysis {
+    let mut open = Vec::new();
+    let mut anchors = Vec::new();
+
+    for item in items {
+        if !is_verify_eligible(&item) {
+            continue;
+        }
+
+        let normalized_title = triage::normalized_title(&item.text);
+        let candidate = Candidate {
+            timestamp: item
+                .ts
+                .parse()
+                .expect("folded items have valid RFC3339 timestamps"),
+            tags: item.tags.iter().cloned().collect(),
+            tokens: triage::scoring_tokens(&normalized_title),
+            normalized_title,
+            item,
+        };
+
+        match candidate.item.status {
+            ItemStatus::Open => open.push(candidate),
+            ItemStatus::Resolved => {
+                let resolution = candidate
+                    .item
+                    .resolution
+                    .as_ref()
+                    .expect("resolved folded items have a resolution");
+                anchors.push(ResolvedAnchor {
+                    resolution_timestamp: resolution
+                        .ts
+                        .parse()
+                        .expect("folded resolutions have valid RFC3339 timestamps"),
+                    candidate,
+                });
+            }
+        }
+    }
+
+    open.sort_by(triage::candidate_order);
+    let scanned = open.len();
+    let frequencies = triage::token_frequencies(
+        open.iter()
+            .chain(anchors.iter().map(|anchor| &anchor.candidate)),
+    );
+    let mut recurrences = Vec::new();
+    for anchor in anchors {
+        let recurring: Vec<_> = open
+            .iter()
+            .filter(|candidate| {
+                candidate.timestamp > anchor.resolution_timestamp
+                    && triage::linked(&anchor.candidate, candidate, &frequencies)
+            })
+            .collect();
+        let Some(first) = recurring.first() else {
+            continue;
+        };
+        recurrences.push(OrderedRecurrence {
+            first_recurrence_timestamp: first.timestamp,
+            data: RecurrenceGroup {
+                anchor: anchor.candidate,
+                members: recurring.into_iter().cloned().collect(),
+            },
+        });
+    }
+    recurrences.sort_by(|left, right| {
+        left.first_recurrence_timestamp
+            .cmp(&right.first_recurrence_timestamp)
+            .then_with(|| left.data.anchor.item.id.cmp(&right.data.anchor.item.id))
+    });
+
+    RecurrenceAnalysis {
+        recurrences: recurrences
+            .into_iter()
+            .map(|recurrence| recurrence.data)
+            .collect(),
+        scanned,
+    }
+}
+
+fn materialize_recurrence(group: &RecurrenceGroup) -> Recurrence {
+    let resolution = group
+        .anchor
+        .item
+        .resolution
+        .as_ref()
+        .expect("resolved anchors have a resolution");
+    let first = group
+        .members
+        .first()
+        .expect("recurrence groups have members");
+
+    Recurrence {
+        resolved_id: group.anchor.item.id.clone(),
+        resolved_text: group.anchor.item.text.clone(),
+        source: group.anchor.item.source.clone(),
+        resolution: VerifyResolution {
+            ts: resolution.ts.clone(),
+            task: resolution.task.clone(),
+            pr: resolution.pr.clone(),
+            commit: resolution.commit.clone(),
+        },
+        recurrence_ids: group
+            .members
+            .iter()
+            .map(|candidate| candidate.item.id.clone())
+            .collect(),
+        count: group.members.len(),
+        first_recurrence_ts: first.item.ts.clone(),
+    }
+}
