@@ -688,6 +688,36 @@ mod tests {
         )
     }
 
+    fn amend(id: &str) -> String {
+        format!(
+            r#"{{"kind":"resolve","id":"{id}","ts":"2026-01-15T00:00:02.000Z","agent":"t","note":"correction","amend":true}}"#
+        )
+    }
+
+    #[test]
+    fn amend_without_a_base_resolve_is_an_orphan_finding() {
+        let id = "pc_aaaaaaaaaaaa";
+        let bytes = format!("{}\n{}\n", cut(id), amend(id));
+        assert_eq!(
+            crate::store::fold_bytes(bytes.as_bytes()).warnings,
+            ["skipped 1 orphan resolve"]
+        );
+
+        let data = inspect(bytes.as_bytes(), None);
+        assert!(!data.healthy);
+        assert_eq!(data.findings.len(), 1);
+        assert_eq!(data.findings[0].line, 2);
+        assert_eq!(data.findings[0].kind, "orphan_resolve");
+        assert_eq!(
+            data.findings[0].message,
+            "amend references record pc_aaaaaaaaaaaa without a base resolve"
+        );
+
+        let with_base = format!("{}\n{}\n{}\n", cut(id), amend(id), resolve(id));
+        let data = inspect(with_base.as_bytes(), None);
+        assert!(data.healthy, "findings: {:?}", data.findings);
+    }
+
     /// The derived post-fix report must equal a full reinspection of the
     /// repaired bytes on every shape, including the ones where line numbers
     /// shift, the log keeps a leading empty segment, or the repair empties it.
