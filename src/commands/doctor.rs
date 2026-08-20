@@ -688,6 +688,20 @@ mod tests {
         )
     }
 
+    #[test]
+    fn leak_scan_treats_colon_as_a_path_list_boundary() {
+        assert!(contains_home_path(
+            b"PATH=/opt/bin:/Users/bob/bin",
+            None,
+            None
+        ));
+        assert!(contains_home_path(
+            b"PATH=/opt/bin:-Users-bob-project/cache",
+            None,
+            None
+        ));
+    }
+
     /// The derived post-fix report must equal a full reinspection of the
     /// repaired bytes on every shape, including the ones where line numbers
     /// shift, the log keeps a leading empty segment, or the repair empties it.
