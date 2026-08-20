@@ -16,6 +16,7 @@ const LOCK_DELAY: Duration = Duration::from_millis(100);
 #[derive(Debug, Clone)]
 pub struct ResolvedFile {
     pub path: PathBuf,
+    pub cwd: PathBuf,
     pub explicit: bool,
     pub repo: Option<PathBuf>,
     pub warnings: Vec<String>,
@@ -120,12 +121,13 @@ pub fn discover(flag: Option<PathBuf>) -> AppResult<ResolvedFile> {
 pub fn discover_from(cwd: &Path, flag: Option<PathBuf>) -> AppResult<ResolvedFile> {
     let repo = find_repo_root(cwd);
     if let Some(path) = flag {
-        return Ok(resolved_file(absolute(cwd, path), true, repo));
+        return Ok(resolved_file(cwd, absolute(cwd, path), true, repo));
     }
     if let Some(path) = std::env::var_os("BLOTTER_FILE")
         && !path.is_empty()
     {
         return Ok(resolved_file(
+            cwd,
             absolute(cwd, PathBuf::from(path)),
             true,
             repo,
@@ -133,7 +135,7 @@ pub fn discover_from(cwd: &Path, flag: Option<PathBuf>) -> AppResult<ResolvedFil
     }
     if let Some(root) = repo.clone() {
         let path = default_log_path(&root);
-        return Ok(resolved_file(path, false, Some(root)));
+        return Ok(resolved_file(cwd, path, false, Some(root)));
     }
     let home = home_dir(cwd).ok_or_else(|| {
         AppError::config(
@@ -141,13 +143,19 @@ pub fn discover_from(cwd: &Path, flag: Option<PathBuf>) -> AppResult<ResolvedFil
             "Set HOME or pass --file PATH.",
         )
     })?;
-    Ok(resolved_file(home.join(".blotter/log.jsonl"), false, None))
+    Ok(resolved_file(
+        cwd,
+        home.join(".blotter/log.jsonl"),
+        false,
+        None,
+    ))
 }
 
-fn resolved_file(path: PathBuf, explicit: bool, repo: Option<PathBuf>) -> ResolvedFile {
+fn resolved_file(cwd: &Path, path: PathBuf, explicit: bool, repo: Option<PathBuf>) -> ResolvedFile {
     ResolvedFile {
         warnings: Vec::new(),
         path,
+        cwd: cwd.to_path_buf(),
         explicit,
         repo,
     }

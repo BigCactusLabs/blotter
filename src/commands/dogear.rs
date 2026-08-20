@@ -23,9 +23,7 @@ pub fn run(
 ) -> AppResult<i32> {
     let resolved = store::discover(file)?;
     let text = read_text(args.text, "dogear", "dogear")?;
-    let cwd = std::env::current_dir()
-        .map_err(|error| AppError::from_io(error, std::path::Path::new(".")))?;
-    let home = store::home_dir(&cwd);
+    let home = store::home_dir(&resolved.cwd);
     let text = rewrite_home_paths(&text, home.as_deref());
     validate_text(&text, "dogear")?;
     let (agent, source) = resolve_agent_checked(args.agent, true)?;
@@ -43,7 +41,7 @@ pub fn run(
             .evidence
             .as_deref()
             .map(|value| redact_evidence(value, home.as_deref())),
-        cwd: store::record_cwd(&cwd, resolved.cwd_repo(), home.as_deref()),
+        cwd: store::record_cwd(&resolved.cwd, resolved.cwd_repo(), home.as_deref()),
     };
     let (changed, record) = store::append_unique(&resolved.path, record, args.dry_run)?;
     let mut meta = Meta::new();

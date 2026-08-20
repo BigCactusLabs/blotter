@@ -68,9 +68,7 @@ pub fn run(
     }
     // Redact once, ahead of the critical section, so the base and amend paths —
     // and the dry-run prediction — all carry the same bytes the append stores.
-    let cwd = std::env::current_dir()
-        .map_err(|error| AppError::from_io(error, std::path::Path::new(".")))?;
-    let home = store::home_dir(&cwd);
+    let home = store::home_dir(&resolved.cwd);
     let note = note.map(|value| redact_evidence(&value, home.as_deref()));
     let (agent, source) = resolve_agent_checked(requested_agent, false)?;
     let ts = format_timestamp(now);
