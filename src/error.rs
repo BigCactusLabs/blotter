@@ -161,18 +161,23 @@ impl AppError {
         }
     }
 
-    /// Error mapping for opening an existing blotter log file. This is the
-    /// only place where `NotFound` is mapped to `not_found` / 66.
+    /// Error mapping for opening an existing blotter log file. This is where
+    /// `NotFound` becomes `not_found` / 66, and where a directory rejected by
+    /// an append-mode open is normalized to the same `invalid_input` / 65 that
+    /// the opened-handle regular-file check returns for other object types.
     pub fn from_log_open(error: std::io::Error, path: &std::path::Path) -> Self {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            Self::new(
+        match error.kind() {
+            std::io::ErrorKind::NotFound => Self::new(
                 "not_found",
                 format!("blotter file not found: {}", path.display()),
                 false,
                 "Run `blotter add` to create the file or pass an existing --file PATH.",
-            )
-        } else {
-            Self::from_io(error, path)
+            ),
+            std::io::ErrorKind::IsADirectory => Self::invalid_input(
+                format!("blotter file is not a regular file: {}", path.display()),
+                "Point --file PATH or BLOTTER_FILE at a regular JSONL file; FIFOs and devices are not accepted.",
+            ),
+            _ => Self::from_io(error, path),
         }
     }
 
@@ -180,15 +185,18 @@ impl AppError {
     /// names a file as explicitly as `--file` does, so a missing path is
     /// `not_found` / 66 rather than the `io_error` / 74 `from_io` gives.
     pub fn from_registry_file(error: std::io::Error, path: &std::path::Path) -> Self {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            Self::new(
+        match error.kind() {
+            std::io::ErrorKind::NotFound => Self::new(
                 "not_found",
                 format!("sweep registry file not found: {}", path.display()),
                 false,
                 "Pass an existing registry file to --registry PATH.",
-            )
-        } else {
-            Self::from_io(error, path)
+            ),
+            std::io::ErrorKind::InvalidData => Self::invalid_input(
+                format!("sweep registry file is not valid UTF-8: {}", path.display()),
+                "Save the registry as UTF-8 text with one path per line, then retry.",
+            ),
+            _ => Self::from_io(error, path),
         }
     }
 
