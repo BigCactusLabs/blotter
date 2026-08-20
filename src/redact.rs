@@ -111,3 +111,17 @@ pub(crate) fn rewrite_home_paths(input: &str, home: Option<&Path>) -> String {
         output
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rewrites_every_home_in_a_colon_separated_path_list() {
+        let input = "PATH=/Users/alice/bin:/Users/bob/bin:/home/carol/bin";
+        assert_eq!(
+            rewrite_home_paths(input, Some(Path::new("/Users/alice"))),
+            "PATH=~/bin:~/bin:~/bin"
+        );
+    }
+}
