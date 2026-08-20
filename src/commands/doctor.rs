@@ -576,17 +576,24 @@ fn evidence_delimiter(byte: u8) -> bool {
     byte.is_ascii_whitespace() || EVIDENCE_DELIMITERS.contains(&byte)
 }
 
+// A colon separates entries in Unix path lists such as PATH. Keep it specific
+// to home-path scanning so the byte class continues to mirror the redactor's
+// secret-value delimiters without changing URL or assignment parsing.
+fn home_path_delimiter(byte: u8) -> bool {
+    evidence_delimiter(byte) || byte == b':'
+}
+
 fn path_prefix_boundary(bytes: &[u8], end: usize, separator: u8) -> bool {
     bytes
         .get(end)
-        .is_none_or(|byte| *byte == b'/' || *byte == separator || evidence_delimiter(*byte))
+        .is_none_or(|byte| *byte == b'/' || *byte == separator || home_path_delimiter(*byte))
 }
 
 fn dash_start_boundary(bytes: &[u8], start: usize) -> bool {
     start == 0
         || bytes
             .get(start - 1)
-            .is_some_and(|byte| evidence_delimiter(*byte) || *byte == b'/')
+            .is_some_and(|byte| home_path_delimiter(*byte) || *byte == b'/')
 }
 
 fn generic_home_path_end(bytes: &[u8], start: usize) -> Option<usize> {
@@ -598,16 +605,16 @@ fn generic_home_path_end(bytes: &[u8], start: usize) -> Option<usize> {
     // preceding slash makes the slash form a nested path such as
     // /mnt/home/shared; a dash-encoded slug normally does follow a slash.
     if start != 0
-        && !bytes
-            .get(start - 1)
-            .is_some_and(|byte| evidence_delimiter(*byte) || (separator == b'-' && *byte == b'/'))
+        && !bytes.get(start - 1).is_some_and(|byte| {
+            home_path_delimiter(*byte) || (separator == b'-' && *byte == b'/')
+        })
     {
         return None;
     }
     let component_start = start + prefix.len();
     let mut component_end = component_start;
     while let Some(byte) = bytes.get(component_end) {
-        if *byte == b'/' || *byte == separator || evidence_delimiter(*byte) {
+        if *byte == b'/' || *byte == separator || home_path_delimiter(*byte) {
             break;
         }
         component_end += 1;
