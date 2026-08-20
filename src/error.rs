@@ -308,7 +308,10 @@ mod tests {
 
     #[test]
     fn registry_invalid_data_maps_to_invalid_input_65() {
-        let error = std::io::Error::new(ErrorKind::InvalidData, "stream did not contain valid UTF-8");
+        let error = std::io::Error::new(
+            ErrorKind::InvalidData,
+            "stream did not contain valid UTF-8",
+        );
         let err = AppError::from_registry_file(error, std::path::Path::new("/tmp/repos.txt"));
         assert_eq!(err.code, "invalid_input");
         assert_eq!(err.exit_code, 65);
