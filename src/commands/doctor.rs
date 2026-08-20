@@ -700,12 +700,12 @@ mod tests {
         assert!(contains_home_path(
             b"PATH=/opt/bin:/Users/bob/bin",
             None,
-            None
+            None,
         ));
         assert!(contains_home_path(
             b"PATH=/opt/bin:-Users-bob-project/cache",
             None,
-            None
+            None,
         ));
     }
 
