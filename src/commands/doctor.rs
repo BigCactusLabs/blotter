@@ -421,7 +421,8 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
     let mut leak_findings = Vec::new();
     let mut records = HashMap::<String, Vec<u8>>::new();
     let mut record_ids = HashSet::new();
-    let mut resolves = Vec::<(usize, String)>::new();
+    let mut base_resolve_ids = HashSet::new();
+    let mut resolves = Vec::<(usize, String, bool)>::new();
     let mut checked_lines = 0;
     for scanned in store::scan(bytes) {
         checked_lines += 1;
@@ -540,20 +541,28 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
                     }
                     record_ids.insert(id);
                 }
-                LogEvent::Resolve { id, .. } => {
-                    resolves.push((line, id));
+                LogEvent::Resolve { id, amend, .. } => {
+                    if !amend {
+                        base_resolve_ids.insert(id.clone());
+                    }
+                    resolves.push((line, id, amend));
                 }
                 LogEvent::Unknown => unreachable!("scanner classifies unknown events"),
             },
         }
     }
-    for (line, id) in resolves {
-        if !record_ids.contains(&id) {
-            findings.push(finding(
-                line,
-                "orphan_resolve",
-                format!("resolve references unknown record {id}"),
-            ));
+    for (line, id, amend) in resolves {
+        let message = if !record_ids.contains(&id) {
+            Some(format!("resolve references unknown record {id}"))
+        } else if amend && !base_resolve_ids.contains(&id) {
+            Some(format!(
+                "amend references record {id} without a base resolve"
+            ))
+        } else {
+            None
+        };
+        if let Some(message) = message {
+            findings.push(finding(line, "orphan_resolve", message));
         }
     }
     findings.extend(leak_findings);
@@ -686,6 +695,33 @@ mod tests {
         format!(
             r#"{{"kind":"resolve","id":"{id}","ts":"2026-01-15T00:00:01.000Z","agent":"t","note":null}}"#
         )
+    }
+
+    fn amend(id: &str) -> String {
+        format!(
+            r#"{{"kind":"resolve","id":"{id}","ts":"2026-01-15T00:00:02.000Z","agent":"t","note":"correction","amend":true}}"#
+        )
+    }
+
+    #[test]
+    fn amend_without_a_base_resolve_is_an_orphan_finding() {
+        let id = "pc_aaaaaaaaaaaa";
+        let bytes = format!("{}\n{}\n", cut(id), amend(id));
+        let folded = crate::store::fold_bytes(bytes.as_bytes());
+        assert_eq!(folded.warnings, ["skipped 1 orphan resolve"]);
+
+        let data = inspect(bytes.as_bytes(), None);
+        assert!(!data.healthy);
+        assert_eq!(data.findings.len(), 1);
+        let finding = &data.findings[0];
+        assert_eq!(finding.line, 2);
+        assert_eq!(finding.kind, "orphan_resolve");
+        let expected = "amend references record pc_aaaaaaaaaaaa without a base resolve";
+        assert_eq!(finding.message, expected);
+
+        let with_base = format!("{}\n{}\n{}\n", cut(id), amend(id), resolve(id));
+        let data = inspect(with_base.as_bytes(), None);
+        assert!(data.healthy, "findings: {:?}", data.findings);
     }
 
     /// The derived post-fix report must equal a full reinspection of the
