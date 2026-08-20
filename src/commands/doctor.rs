@@ -707,20 +707,17 @@ mod tests {
     fn amend_without_a_base_resolve_is_an_orphan_finding() {
         let id = "pc_aaaaaaaaaaaa";
         let bytes = format!("{}\n{}\n", cut(id), amend(id));
-        assert_eq!(
-            crate::store::fold_bytes(bytes.as_bytes()).warnings,
-            ["skipped 1 orphan resolve"]
-        );
+        let folded = crate::store::fold_bytes(bytes.as_bytes());
+        assert_eq!(folded.warnings, ["skipped 1 orphan resolve"]);
 
         let data = inspect(bytes.as_bytes(), None);
         assert!(!data.healthy);
         assert_eq!(data.findings.len(), 1);
-        assert_eq!(data.findings[0].line, 2);
-        assert_eq!(data.findings[0].kind, "orphan_resolve");
-        assert_eq!(
-            data.findings[0].message,
-            "amend references record pc_aaaaaaaaaaaa without a base resolve"
-        );
+        let finding = &data.findings[0];
+        assert_eq!(finding.line, 2);
+        assert_eq!(finding.kind, "orphan_resolve");
+        let expected = "amend references record pc_aaaaaaaaaaaa without a base resolve";
+        assert_eq!(finding.message, expected);
 
         let with_base = format!("{}\n{}\n{}\n", cut(id), amend(id), resolve(id));
         let data = inspect(with_base.as_bytes(), None);
