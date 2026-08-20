@@ -274,6 +274,15 @@ mod tests {
     }
 
     #[test]
+    fn log_open_directory_maps_to_invalid_input_65() {
+        let error = std::io::Error::new(ErrorKind::IsADirectory, "is a directory");
+        let err = AppError::from_log_open(error, std::path::Path::new("/tmp/log-dir"));
+        assert_eq!(err.code, "invalid_input");
+        assert_eq!(err.exit_code, 65);
+        assert!(err.message.contains("not a regular file"));
+    }
+
+    #[test]
     fn registry_not_found_maps_to_not_found_66() {
         let error = std::io::Error::new(ErrorKind::NotFound, "missing");
         let err = AppError::from_registry_file(error, std::path::Path::new("/tmp/x"));
@@ -287,5 +296,14 @@ mod tests {
         let err = AppError::from_registry_file(error, std::path::Path::new("/tmp/x"));
         assert_eq!(err.code, "permission_denied");
         assert_eq!(err.exit_code, 77);
+    }
+
+    #[test]
+    fn registry_invalid_data_maps_to_invalid_input_65() {
+        let error = std::io::Error::new(ErrorKind::InvalidData, "stream did not contain valid UTF-8");
+        let err = AppError::from_registry_file(error, std::path::Path::new("/tmp/repos.txt"));
+        assert_eq!(err.code, "invalid_input");
+        assert_eq!(err.exit_code, 65);
+        assert!(err.message.contains("not valid UTF-8"));
     }
 }
