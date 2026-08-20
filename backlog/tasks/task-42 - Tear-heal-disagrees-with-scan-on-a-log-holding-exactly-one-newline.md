@@ -1,9 +1,10 @@
 ---
 id: TASK-42
 title: Tear-heal disagrees with scan on a log holding exactly one newline
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-19 14:43'
+updated_date: '2026-08-19 20:52'
 labels:
   - bug
   - store

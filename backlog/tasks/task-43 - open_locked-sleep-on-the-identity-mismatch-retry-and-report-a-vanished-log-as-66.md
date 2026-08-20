@@ -3,9 +3,10 @@ id: TASK-43
 title: >-
   open_locked: sleep on the identity-mismatch retry and report a vanished log as
   66
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-19 14:43'
+updated_date: '2026-08-19 20:52'
 labels:
   - bug
   - store

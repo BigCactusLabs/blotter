@@ -1,5 +1,5 @@
 use crate::cli::DogearArgs;
-use crate::commands::add::{read_text, validate_text};
+use crate::commands::add::{read_text, redact_evidence, validate_text};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use crate::redact::rewrite_home_paths;
@@ -39,7 +39,10 @@ pub fn run(
         agent,
         text,
         tags,
-        evidence: args.evidence,
+        evidence: args
+            .evidence
+            .as_deref()
+            .map(|value| redact_evidence(value, home.as_deref())),
         cwd: store::record_cwd(&cwd, resolved.cwd_repo(), home.as_deref()),
     };
     let (changed, record) = store::append_unique(&resolved.path, record, args.dry_run)?;

@@ -3,9 +3,10 @@ id: TASK-44
 title: >-
   store::absolute normalizes .. lexically, diverging from the OS across
   symlinked directories
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-19 14:43'
+updated_date: '2026-08-19 20:52'
 labels:
   - bug
   - store

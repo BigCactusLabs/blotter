@@ -6,7 +6,7 @@ use crate::{LogEvent, compute_dogear_id, compute_id};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -210,27 +210,49 @@ fn apply_fixes(log: &mut File, path: &Path, now: Timestamp) -> AppResult<DoctorD
     // A symlinked log is locked and read through the link; the swap must land
     // on the target, not replace the link with a regular file.
     let path = &store::resolve_symlinked_log(path)?;
-    let backup = store::write_new_file(
-        &store::suffixed_path(path, &format!(".bak-{}", store::backup_timestamp(now))),
-        &original,
-        &permissions,
-    )?;
+    let backup_path = store::suffixed_path(path, &format!(".bak-{}", store::backup_timestamp(now)));
+    if backup_path.exists() {
+        return Err(AppError::stale_backup(&backup_path));
+    }
+    let backup = store::write_new_file(&backup_path, &original, &permissions)?;
+    let quarantine_path = store::suffixed_path(path, ".quarantine.jsonl");
+    // `append_file` extends an existing quarantine sidecar, so its rollback
+    // restores the prior length instead of deleting an earlier repair's lines.
+    let quarantine_len = fs::metadata(&quarantine_path)
+        .ok()
+        .map(|metadata| metadata.len());
     let quarantined = quarantined_bytes(&original, &applied);
-    let quarantine = store::append_file(
-        &store::suffixed_path(path, ".quarantine.jsonl"),
-        &quarantined,
-        &permissions,
-    )?;
+    let quarantine = match store::append_file(&quarantine_path, &quarantined, &permissions) {
+        Ok(quarantine) => quarantine,
+        Err(error) => {
+            // A failed append into a pre-existing sidecar leaves partial
+            // bytes behind; truncate back alongside removing the backup.
+            undo_created_outputs(&[
+                (backup.as_path(), None),
+                (quarantine_path.as_path(), quarantine_len),
+            ]);
+            return Err(error);
+        }
+    };
     let repaired = repaired_bytes(&original, &applied);
-    store::replace_log(
+    if let Err(error) = store::replace_log(
         path,
         &repaired,
         &permissions,
         &format!(".tmp-fix-{}", std::process::id()),
-    )?;
-    let repaired = fs::read(path).map_err(|error| AppError::from_io(error, path))?;
+    ) {
+        undo_created_outputs(&[
+            (backup.as_path(), None),
+            (quarantine.as_path(), quarantine_len),
+        ]);
+        return Err(error);
+    }
+    // The swap renames a new inode over the path, so the held lock no longer
+    // covers the file there; diagnose the bytes just written, never a reread —
+    // and derive that diagnosis from the pre-fix findings rather than parsing
+    // those bytes a second time.
     Ok(with_fix(
-        inspect(&repaired, None),
+        post_fix_data(&before, &applied),
         FixData {
             changed: true,
             applied,
@@ -240,6 +262,62 @@ fn apply_fixes(log: &mut File, path: &Path, now: Timestamp) -> AppResult<DoctorD
             dry_run: false,
         },
     ))
+}
+
+/// Mirror of `archive::remove_created_outputs` for an aborted repair: a
+/// sidecar this run created is removed, and one it only extended is truncated
+/// back. Without it a failed repair leaves a backup that claims a repair which
+/// never happened, and the retry then fails on that leftover.
+fn undo_created_outputs(outputs: &[(&Path, Option<u64>)]) {
+    for (path, previous_len) in outputs {
+        match previous_len {
+            None => {
+                let _ = fs::remove_file(path);
+            }
+            Some(len) => {
+                let _ = OpenOptions::new()
+                    .write(true)
+                    .open(path)
+                    .and_then(|file| file.set_len(*len));
+            }
+        }
+    }
+}
+
+/// What `inspect` would report on the repaired bytes, derived from the pre-fix
+/// report instead of decoding the whole log again.
+///
+/// `repaired_bytes` only drops whole quarantined lines, so the surviving
+/// findings are exactly the ones no fix removed, each renumbered by the lines
+/// dropped ahead of it. Nothing that survives depended on a dropped line: only a
+/// scan error is fixable, a scan error is the only finding its line can carry,
+/// and a line that failed to parse contributes no record, no duplicate payload
+/// and no resolve target. Dropping a line also cannot tear the tail or orphan
+/// the leading empty segment, because each dropped line takes its own newline.
+fn post_fix_data(before: &DoctorData, applied: &[AppliedFix]) -> DoctorData {
+    let mut removed: Vec<usize> = applied
+        .iter()
+        .filter(|fix| fix.action == "quarantined")
+        .map(|fix| fix.line)
+        .collect();
+    removed.sort_unstable();
+    let findings: Vec<Finding> = before
+        .findings
+        .iter()
+        .filter(|finding| removed.binary_search(&finding.line).is_err())
+        .map(|finding| Finding {
+            line: finding.line - removed.partition_point(|line| *line < finding.line),
+            kind: finding.kind.clone(),
+            message: finding.message.clone(),
+            fixable: finding.fixable,
+        })
+        .collect();
+    DoctorData {
+        healthy: findings.is_empty(),
+        findings,
+        checked_lines: before.checked_lines - removed.len(),
+        fix: None,
+    }
 }
 
 fn with_fix(mut data: DoctorData, fix: FixData) -> DoctorData {
@@ -590,6 +668,63 @@ fn add_leak_findings(
                 "leak",
                 format!("line {line} contains deny pattern {pattern:?}"),
             ));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cut(id: &str) -> String {
+        format!(
+            r#"{{"kind":"cut","id":"{id}","ts":"2026-01-15T00:00:00.000Z","agent":"t","text":"x","tags":[],"severity":"minor","cwd":"."}}"#
+        )
+    }
+
+    fn resolve(id: &str) -> String {
+        format!(
+            r#"{{"kind":"resolve","id":"{id}","ts":"2026-01-15T00:00:01.000Z","agent":"t","note":null}}"#
+        )
+    }
+
+    /// The derived post-fix report must equal a full reinspection of the
+    /// repaired bytes on every shape, including the ones where line numbers
+    /// shift, the log keeps a leading empty segment, or the repair empties it.
+    #[test]
+    fn derived_post_fix_report_matches_a_full_reinspection() {
+        let cases: Vec<Vec<u8>> = vec![
+            b"".to_vec(),
+            b"\n".to_vec(),
+            b"not-json\n".to_vec(),
+            b"not-json".to_vec(),
+            format!("\n{}\nnot-json\n", cut("bl_aaaaaaaaaaaa")).into_bytes(),
+            format!("not-json\n{}\n{}\n", cut("bl_a"), cut("bl_a")).into_bytes(),
+            format!("{}\nnot-json\n{}\n", cut("bl_a"), cut("bl_a")).into_bytes(),
+            format!("{}\n{}\nnot-json", cut("bl_a"), resolve("bl_b")).into_bytes(),
+            format!(
+                "<<<<<<< HEAD\n{}\n>>>>>>> other\n{}\n",
+                cut("bl_a"),
+                resolve("bl_zzz")
+            )
+            .into_bytes(),
+            br#"{"kind":"nope"}"#.to_vec(),
+            format!("{{\"kind\":\"nope\"}}\nnot-json\n{}\n", cut("bl_a")).into_bytes(),
+            b"not-json\nnot-json\nnot-json\n".to_vec(),
+            format!("{}\n{}\n", cut("bl_a"), resolve("bl_a")).into_bytes(),
+        ];
+        for bytes in cases {
+            let before = inspect(&bytes, None);
+            let applied = planned_fixes(&before.findings);
+            let repaired = repaired_bytes(&bytes, &applied);
+            let expected = serde_json::to_value(inspect(&repaired, None)).unwrap();
+            let derived = serde_json::to_value(post_fix_data(&before, &applied)).unwrap();
+            assert_eq!(
+                derived,
+                expected,
+                "derived report drifted for {:?}",
+                String::from_utf8_lossy(&bytes)
+            );
         }
     }
 }

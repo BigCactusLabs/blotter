@@ -77,7 +77,13 @@ impl CutEventExt for LogEvent {
 }
 
 pub fn command() -> Command {
-    let mut command = assert_cmd::cargo::cargo_bin_cmd!("blotter");
+    Command::from_std(spawn_command())
+}
+
+/// The same clean environment as `command()`, as a `std::process::Command`,
+/// for tests that must spawn blotter and act while it runs.
+pub fn spawn_command() -> std::process::Command {
+    let mut command = std::process::Command::new(assert_cmd::cargo::cargo_bin!("blotter"));
     command
         .env("BLOTTER_NOW", NOW)
         .env_remove("BLOTTER_FILE")
@@ -231,39 +237,4 @@ pub fn append_lines(file: &Path, lines: &[String]) {
         log.push('\n');
     }
     std::fs::write(file, log).unwrap();
-}
-
-pub fn hook_exec_claude_code(file: &Path, stdin: impl Into<Vec<u8>>) -> std::process::Output {
-    command()
-        .arg("--file")
-        .arg(file)
-        .args(["hook", "exec", "claude-code"])
-        .write_stdin(stdin)
-        .output()
-        .unwrap()
-}
-
-pub fn hook_exec_is_silent(output: &std::process::Output) {
-    assert_eq!(
-        output.status.code(),
-        Some(0),
-        "stderr={}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(output.stdout.is_empty());
-    assert!(output.stderr.is_empty());
-}
-
-pub fn claude_bash_failure(command: &str, cwd: &Path) -> Value {
-    json!({
-        "hook_event_name": "PostToolUseFailure",
-        "tool_name": "Bash",
-        "tool_input": {"command": command, "description": "run a command"},
-        "tool_use_id": "toolu_123",
-        "error": "Command exited with non-zero status code 1; API_KEY=super-secret-token",
-        "is_interrupt": false,
-        "duration_ms": 42,
-        "cwd": cwd,
-        "session_id": "session_123"
-    })
 }

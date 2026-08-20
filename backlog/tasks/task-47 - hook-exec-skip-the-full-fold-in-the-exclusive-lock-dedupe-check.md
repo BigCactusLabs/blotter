@@ -1,9 +1,10 @@
 ---
 id: TASK-47
 title: 'hook exec: skip the full fold in the exclusive-lock dedupe check'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-19 14:43'
+updated_date: '2026-08-19 20:52'
 labels:
   - performance
   - hook
@@ -26,3 +27,9 @@ hook exec claude-code (src/commands/hook.rs:307) folds the whole log to answer o
 - [ ] #4 Lane stays fail-open: stdout empty, exit 0
 - [ ] #5 All four gates pass; store/concurrency-adjacent, so the suite runs five times
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Not implemented: mooted by the r32 auto-capture retirement — the hook no longer folds or appends, so there is no dedupe check to optimize.
+<!-- SECTION:NOTES:END -->

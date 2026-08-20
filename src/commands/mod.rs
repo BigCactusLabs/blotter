@@ -40,7 +40,7 @@ pub fn run(cli: Cli, now: Timestamp) -> AppResult<i32> {
         Command::Sweep(args) => sweep::run(args, cli.file, cli.pretty, now),
         Command::Resolve(args) => resolve::run(args, cli.file, cli.pretty, now),
         Command::Archive(args) => archive::run(args, cli.file, cli.pretty, now),
-        Command::Hook(args) => hook::run(args, cli.file, cli.pretty, now),
+        Command::Hook(args) => hook::run(args),
         Command::Schema { target } => run_schema(target, cli.pretty),
         Command::Doctor(args) => doctor::run(args, cli.file, cli.pretty, now),
     }
@@ -52,21 +52,15 @@ pub fn run_schema(target: SchemaTarget, pretty: bool) -> AppResult<i32> {
     Ok(0)
 }
 
+/// The retired auto-capture receiver (r32). It resolves no clock and touches no log, so no
+/// environment fault can make an already-installed harness hook fail into its host session.
 pub fn run_hook_exec(cli: Cli) -> i32 {
-    let Cli { file, command, .. } = cli;
     let Command::Hook(HookArgs {
         command: HookCommand::Exec(args),
-    }) = command
+    }) = cli.command
     else {
         unreachable!("run_hook_exec only receives hook exec commands");
     };
-    let now = match crate::effective_now() {
-        Ok(now) => now,
-        Err(error) => {
-            hook::explain_clock_failure(&error.message);
-            return 0;
-        }
-    };
-    let _ = hook::exec(args, file, now);
+    hook::exec(args);
     0
 }

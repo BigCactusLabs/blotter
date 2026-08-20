@@ -2,7 +2,7 @@ use crate::cli::ArchiveArgs;
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use crate::store;
-use crate::{IdNamespace, ItemStatus, LogEvent, id_namespace, parse_before};
+use crate::{IdNamespace, ItemStatus, id_namespace, parse_before};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -147,7 +147,10 @@ fn apply_archive(
 }
 
 fn plan_archive(bytes: &[u8], cutoff: Timestamp) -> ArchivePlan {
-    let folded = store::fold_bytes(bytes);
+    // One parse pass: the fold carries the (line, id, ts) tuple of every
+    // record-carrying physical line, so the line groupings below cost a walk
+    // over those tuples instead of a second decode of the whole log.
+    let folded = store::fold_bytes_with_lines(bytes);
     let closed_ids = folded
         .items
         .iter()
@@ -157,26 +160,20 @@ fn plan_archive(bytes: &[u8], cutoff: Timestamp) -> ArchivePlan {
         .map(|item| item.id.clone())
         .collect::<HashSet<_>>();
 
-    let mut group_lines = HashMap::<String, Vec<(usize, bool)>>::new();
-    for scanned in store::scan(bytes) {
-        let line = scanned.line;
-        let Ok(event) = scanned.event else {
-            continue;
-        };
-        let Some(id) = event.id() else {
-            continue;
-        };
-        if id_namespace(id) != Some(IdNamespace::Bl) {
+    let mut group_lines = HashMap::<&str, Vec<(usize, bool)>>::new();
+    for folded_line in folded.lines() {
+        if id_namespace(&folded_line.id) != Some(IdNamespace::Bl) {
             continue;
         }
         group_lines
-            .entry(id.to_owned())
+            .entry(folded_line.id.as_str())
             .or_default()
-            .push((line, event_timestamp(&event) < cutoff));
+            .push((folded_line.line, folded_line.ts < cutoff));
     }
 
     let eligible_ids = closed_ids
-        .into_iter()
+        .iter()
+        .map(String::as_str)
         .filter(|id| {
             group_lines
                 .get(id)
@@ -205,7 +202,11 @@ fn plan_archive(bytes: &[u8], cutoff: Timestamp) -> ArchivePlan {
             archived += 1;
         } else {
             kept_bytes.extend_from_slice(raw);
-            kept += 1;
+            // A leading empty segment has zero physical lines under the scan
+            // contract (r33/TASK-42): its byte survives, its count does not.
+            if !(index == 0 && raw == b"\n") {
+                kept += 1;
+            }
         }
     }
 
@@ -222,14 +223,6 @@ fn plan_archive(bytes: &[u8], cutoff: Timestamp) -> ArchivePlan {
         archived_bytes,
         warnings: folded.warnings,
     }
-}
-
-fn event_timestamp(event: &LogEvent) -> Timestamp {
-    let ts = match event {
-        LogEvent::Cut { ts, .. } | LogEvent::Dogear { ts, .. } | LogEvent::Resolve { ts, .. } => ts,
-        LogEvent::Unknown => unreachable!("scanner classifies unknown events"),
-    };
-    ts.parse().expect("scanner validates event timestamps")
 }
 
 fn empty_plan() -> ArchivePlan {

@@ -1,9 +1,10 @@
 ---
 id: TASK-41
 title: 'doctor --fix: roll back sidecars on abort and diagnose inside the lock'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-19 14:42'
+updated_date: '2026-08-19 20:52'
 labels:
   - bug
   - doctor

@@ -1,5 +1,4 @@
 use crate::cli::RetrospectArgs;
-use crate::commands::hook;
 use crate::commands::triage::{self, Candidate, ChronicCluster};
 use crate::commands::verify::{self, RecurrenceGroup};
 use crate::error::{AppError, AppResult};
@@ -8,7 +7,30 @@ use crate::store;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// The first program word of an evidence command, after leading `VAR=value` assignments and
+/// reduced to its basename. Best-effort: this does not parse the shell.
+fn leading_program(command: &str) -> Option<&str> {
+    command
+        .split_whitespace()
+        .find(|word| !is_environment_assignment(word))
+        .map(|word| {
+            Path::new(word)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(word)
+        })
+}
+
+fn is_environment_assignment(word: &str) -> bool {
+    let Some((name, _)) = word.split_once('=') else {
+        return false;
+    };
+    let mut bytes = name.bytes();
+    matches!(bytes.next(), Some(byte) if byte.is_ascii_alphabetic() || byte == b'_')
+        && bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
 
 const MAX_EVIDENCE_TEXTS: usize = 10;
 const MAX_RESOLUTION_NOTES: usize = 5;
@@ -167,7 +189,7 @@ fn shared_program(members: &[Candidate]) -> Option<String> {
         else {
             continue;
         };
-        let Some(program) = hook::leading_program(command) else {
+        let Some(program) = leading_program(command) else {
             continue;
         };
         *programs.entry(program.into()).or_default() += 1;

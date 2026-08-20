@@ -247,10 +247,80 @@ fn doctor_fix_rejects_a_backup_collision_without_changing_the_log() {
     let backup = std::path::PathBuf::from(format!("{}.bak-20260709T183000123Z", file.display()));
     std::fs::write(&backup, b"existing backup").unwrap();
 
-    error(&run_file(&file, &["doctor", "--fix"]), 74, "io_error");
+    let envelope = error(&run_file(&file, &["doctor", "--fix"]), 74, "io_error");
+    assert!(
+        envelope
+            .error
+            .suggested_fix
+            .contains(&format!("{}", backup.display())),
+        "suggested_fix must name the leftover backup: {}",
+        envelope.error.suggested_fix
+    );
     assert_eq!(std::fs::read(&file).unwrap(), original);
     assert_eq!(std::fs::read(&backup).unwrap(), b"existing backup");
     assert!(!std::path::PathBuf::from(format!("{}.quarantine.jsonl", file.display())).exists());
+}
+
+#[test]
+fn doctor_fix_removes_the_backup_when_the_quarantine_append_fails() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let original = b"not-json\n";
+    std::fs::write(&file, original).unwrap();
+    // A directory at the quarantine path fails the append after the backup.
+    let quarantine = std::path::PathBuf::from(format!("{}.quarantine.jsonl", file.display()));
+    std::fs::create_dir(&quarantine).unwrap();
+
+    error(&run_file(&file, &["doctor", "--fix"]), 74, "io_error");
+    assert_eq!(std::fs::read(&file).unwrap(), original);
+    assert!(
+        !std::path::PathBuf::from(format!("{}.bak-20260709T183000123Z", file.display())).exists(),
+        "aborted repair must leave no backup"
+    );
+    assert!(quarantine.is_dir());
+}
+
+#[test]
+fn doctor_fix_undoes_created_outputs_when_replacement_fails() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let original = b"not-json\n";
+    std::fs::write(&file, original).unwrap();
+    let quarantine = std::path::PathBuf::from(format!("{}.quarantine.jsonl", file.display()));
+    std::fs::write(&quarantine, b"earlier-quarantine\n").unwrap();
+    let locked = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&file)
+        .unwrap();
+    locked.lock().unwrap();
+    let mut doctor = spawn_command();
+    doctor
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let child = doctor
+        .arg("--file")
+        .arg(&file)
+        .args(["doctor", "--fix"])
+        .spawn()
+        .unwrap();
+    let temporary = std::path::PathBuf::from(format!("{}.tmp-fix-{}", file.display(), child.id()));
+    std::fs::write(&temporary, b"existing temporary").unwrap();
+    locked.unlock().unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    error(&output, 74, "io_error");
+    assert_eq!(std::fs::read(&file).unwrap(), original);
+    assert_eq!(std::fs::read(&temporary).unwrap(), b"existing temporary");
+    assert!(
+        !std::path::PathBuf::from(format!("{}.bak-20260709T183000123Z", file.display())).exists(),
+        "aborted repair must leave no backup"
+    );
+    assert_eq!(
+        std::fs::read(&quarantine).unwrap(),
+        b"earlier-quarantine\n",
+        "aborted repair must not extend the quarantine sidecar"
+    );
 }
 
 #[test]

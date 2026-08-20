@@ -1,9 +1,10 @@
 ---
 id: TASK-46
 title: archive and doctor --fix each parse the whole log twice
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-19 14:43'
+updated_date: '2026-08-19 21:46'
 labels:
   - performance
 dependencies: []
@@ -25,3 +26,9 @@ plan_archive calls store::fold_bytes (src/commands/archive.rs:150) then store::s
 - [ ] #4 Measured before/after CPU and peak RSS recorded in the baselines doc
 - [ ] #5 All four gates pass; store/concurrency-adjacent, so the suite runs five times
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+plan_archive single-parse via fold_bytes_with_lines; doctor --fix derives post-fix findings from pre-fix findings. Byte-identity proven by 234-invocation differential against the pre-change binary. archive CPU 1.52x, doctor --fix CPU 2.00x / RSS -20% at 100k.
+<!-- SECTION:NOTES:END -->

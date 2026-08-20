@@ -1,9 +1,10 @@
 ---
 id: TASK-45
 title: Bound triage's residual prefilter cost at 300k records
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-19 14:43'
+updated_date: '2026-08-19 21:54'
 labels:
   - performance
 dependencies: []
@@ -24,3 +25,9 @@ TASK-29.3 replaced triage's quadratic candidate scan with exact-normalized-title
 - [ ] #3 Peak RSS is an acceptance criterion alongside CPU
 - [ ] #4 All four gates pass
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Budget recorded in baselines doc for 10k/30k/100k/300k (CPU + peak RSS ceilings). Shipped three provable prefilter bounds: reachability bound, representative floor, singleton-tag pool drop. 7.48x triage / 6.26x retrospect CPU at 300k, byte-identical on 16/16 envelope pairs.
+<!-- SECTION:NOTES:END -->

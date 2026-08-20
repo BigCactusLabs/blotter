@@ -1,9 +1,10 @@
 ---
 id: TASK-52
 title: 'Destructive-command guard matches command text as data, not as a command'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-19 17:35'
+updated_date: '2026-08-19 20:53'
 labels:
   - tooling
   - hooks
@@ -29,3 +30,9 @@ The failure is asymmetric. A false negative lets a real destructive command thro
 
 Cheapest credible fix: match on command position rather than anywhere in the string. Strip heredoc bodies and quoted arguments before matching, or match only the first word of each command segment. A scratchpad-path allowlist separately fixes bl_f334bf71a138.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Closed via TASK-52.1 (structural command-position matcher) and TASK-52.2 (deny→ask); guard rewritten as ~/.claude/hooks/destructive-guard.py with a 48-fixture bidirectional test file.
+<!-- SECTION:NOTES:END -->

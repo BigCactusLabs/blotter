@@ -1,9 +1,10 @@
 ---
 id: TASK-48
 title: Decide whether dogear --evidence joins the redaction surface
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-19 14:43'
+updated_date: '2026-08-19 20:58'
 labels:
   - redaction
 dependencies: []
@@ -24,3 +25,9 @@ add --evidence is redacted; dogear --evidence is stored verbatim. Verified: add 
 - [ ] #3 If the deferral stands, the dogear docs say so, so the doctor --leaks result is not a surprise
 - [ ] #4 All four gates pass
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Decision: extend. dogear --evidence and resolve --note/--amend join the write-time redaction surface (design doc r34), superseding r25's resolution deferral; one rule now covers every authored free-text field.
+<!-- SECTION:NOTES:END -->

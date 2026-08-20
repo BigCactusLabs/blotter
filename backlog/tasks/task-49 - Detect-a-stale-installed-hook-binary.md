@@ -1,9 +1,10 @@
 ---
 id: TASK-49
 title: Detect a stale installed hook binary
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-19 14:43'
+updated_date: '2026-08-19 20:52'
 labels:
   - hook
   - tooling
@@ -25,3 +26,9 @@ The Claude Code hook runs whatever blotter binary the settings command names, ty
 - [ ] #3 The hook lane stays fail-open and the check never disrupts a host session
 - [ ] #4 All four gates pass
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Not implemented: mooted by the r32 auto-capture retirement — no binary path remains in harness settings to drift; a stale installed entry hits the fail-open no-op receiver.
+<!-- SECTION:NOTES:END -->
