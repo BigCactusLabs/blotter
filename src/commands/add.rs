@@ -27,9 +27,7 @@ pub struct AddData {
 
 pub fn run(args: AddArgs, file: Option<PathBuf>, pretty: bool, now: Timestamp) -> AppResult<i32> {
     let resolved = store::discover(file)?;
-    let cwd = std::env::current_dir()
-        .map_err(|error| AppError::from_io(error, std::path::Path::new(".")))?;
-    let home = store::home_dir(&cwd);
+    let home = store::home_dir(&resolved.cwd);
     let evidence = build_evidence(&args, home.as_deref())?;
     let text = rewrite_home_paths(&read_text(args.text, "cut", "add")?, home.as_deref());
     validate_text(&text, "cut")?;
@@ -49,7 +47,7 @@ pub fn run(args: AddArgs, file: Option<PathBuf>, pretty: bool, now: Timestamp) -
         text,
         tags,
         severity: args.severity,
-        cwd: store::record_cwd(&cwd, resolved.cwd_repo(), home.as_deref()),
+        cwd: store::record_cwd(&resolved.cwd, resolved.cwd_repo(), home.as_deref()),
         source: None,
         evidence,
     };

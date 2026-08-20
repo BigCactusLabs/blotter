@@ -330,6 +330,10 @@ pub struct HookArgs {
 
 #[derive(Debug, Subcommand)]
 pub enum HookCommand {
+    #[command(
+        about = "Retired auto-capture receiver; files nothing; keeps installed hooks fail open",
+        long_about = "Retired auto-capture receiver kept so installed hooks fail open. It files nothing. Global flags such as --file and --pretty are accepted but ignored."
+    )]
     Exec(HookExecArgs),
 }
 

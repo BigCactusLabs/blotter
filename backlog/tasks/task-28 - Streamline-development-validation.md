@@ -1,9 +1,10 @@
 ---
 id: TASK-28
 title: Streamline development validation
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-13 03:01'
+updated_date: '2026-08-20 15:34'
 labels:
   - testing
   - performance
@@ -20,7 +21,13 @@ Parent group for shortening local feedback while preserving the agent-facing CLI
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Child tasks provide a documented fast iterative command and a maintainable test layout.
-- [ ] #2 The final AGENTS.md gate still runs cargo test --all-features, Clippy, formatting, and the release build.
-- [ ] #3 No test is removed unless its regression protection is preserved by independent behavior, artifact, schema, determinism, or error-contract coverage.
+- [x] #1 Child tasks provide a documented fast iterative command and a maintainable test layout.
+- [x] #2 The final AGENTS.md gate still runs cargo test --all-features, Clippy, formatting, and the release build.
+- [x] #3 No test is removed unless its regression protection is preserved by independent behavior, artifact, schema, determinism, or error-contract coverage.
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Close-out verification 2026-08-20: scripts/dev/test-fast.sh present and documented in AGENTS.md (nextest fast loop, TASK-28.1); tests/cli/ split into 21 declared modules with every_test_module_file_is_declared_in_main guard in docs.rs (TASK-28.2); AGENTS.md gate still requires cargo test --all-features, clippy -D warnings, fmt --check, release build. Both subtasks Done. No tests removed.
+<!-- SECTION:NOTES:END -->

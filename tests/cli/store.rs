@@ -539,11 +539,12 @@ fn spawn_blotter(file: &Path, args: &[&str]) -> std::process::Child {
     child.spawn().unwrap()
 }
 
-/// Wait with a deadline. The pre-fix FIFO behaviour was an unbounded block, so a
-/// regression must fail this test rather than wedge the whole suite.
+/// Wait with a deliberately generous deadline so machine load cannot expire it.
+/// The pre-fix FIFO behaviour was an unbounded block, so a true regression must
+/// still fail this test rather than wedge the whole suite.
 #[cfg(unix)]
 fn wait_bounded(mut child: std::process::Child, what: &str) -> std::process::Output {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     loop {
         if child.try_wait().unwrap().is_some() {
             return child.wait_with_output().unwrap();

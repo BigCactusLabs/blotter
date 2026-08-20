@@ -22,8 +22,9 @@ pub fn run(args: HookArgs) -> AppResult<i32> {
 }
 
 /// Reads and discards the harness payload, then reports the retirement under
-/// `BLOTTER_HOOK_EXPLAIN=1`. Draining matters: a hook process that exits without reading
-/// leaves the harness writing to a closed pipe.
+/// `BLOTTER_HOOK_EXPLAIN=1`. The drain is bounded at 1 MiB; payloads larger than that bound
+/// may still observe EPIPE. The bound is deliberate so a hostile or endless stdin cannot hold
+/// the process open.
 pub fn exec(_args: HookExecArgs) {
     let mut sink = std::io::sink();
     let _ = std::io::copy(
