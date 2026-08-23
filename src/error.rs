@@ -183,7 +183,10 @@ impl AppError {
 
     /// Error mapping for reading an explicit `sweep --registry` file. The flag
     /// names a file as explicitly as `--file` does, so a missing path is
-    /// `not_found` / 66 rather than the `io_error` / 74 `from_io` gives.
+    /// `not_found` / 66 rather than the `io_error` / 74 `from_io` gives. A path
+    /// that exists but can never be read as a registry — a directory, or bytes
+    /// that are not UTF-8 — is `invalid_input` / 65 for the same reason the log
+    /// path is: the input is wrong, not the filesystem.
     pub fn from_registry_file(error: std::io::Error, path: &std::path::Path) -> Self {
         match error.kind() {
             std::io::ErrorKind::NotFound => Self::new(
@@ -195,6 +198,13 @@ impl AppError {
             std::io::ErrorKind::InvalidData => Self::invalid_input(
                 format!("sweep registry file is not valid UTF-8: {}", path.display()),
                 "Save the registry as UTF-8 text with one path per line, then retry.",
+            ),
+            std::io::ErrorKind::IsADirectory => Self::invalid_input(
+                format!(
+                    "sweep registry file is not a regular file: {}",
+                    path.display()
+                ),
+                "Pass a UTF-8 text file with one repository path per line to --registry PATH.",
             ),
             _ => Self::from_io(error, path),
         }
@@ -308,13 +318,20 @@ mod tests {
 
     #[test]
     fn registry_invalid_data_maps_to_invalid_input_65() {
-        let error = std::io::Error::new(
-            ErrorKind::InvalidData,
-            "stream did not contain valid UTF-8",
-        );
+        let error =
+            std::io::Error::new(ErrorKind::InvalidData, "stream did not contain valid UTF-8");
         let err = AppError::from_registry_file(error, std::path::Path::new("/tmp/repos.txt"));
         assert_eq!(err.code, "invalid_input");
         assert_eq!(err.exit_code, 65);
         assert!(err.message.contains("not valid UTF-8"));
+    }
+
+    #[test]
+    fn registry_directory_maps_to_invalid_input_65() {
+        let error = std::io::Error::new(ErrorKind::IsADirectory, "is a directory");
+        let err = AppError::from_registry_file(error, std::path::Path::new("/tmp/repos"));
+        assert_eq!(err.code, "invalid_input");
+        assert_eq!(err.exit_code, 65);
+        assert!(err.message.contains("not a regular file"));
     }
 }

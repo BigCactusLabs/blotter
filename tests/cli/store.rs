@@ -619,3 +619,18 @@ fn a_device_log_path_is_rejected_before_an_unbounded_read() {
         "list /dev/null",
     );
 }
+
+/// r31 requires a directory log path to answer `invalid_input` (65) like every
+/// other non-regular type. The read commands reached that answer through the
+/// opened-handle check, but a mutation opens read+append, where the OS rejects a
+/// directory before there is a handle to stat — so `add` alone answered 74.
+#[cfg(unix)]
+#[test]
+fn a_directory_log_path_is_rejected_on_read_and_mutation_alike() {
+    let temp = TempDir::new().unwrap();
+    let directory = temp.path().join("log-directory");
+    std::fs::create_dir(&directory).unwrap();
+    for (what, args) in non_regular_log_cases() {
+        assert_non_regular_log(&run_file(&directory, &args), what);
+    }
+}
