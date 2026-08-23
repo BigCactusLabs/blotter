@@ -332,6 +332,14 @@ fn schema_documents_sweep() {
             .unwrap()
             .contains("relative paths")
     );
+    // r35: the rejection is part of the published contract, not just an
+    // internal mapping, so an agent can predict 65 without provoking it.
+    assert!(
+        sweep["flags"]["--registry"]
+            .as_str()
+            .unwrap()
+            .contains("invalid_input (65)")
+    );
     assert_eq!(sweep["flags"]["--since"], "full RFC3339|Nd|Nh; optional");
     assert_eq!(sweep["flags"]["--kind"], "cut|dogear|all; default cut");
     assert!(
