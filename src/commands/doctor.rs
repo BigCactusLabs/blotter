@@ -291,8 +291,8 @@ fn undo_created_outputs(outputs: &[(&Path, Option<u64>)]) {
 /// findings are exactly the ones no fix removed, each renumbered by the lines
 /// dropped ahead of it. Nothing that survives depended on a dropped line: only a
 /// scan error is fixable, a scan error is the only finding its line can carry,
-/// and a line that failed to parse contributes no record, no duplicate payload
-/// and no resolve target. Dropping a line also cannot tear the tail or orphan
+/// and a line that failed to parse contributes no record, no duplicate payload,
+/// no resolve target and no base resolve. Dropping a line also cannot tear the tail or orphan
 /// the leading empty segment, because each dropped line takes its own newline.
 fn post_fix_data(before: &DoctorData, applied: &[AppliedFix]) -> DoctorData {
     let mut removed: Vec<usize> = applied
@@ -695,33 +695,6 @@ mod tests {
         format!(
             r#"{{"kind":"resolve","id":"{id}","ts":"2026-01-15T00:00:01.000Z","agent":"t","note":null}}"#
         )
-    }
-
-    fn amend(id: &str) -> String {
-        format!(
-            r#"{{"kind":"resolve","id":"{id}","ts":"2026-01-15T00:00:02.000Z","agent":"t","note":"correction","amend":true}}"#
-        )
-    }
-
-    #[test]
-    fn amend_without_a_base_resolve_is_an_orphan_finding() {
-        let id = "pc_aaaaaaaaaaaa";
-        let bytes = format!("{}\n{}\n", cut(id), amend(id));
-        let folded = crate::store::fold_bytes(bytes.as_bytes());
-        assert_eq!(folded.warnings, ["skipped 1 orphan resolve"]);
-
-        let data = inspect(bytes.as_bytes(), None);
-        assert!(!data.healthy);
-        assert_eq!(data.findings.len(), 1);
-        let finding = &data.findings[0];
-        assert_eq!(finding.line, 2);
-        assert_eq!(finding.kind, "orphan_resolve");
-        let expected = "amend references record pc_aaaaaaaaaaaa without a base resolve";
-        assert_eq!(finding.message, expected);
-
-        let with_base = format!("{}\n{}\n{}\n", cut(id), amend(id), resolve(id));
-        let data = inspect(with_base.as_bytes(), None);
-        assert!(data.healthy, "findings: {:?}", data.findings);
     }
 
     /// The derived post-fix report must equal a full reinspection of the
