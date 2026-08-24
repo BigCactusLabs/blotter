@@ -1,10 +1,10 @@
 ---
 id: TASK-59
 title: 'doctor --leaks residual: entropy pass composes with the home marker'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-24 17:11'
-updated_date: '2026-08-24 18:16'
+updated_date: '2026-08-24 18:56'
 labels: []
 dependencies: []
 ordinal: 69000
