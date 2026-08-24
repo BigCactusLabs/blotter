@@ -97,6 +97,19 @@ parse_command_selection() {
     done
 }
 
+missing_metadata_fixture() {
+    fail "fixture metadata reflects the last generation and has no $1 fixture; regenerate the fixture union in one --fixtures call"
+}
+
+validate_metadata_selection() {
+    for label in $fixture_labels; do
+        case " $SCALE_FIXTURE_LABELS " in
+            *" $label "*) ;;
+            *) missing_metadata_fixture "$label" ;;
+        esac
+    done
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --bin)
@@ -177,6 +190,7 @@ output_parent=$(dirname -- "$output")
 . "$fixture_dir/scale-fixtures.env"
 [ "${SCALE_FIXTURE_FORMAT:-}" = 1 ] || fail "unsupported fixture metadata format"
 [ -n "${SCALE_FIXTURE_LABELS:-}" ] || fail "fixture labels are missing; regenerate fixtures"
+validate_metadata_selection
 export SCALE_MEASUREMENT_NOW SCALE_DIGEST_SINCE SCALE_DUPLICATE_ADD_NOW
 export SCALE_DUPLICATE_TEXT SCALE_DUPLICATE_AGENT SCALE_DUPLICATE_TAG_1 SCALE_DUPLICATE_TAG_2
 

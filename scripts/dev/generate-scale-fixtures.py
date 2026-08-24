@@ -357,7 +357,10 @@ def main():
         nargs="+",
         choices=[label for label, _ in FIXTURES],
         default=DEFAULT_FIXTURE_LABELS,
-        help="fixture sizes to generate (default: 1k 10k)",
+        help=(
+            "fixture sizes to generate (default: 1k 10k). Metadata reflects "
+            "the last generation; regenerate the fixture union in one --fixtures call."
+        ),
     )
     parser.add_argument(
         "--check",
