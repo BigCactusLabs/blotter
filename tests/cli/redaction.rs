@@ -441,6 +441,70 @@ fn colon_separated_path_lists_rewrite_every_home_in_evidence_and_doctor() {
 }
 
 #[test]
+fn home_forms_nested_in_a_redacted_token_tail_agree_with_doctor() {
+    let temp = TempDir::new().unwrap();
+    let evidence_file = temp.path().join("evidence.jsonl");
+    let input =
+        "/Users/alice/x/-Users-bob-y /Users/alice/backup/Users/alice/z /Users/alice/-Users-alice";
+    let redacted = "~/x/~-y ~/backup~/z ~/~";
+
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", "/Users/alice")
+            .arg("--file")
+            .arg(&evidence_file)
+            .args(["add", "nested tails", "--agent", "tester", "--evidence"])
+            .arg(input)
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(
+        added.data.record.cut_evidence().unwrap().note.as_deref(),
+        Some(redacted)
+    );
+
+    // The first two texts are what the pre-r38 redactor stored for these
+    // inputs; doctor must flag them, and must pass the r38 output.
+    let log = temp.path().join("doctor.jsonl");
+    let texts = ["~/x/-Users-bob-y", "~/backup/Users/alice/z", redacted];
+    let records = texts
+        .iter()
+        .map(|text| {
+            json!({
+                "kind": "cut",
+                "id": compute_id(NOW, "tester", text, Severity::Minor, &[]),
+                "ts": NOW,
+                "agent": "tester",
+                "text": text,
+                "tags": [],
+                "severity": "minor",
+                "cwd": "."
+            })
+            .to_string()
+        })
+        .collect::<Vec<_>>();
+    std::fs::write(&log, format!("{}\n", records.join("\n"))).unwrap();
+    let doctor = doctor_response(
+        &command()
+            .env("HOME", "/Users/alice")
+            .arg("--file")
+            .arg(&log)
+            .args(["doctor", "--leaks"])
+            .output()
+            .unwrap(),
+        1,
+    );
+    let leak_lines: Vec<_> = doctor
+        .data
+        .findings
+        .iter()
+        .filter(|finding| finding.kind == "leak")
+        .map(|finding| finding.line)
+        .collect();
+    assert_eq!(leak_lines, [1, 2]);
+}
+
+#[test]
 fn colon_path_list_boundaries_leave_secret_and_url_parsing_unchanged() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");

@@ -1,9 +1,10 @@
 ---
 id: TASK-55
 title: Redactor/doctor divergence on dash-encoded home after a redacted home path
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-24 15:23'
+updated_date: '2026-08-24 16:00'
 labels: []
 dependencies: []
 ordinal: 65000

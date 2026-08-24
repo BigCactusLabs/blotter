@@ -65,12 +65,6 @@ fn generic_home_prefix_end(input: &str, start: usize) -> Option<usize> {
         .then_some(component_end)
 }
 
-fn token_end(input: &str, start: usize) -> usize {
-    input[start..]
-        .find(|character: char| home_path_delimiter(character))
-        .map_or(input.len(), |offset| start + offset)
-}
-
 pub(crate) fn rewrite_home_paths(input: &str, home: Option<&Path>) -> String {
     let home = home.and_then(Path::to_str);
     // Exact current home in dash-encoded form. This must win over the generic
@@ -101,14 +95,20 @@ pub(crate) fn rewrite_home_paths(input: &str, home: Option<&Path>) -> String {
                     .map(|dash| index + dash.len())
                     .filter(|end| path_prefix_boundary(input, *end, '-'))
             })
-            .or_else(|| generic_home_prefix_end(input, index));
+            .or_else(|| generic_home_prefix_end(input, index))
+            // A degenerate home (empty string) matches zero bytes; never accept
+            // a match that makes no progress, or this loop would not terminate.
+            .filter(|end| *end > index);
         if let Some(end) = end {
             output.push_str(&input[copied..index]);
             output.push('~');
             copied = end;
-            // A match replaces only the home prefix. Keep the rest of this path
-            // token verbatim rather than finding and rewriting nested segments.
-            index = token_end(input, end);
+            // A match replaces only the home prefix, but scanning resumes right
+            // here rather than at the token's end: `doctor --leaks` scans every
+            // position, so a home form nested in the tail (an exact home, or a
+            // dash-encoded slug after a `/`) must redact or blotter's own write
+            // trips its own gate (r38).
+            index = end;
         } else {
             index += character.len_utf8();
         }
