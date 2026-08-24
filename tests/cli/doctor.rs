@@ -39,7 +39,7 @@ fn doctor_accepts_amend_for_existing_resolved_record() {
     assert!(doctor.data.healthy);
 }
 
-/// The two halves of design doc r35: an amend with no base resolve anywhere in
+/// The two halves of design doc r36: an amend with no base resolve anywhere in
 /// the log is a diagnose-only `orphan_resolve`, and a base resolve appearing
 /// after the amend clears both the finding and the fold's orphan warning.
 #[test]

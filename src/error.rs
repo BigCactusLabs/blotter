@@ -161,34 +161,52 @@ impl AppError {
         }
     }
 
-    /// Error mapping for opening an existing blotter log file. This is the
-    /// only place where `NotFound` is mapped to `not_found` / 66.
+    /// Error mapping for opening an existing blotter log file. This is where
+    /// `NotFound` becomes `not_found` / 66, and where a directory rejected by
+    /// an append-mode open is normalized to the same `invalid_input` / 65 that
+    /// the opened-handle regular-file check returns for other object types.
     pub fn from_log_open(error: std::io::Error, path: &std::path::Path) -> Self {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            Self::new(
+        match error.kind() {
+            std::io::ErrorKind::NotFound => Self::new(
                 "not_found",
                 format!("blotter file not found: {}", path.display()),
                 false,
                 "Run `blotter add` to create the file or pass an existing --file PATH.",
-            )
-        } else {
-            Self::from_io(error, path)
+            ),
+            std::io::ErrorKind::IsADirectory => Self::invalid_input(
+                format!("blotter file is not a regular file: {}", path.display()),
+                "Point --file PATH or BLOTTER_FILE at a regular JSONL file; FIFOs and devices are not accepted.",
+            ),
+            _ => Self::from_io(error, path),
         }
     }
 
     /// Error mapping for reading an explicit `sweep --registry` file. The flag
     /// names a file as explicitly as `--file` does, so a missing path is
-    /// `not_found` / 66 rather than the `io_error` / 74 `from_io` gives.
+    /// `not_found` / 66 rather than the `io_error` / 74 `from_io` gives. A path
+    /// that exists but can never be read as a registry — a directory, or bytes
+    /// that are not UTF-8 — is `invalid_input` / 65 for the same reason the log
+    /// path is: the input is wrong, not the filesystem.
     pub fn from_registry_file(error: std::io::Error, path: &std::path::Path) -> Self {
-        if error.kind() == std::io::ErrorKind::NotFound {
-            Self::new(
+        match error.kind() {
+            std::io::ErrorKind::NotFound => Self::new(
                 "not_found",
                 format!("sweep registry file not found: {}", path.display()),
                 false,
                 "Pass an existing registry file to --registry PATH.",
-            )
-        } else {
-            Self::from_io(error, path)
+            ),
+            std::io::ErrorKind::InvalidData => Self::invalid_input(
+                format!("sweep registry file is not valid UTF-8: {}", path.display()),
+                "Save the registry as UTF-8 text with one path per line, then retry.",
+            ),
+            std::io::ErrorKind::IsADirectory => Self::invalid_input(
+                format!(
+                    "sweep registry file is not a regular file: {}",
+                    path.display()
+                ),
+                "Pass a UTF-8 text file with one repository path per line to --registry PATH.",
+            ),
+            _ => Self::from_io(error, path),
         }
     }
 
@@ -274,6 +292,15 @@ mod tests {
     }
 
     #[test]
+    fn log_open_directory_maps_to_invalid_input_65() {
+        let error = std::io::Error::new(ErrorKind::IsADirectory, "is a directory");
+        let err = AppError::from_log_open(error, std::path::Path::new("/tmp/log-dir"));
+        assert_eq!(err.code, "invalid_input");
+        assert_eq!(err.exit_code, 65);
+        assert!(err.message.contains("not a regular file"));
+    }
+
+    #[test]
     fn registry_not_found_maps_to_not_found_66() {
         let error = std::io::Error::new(ErrorKind::NotFound, "missing");
         let err = AppError::from_registry_file(error, std::path::Path::new("/tmp/x"));
@@ -287,5 +314,24 @@ mod tests {
         let err = AppError::from_registry_file(error, std::path::Path::new("/tmp/x"));
         assert_eq!(err.code, "permission_denied");
         assert_eq!(err.exit_code, 77);
+    }
+
+    #[test]
+    fn registry_invalid_data_maps_to_invalid_input_65() {
+        let error =
+            std::io::Error::new(ErrorKind::InvalidData, "stream did not contain valid UTF-8");
+        let err = AppError::from_registry_file(error, std::path::Path::new("/tmp/repos.txt"));
+        assert_eq!(err.code, "invalid_input");
+        assert_eq!(err.exit_code, 65);
+        assert!(err.message.contains("not valid UTF-8"));
+    }
+
+    #[test]
+    fn registry_directory_maps_to_invalid_input_65() {
+        let error = std::io::Error::new(ErrorKind::IsADirectory, "is a directory");
+        let err = AppError::from_registry_file(error, std::path::Path::new("/tmp/repos"));
+        assert_eq!(err.code, "invalid_input");
+        assert_eq!(err.exit_code, 65);
+        assert!(err.message.contains("not a regular file"));
     }
 }

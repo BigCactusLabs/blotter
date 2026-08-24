@@ -533,7 +533,7 @@ fn amended_list_output_is_byte_deterministic_under_blotter_now() {
 }
 
 // Reverses the divergence this test previously pinned: doctor now fails on an
-// amend that has no base resolve anywhere in the log (design doc r35).
+// amend that has no base resolve anywhere in the log (design doc r36).
 #[test]
 fn orphan_resolve_amends_warn_in_the_fold_and_fail_doctor() {
     let temp = TempDir::new().unwrap();
