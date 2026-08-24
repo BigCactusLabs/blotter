@@ -16,6 +16,11 @@ use std::io::{IsTerminal, Read};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+/// What the secret pass writes in place of a redacted span. Load-bearing on
+/// both sides of the redactor/scanner mirror: `commands::doctor` accepts it
+/// behind a generic home prefix (r41), so the two must stay in sync.
+pub(crate) const SECRET_MARKER: &str = "<redacted>";
+
 const STDERR_INPUT_LIMIT: u64 = 1024 * 1024;
 const STDIN_INPUT_LIMIT: u64 = 1024 * 1024;
 
@@ -273,7 +278,7 @@ pub(crate) fn redact_evidence(input: &str, home: Option<&Path>) -> String {
     let mut cursor = 0;
     for (start, end) in merged {
         output.push_str(&input[cursor..start]);
-        output.push_str("<redacted>");
+        output.push_str(SECRET_MARKER);
         cursor = end;
     }
     output.push_str(&input[cursor..]);

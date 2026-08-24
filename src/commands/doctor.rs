@@ -585,7 +585,9 @@ fn current_home_path() -> Option<Vec<u8>> {
 // plus the colon that separates entries in Unix path lists such as PATH. Both
 // classes must stay in sync with `redact.rs`, where the colon is deliberately
 // kept out of `evidence_delimiter` so secret-value and URL parsing are
-// unchanged.
+// unchanged. `commands::add::SECRET_MARKER` joins them: `generic_home_path_end`
+// below accepts that marker's bytes behind a generic prefix (r41), so the
+// scanner now mirrors the secret pass as well as the home pass.
 fn home_path_delimiter(byte: u8) -> bool {
     byte.is_ascii_whitespace() || EVIDENCE_DELIMITERS.contains(&byte) || byte == b':'
 }
@@ -594,13 +596,6 @@ fn path_prefix_boundary(bytes: &[u8], end: usize, separator: u8) -> bool {
     bytes
         .get(end)
         .is_none_or(|byte| *byte == b'/' || *byte == separator || home_path_delimiter(*byte))
-}
-
-fn dash_start_boundary(bytes: &[u8], start: usize) -> bool {
-    start == 0
-        || bytes
-            .get(start - 1)
-            .is_some_and(|byte| home_path_delimiter(*byte) || *byte == b'/')
 }
 
 fn generic_home_path_end(bytes: &[u8], start: usize) -> Option<usize> {
@@ -626,11 +621,20 @@ fn generic_home_path_end(bytes: &[u8], start: usize) -> Option<usize> {
         }
         component_end += 1;
     }
-    // A bare `~` is blotter's own redaction marker, not a username: the
-    // redactor emits it behind a generic prefix whose component was empty, and
-    // it always ends at a token boundary, so the marker can only stand alone.
-    // A component that merely starts with `~` is a real directory name.
-    if &bytes[component_start..component_end] == b"~" {
+    // A `~` is blotter's own redaction marker, not a username: the redactor
+    // emits it behind a generic prefix whose own component was empty. It does
+    // not always stand alone — r38's resume-after-match lets two home forms
+    // abut as `~~`, and the secret pass (r25) runs afterwards over a token
+    // class holding no `~`, so it can swallow the separator behind one and
+    // leave `~<redacted>`. Accept the bare marker and either composition,
+    // whatever follows (r41). A component whose second element is neither is a
+    // real directory name, so `~abc` stays a leak.
+    let component = &bytes[component_start..component_end];
+    let composed = component.starts_with(b"~~")
+        || component
+            .strip_prefix(b"~")
+            .is_some_and(|tail| tail.starts_with(crate::commands::add::SECRET_MARKER.as_bytes()));
+    if component == b"~" || composed {
         return None;
     }
     (component_end > component_start && path_prefix_boundary(bytes, component_end, separator))
@@ -645,9 +649,9 @@ fn contains_home_path(bytes: &[u8], home: Option<&[u8]>, dash_home: Option<&[u8]
             .map(|home| start + home.len())
             .filter(|end| path_prefix_boundary(bytes, *end, b'/'));
         // Exact current home in dash-encoded form; mirrors the redaction-side
-        // precedence so dashed usernames and non-generic homes are caught.
+        // precedence so dashed usernames and non-generic homes are caught, and
+        // like the slash form it carries no start boundary (r40).
         let dash_home_end = dash_home
-            .filter(|_| dash_start_boundary(bytes, start))
             .filter(|dash| bytes[start..].starts_with(dash))
             .map(|dash| start + dash.len())
             .filter(|end| path_prefix_boundary(bytes, *end, b'-'));
