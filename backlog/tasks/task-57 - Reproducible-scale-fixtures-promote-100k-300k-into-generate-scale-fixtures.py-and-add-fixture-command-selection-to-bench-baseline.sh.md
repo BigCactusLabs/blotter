@@ -3,10 +3,10 @@ id: TASK-57
 title: >-
   Reproducible scale fixtures: promote 100k/300k into generate-scale-fixtures.py
   and add fixture/command selection to bench-baseline.sh
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-24 16:38'
-updated_date: '2026-08-24 16:40'
+updated_date: '2026-08-24 17:34'
 labels: []
 dependencies: []
 ordinal: 67000
