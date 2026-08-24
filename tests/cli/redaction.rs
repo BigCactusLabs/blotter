@@ -374,6 +374,95 @@ fn generic_home_paths_require_a_token_start_in_evidence_and_doctor() {
 }
 
 #[test]
+fn colon_separated_path_lists_rewrite_every_home_in_evidence_and_doctor() {
+    let temp = TempDir::new().unwrap();
+    let evidence_file = temp.path().join("evidence.jsonl");
+    let list = "PATH=/Users/alice/bin:/home/bob/bin:-Users-carol-work/cache:/Users/dave/bin";
+    let redacted = "PATH=~/bin:~/bin:~-work/cache:~/bin";
+
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", "/Users/alice")
+            .arg("--file")
+            .arg(&evidence_file)
+            .args(["add", "path list", "--agent", "tester", "--evidence"])
+            .arg(list)
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(
+        added.data.record.cut_evidence().unwrap().note.as_deref(),
+        Some(redacted)
+    );
+
+    let log = temp.path().join("doctor.jsonl");
+    let texts = [
+        "/opt/bin:/home/bob/bin",
+        "/opt/bin:-Users-carol-work/cache",
+        "/opt/bin:/mnt/home/shared",
+        list,
+        redacted,
+    ];
+    let records = texts
+        .iter()
+        .map(|text| {
+            json!({
+                "kind": "cut",
+                "id": compute_id(NOW, "tester", text, Severity::Minor, &[]),
+                "ts": NOW,
+                "agent": "tester",
+                "text": text,
+                "tags": [],
+                "severity": "minor",
+                "cwd": "."
+            })
+            .to_string()
+        })
+        .collect::<Vec<_>>();
+    std::fs::write(&log, format!("{}\n", records.join("\n"))).unwrap();
+    let doctor = doctor_response(
+        &command()
+            .env("HOME", "/Users/alice")
+            .arg("--file")
+            .arg(&log)
+            .args(["doctor", "--leaks"])
+            .output()
+            .unwrap(),
+        1,
+    );
+    let leak_lines: Vec<_> = doctor
+        .data
+        .findings
+        .iter()
+        .filter(|finding| finding.kind == "leak")
+        .map(|finding| finding.line)
+        .collect();
+    assert_eq!(leak_lines, [1, 2, 4]);
+}
+
+#[test]
+fn colon_path_list_boundaries_leave_secret_and_url_parsing_unchanged() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let input = "TOKEN:abc:def api_key=one:two url=https://user:credential@host.test:8443/path";
+    let expected = "TOKEN:<redacted> api_key=<redacted> url=https://<redacted>@host.test:8443/path";
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", "/Users/alice")
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "colon secrets", "--agent", "tester", "--evidence"])
+            .arg(input)
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(
+        added.data.record.cut_evidence().unwrap().note.as_deref(),
+        Some(expected)
+    );
+}
+
+#[test]
 fn generic_home_paths_are_rewritten_when_home_is_unset_or_empty() {
     let temp = TempDir::new().unwrap();
     for (name, home) in [("unset", None), ("empty", Some(""))] {

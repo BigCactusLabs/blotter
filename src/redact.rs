@@ -4,7 +4,8 @@
 
 use std::path::Path;
 
-// Keep this token-boundary class mirrored in `commands::doctor` for raw leak scans.
+// Keep this token-boundary class and `home_path_delimiter` below mirrored in
+// `commands::doctor` for raw leak scans.
 // A slash is a path parent, not a delimiter.
 const EVIDENCE_DELIMITERS: &str = ",;)]}&#\"'";
 // Home-path prefixes, in slash form and in the dash-encoded form that harness
@@ -117,19 +118,5 @@ pub(crate) fn rewrite_home_paths(input: &str, home: Option<&Path>) -> String {
     } else {
         output.push_str(&input[copied..]);
         output
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rewrites_every_home_in_a_colon_separated_path_list() {
-        let input = "PATH=/Users/alice/bin:/Users/bob/bin:/home/carol/bin";
-        assert_eq!(
-            rewrite_home_paths(input, Some(Path::new("/Users/alice"))),
-            "PATH=~/bin:~/bin:~/bin"
-        );
     }
 }
