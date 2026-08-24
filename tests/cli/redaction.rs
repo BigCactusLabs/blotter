@@ -883,7 +883,7 @@ fn doctor_leaks_accepts_the_redaction_marker_after_a_generic_home_prefix() {
     let temp = TempDir::new().unwrap();
     // The redactor leaves a `~` behind a generic prefix whose own username
     // component was empty: only the nested exact home matched. Both shapes are
-    // blotter's own output, so its own gate must accept them (r38).
+    // blotter's own output, so its own gate must accept them (r39).
     let cases = [
         ("slash", "/Users//Users/alice/x", "/Users/~/x"),
         ("dash", "-Users-/Users/alice/x", "-Users-~/x"),
