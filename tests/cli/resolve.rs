@@ -532,8 +532,10 @@ fn amended_list_output_is_byte_deterministic_under_blotter_now() {
     assert_eq!(listed.data["items"][0]["resolution"]["amended"], true);
 }
 
+// Reverses the divergence this test previously pinned: doctor now fails on an
+// amend that has no base resolve anywhere in the log (design doc r36).
 #[test]
-fn orphan_resolve_amends_warn_in_the_fold_but_not_doctor() {
+fn orphan_resolve_amends_warn_in_the_fold_and_fail_doctor() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
     let cut = add(&file, "orphan amend fixture");
@@ -552,8 +554,10 @@ fn orphan_resolve_amends_warn_in_the_fold_but_not_doctor() {
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
     assert_eq!(listed.data.items[0].status, ItemStatus::Open);
     assert_eq!(listed.meta.warnings, ["skipped 1 orphan resolve"]);
-    let doctor: SuccessEnvelope<DoctorData> = success(&run_file(&file, &["doctor"]));
-    assert!(doctor.data.healthy);
+    let doctor = doctor_response(&run_file(&file, &["doctor"]), 1);
+    assert!(!doctor.data.healthy);
+    assert_eq!(doctor.data.findings.len(), 1);
+    assert_eq!(doctor.data.findings[0].kind, "orphan_resolve");
 }
 
 #[test]
@@ -623,6 +627,19 @@ fn multiple_orphan_amends_for_one_record_count_once() {
 
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
     assert_eq!(listed.meta.warnings, ["skipped 1 orphan resolve"]);
+
+    // Deliberate granularity divergence: the fold warns once per unresolved ID,
+    // while doctor is line-granular and reports one finding per orphan line.
+    let doctor = doctor_response(&run_file(&file, &["doctor"]), 1);
+    assert!(!doctor.data.healthy);
+    let orphans: Vec<_> = doctor
+        .data
+        .findings
+        .iter()
+        .filter(|finding| finding.kind == "orphan_resolve")
+        .collect();
+    assert_eq!(orphans.len(), 2, "findings: {:?}", doctor.data.findings);
+    assert_eq!(orphans[0].line + 1, orphans[1].line);
 
     // The base append activates the latest orphan amend, and resolve reports it
     // from the deciding fold without reading the log a second time.

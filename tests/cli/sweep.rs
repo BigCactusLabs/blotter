@@ -332,6 +332,14 @@ fn schema_documents_sweep() {
             .unwrap()
             .contains("relative paths")
     );
+    // r35: the rejection is part of the published contract, not just an
+    // internal mapping, so an agent can predict 65 without provoking it.
+    assert!(
+        sweep["flags"]["--registry"]
+            .as_str()
+            .unwrap()
+            .contains("invalid_input (65)")
+    );
     assert_eq!(sweep["flags"]["--since"], "full RFC3339|Nd|Nh; optional");
     assert_eq!(sweep["flags"]["--kind"], "cut|dogear|all; default cut");
     assert!(
@@ -394,4 +402,41 @@ fn sweep_unreadable_registry_is_permission_denied_77() {
         .unwrap();
     std::fs::set_permissions(&registry, std::fs::Permissions::from_mode(0o600)).unwrap();
     error(&output, 77, "permission_denied");
+}
+
+/// A registry the decoder cannot read is a wrong input, not a failing
+/// filesystem: `read_to_string` reports non-UTF-8 bytes as `InvalidData`, which
+/// `from_io` would have published as the generic `io_error` (74).
+#[test]
+fn sweep_non_utf8_registry_is_invalid_input_65() {
+    let temp = TempDir::new().unwrap();
+    let registry = temp.path().join("repos.txt");
+    std::fs::write(&registry, b"alpha\n\xff\xfe\n").unwrap();
+
+    let output = command()
+        .args(["sweep", "--registry"])
+        .arg(&registry)
+        .output()
+        .unwrap();
+    let envelope = error(&output, 65, "invalid_input");
+    assert!(envelope.error.message.contains("not valid UTF-8"));
+    assert!(envelope.error.suggested_fix.contains("UTF-8"));
+}
+
+/// A directory answers the same 65 as a non-UTF-8 file and as a directory log
+/// path, rather than the 74 the read failure would otherwise carry.
+#[test]
+fn sweep_directory_registry_is_invalid_input_65() {
+    let temp = TempDir::new().unwrap();
+    let registry = temp.path().join("registry-directory");
+    std::fs::create_dir(&registry).unwrap();
+
+    let output = command()
+        .args(["sweep", "--registry"])
+        .arg(&registry)
+        .output()
+        .unwrap();
+    let envelope = error(&output, 65, "invalid_input");
+    assert!(envelope.error.message.contains("not a regular file"));
+    assert!(envelope.error.suggested_fix.contains("--registry"));
 }

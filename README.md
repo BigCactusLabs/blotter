@@ -180,7 +180,7 @@ blotter sweep ~/code/api ~/code/web
 blotter sweep --registry ~/.config/blotter-repos.txt --since 14d --kind all
 ```
 
-Each path is a repository directory or a direct JSONL log. A **repository directory** means a directory inside a git working tree: sweep walks up to the nearest `.git` and reads `<repo root>/.blotter.jsonl`. A directory that holds a `.blotter.jsonl` but is not under git is skipped with `not a repository directory` — point sweep at the log file itself in that case. A registry is a plain text file you own with one path per line; blank lines and `#` comments are ignored, and relative paths resolve from the registry file's own directory. `blotter` never creates or looks for a registry on its own — there is no blotter-owned config file.
+Each path is a repository directory or a direct JSONL log. A **repository directory** means a directory inside a git working tree: sweep walks up to the nearest `.git` and reads `<repo root>/.blotter.jsonl`. A directory that holds a `.blotter.jsonl` but is not under git is skipped with `not a repository directory` — point sweep at the log file itself in that case. A registry is a plain text file you own with one path per line; blank lines and `#` comments are ignored, and relative paths resolve from the registry file's own directory. Like `--file`, it must name a regular file: a directory, or bytes that are not UTF-8, is `invalid_input` (exit 65) rather than a generic I/O failure, and a missing registry is `not_found` (exit 66). `blotter` never creates or looks for a registry on its own — there is no blotter-owned config file.
 
 Sweep reads one log at a time under a shared lock and never writes. `BLOTTER_FILE` is ignored and the global `--file` flag is rejected, because sweep's inputs are its arguments. A path that is locked, unreadable, or not a repository directory becomes a skip warning and does not fail the run: sweep exits 0 with `totals.repos_skipped` set, deliberately unlike the exit-75 lock-timeout rule elsewhere. Check `totals.repos_swept` against the number of paths you passed — an all-skipped run still exits 0. Records tagged `auto` are excluded by default; pass `--include-auto` to include them.
 
@@ -220,7 +220,7 @@ Records already tagged `auto` stay in the log, because the log is append-only. T
 | `torn_line`, `malformed`, `conflict_marker` | yes | Run `blotter doctor --fix`. Removed lines are quarantined verbatim. |
 | `id_conflict` | no | A record's ID does not recompute from its payload, usually because it was written before an ID-format change. Leave it — see below. |
 | `duplicate_cut`, `duplicate_dogear` | no | First-wins fold warnings. Harmless — compaction is not worth a rewrite. |
-| `orphan_resolve` | no | A resolve event with no matching record, often from merge ordering. Harmless to the fold. |
+| `orphan_resolve` | no | Either a resolve event whose ID matches no record — often merge ordering, harmless to the fold — or an amend for a known record that has no base resolve anywhere in the log. The second cannot come from merge ordering, so it points at a truncated or hand-edited log; append the missing base resolve. One finding per orphan line. |
 | `unknown_kind` | no | A record kind this build does not know. Left alone for forward compatibility. |
 | `gitignored` | no | Fix `.gitignore`, not the log. |
 

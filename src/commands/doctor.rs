@@ -291,8 +291,8 @@ fn undo_created_outputs(outputs: &[(&Path, Option<u64>)]) {
 /// findings are exactly the ones no fix removed, each renumbered by the lines
 /// dropped ahead of it. Nothing that survives depended on a dropped line: only a
 /// scan error is fixable, a scan error is the only finding its line can carry,
-/// and a line that failed to parse contributes no record, no duplicate payload
-/// and no resolve target. Dropping a line also cannot tear the tail or orphan
+/// and a line that failed to parse contributes no record, no duplicate payload,
+/// no resolve target and no base resolve. Dropping a line also cannot tear the tail or orphan
 /// the leading empty segment, because each dropped line takes its own newline.
 fn post_fix_data(before: &DoctorData, applied: &[AppliedFix]) -> DoctorData {
     let mut removed: Vec<usize> = applied
@@ -421,7 +421,8 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
     let mut leak_findings = Vec::new();
     let mut records = HashMap::<String, Vec<u8>>::new();
     let mut record_ids = HashSet::new();
-    let mut resolves = Vec::<(usize, String)>::new();
+    let mut base_resolve_ids = HashSet::new();
+    let mut resolves = Vec::<(usize, String, bool)>::new();
     let mut checked_lines = 0;
     for scanned in store::scan(bytes) {
         checked_lines += 1;
@@ -540,20 +541,28 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
                     }
                     record_ids.insert(id);
                 }
-                LogEvent::Resolve { id, .. } => {
-                    resolves.push((line, id));
+                LogEvent::Resolve { id, amend, .. } => {
+                    if !amend {
+                        base_resolve_ids.insert(id.clone());
+                    }
+                    resolves.push((line, id, amend));
                 }
                 LogEvent::Unknown => unreachable!("scanner classifies unknown events"),
             },
         }
     }
-    for (line, id) in resolves {
-        if !record_ids.contains(&id) {
-            findings.push(finding(
-                line,
-                "orphan_resolve",
-                format!("resolve references unknown record {id}"),
-            ));
+    for (line, id, amend) in resolves {
+        let message = if !record_ids.contains(&id) {
+            Some(format!("resolve references unknown record {id}"))
+        } else if amend && !base_resolve_ids.contains(&id) {
+            Some(format!(
+                "amend references record {id} without a base resolve"
+            ))
+        } else {
+            None
+        };
+        if let Some(message) = message {
+            findings.push(finding(line, "orphan_resolve", message));
         }
     }
     findings.extend(leak_findings);
