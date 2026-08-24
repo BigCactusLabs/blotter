@@ -13,6 +13,8 @@ inner_runs=3
 overwrite=false
 time_bin=${TIME_BIN:-/usr/bin/time}
 generator="$repo_root/scripts/dev/generate-scale-fixtures.py"
+fixture_selection="1k,10k"
+command_selection="list,triage,verify,digest,doctor,add_duplicate,resolve"
 
 usage() {
     cat <<'EOF'
@@ -24,6 +26,8 @@ calling this script; neither operation is part of the measured samples.
 Options:
   --bin PATH           release binary (default: target/release/blotter)
   --fixtures-dir PATH  generated fixture directory (default: target/scale-fixtures)
+  --fixtures LIST      comma-separated fixture labels (default: 1k,10k)
+  --commands LIST      comma-separated commands (default: list,triage,verify,digest,doctor,add_duplicate,resolve)
   --runs N             batches per command and fixture (default: 5; minimum: 3)
   --inner N            CLI invocations per timed batch (default: 3)
   --output PATH        TSV sample output (default: target/scale-baseline-results.tsv)
@@ -49,6 +53,63 @@ require_positive_integer() {
     [ "$2" -gt 0 ] || fail "$1 must be a positive integer"
 }
 
+parse_fixture_selection() {
+    selection=$1
+    case "$selection" in
+        '' | ,* | *, | *,,* | *[!0123456789abcdefghijklmnopqrstuvwxyz,]*)
+            fail "--fixtures must be a comma-separated list of 1k, 10k, 100k, or 300k"
+            ;;
+    esac
+
+    fixture_labels=$(printf '%s' "$selection" | tr ',' ' ')
+    seen=
+    for label in $fixture_labels; do
+        case "$label" in
+            1k | 10k | 100k | 300k) ;;
+            *) fail "unknown fixture: $label" ;;
+        esac
+        case " $seen " in
+            *" $label "*) fail "duplicate fixture: $label" ;;
+        esac
+        seen="$seen $label"
+    done
+}
+
+parse_command_selection() {
+    selection=$1
+    case "$selection" in
+        '' | ,* | *, | *,,* | *[!abcdefghijklmnopqrstuvwxyz_,]*)
+            fail "--commands must be a comma-separated list of benchmark commands"
+            ;;
+    esac
+
+    command_names=$(printf '%s' "$selection" | tr ',' ' ')
+    seen=
+    for command_name in $command_names; do
+        case "$command_name" in
+            list | triage | verify | digest | doctor | add_duplicate | resolve) ;;
+            *) fail "unknown benchmark command: $command_name" ;;
+        esac
+        case " $seen " in
+            *" $command_name "*) fail "duplicate benchmark command: $command_name" ;;
+        esac
+        seen="$seen $command_name"
+    done
+}
+
+missing_metadata_fixture() {
+    fail "fixture metadata reflects the last generation and has no $1 fixture; regenerate the fixture union in one --fixtures call"
+}
+
+validate_metadata_selection() {
+    for label in $fixture_labels; do
+        case " $SCALE_FIXTURE_LABELS " in
+            *" $label "*) ;;
+            *) missing_metadata_fixture "$label" ;;
+        esac
+    done
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --bin)
@@ -59,6 +120,16 @@ while [ "$#" -gt 0 ]; do
         --fixtures-dir)
             [ "$#" -ge 2 ] || fail "--fixtures-dir requires PATH"
             fixture_dir=$2
+            shift 2
+            ;;
+        --fixtures)
+            [ "$#" -ge 2 ] || fail "--fixtures requires LIST"
+            fixture_selection=$2
+            shift 2
+            ;;
+        --commands)
+            [ "$#" -ge 2 ] || fail "--commands requires LIST"
+            command_selection=$2
             shift 2
             ;;
         --runs)
@@ -93,6 +164,8 @@ done
 require_positive_integer "--runs" "$runs"
 require_positive_integer "--inner" "$inner_runs"
 [ "$runs" -ge 3 ] || fail "--runs must be at least 3"
+parse_fixture_selection "$fixture_selection"
+parse_command_selection "$command_selection"
 [ -x "$binary" ] || fail "release binary is not executable: $binary; run cargo build --release first"
 [ -x "$time_bin" ] || fail "time binary is not executable: $time_bin"
 command -v python3 >/dev/null 2>&1 || fail "python3 is required to verify generated fixtures"
@@ -116,10 +189,14 @@ output_parent=$(dirname -- "$output")
 # shellcheck disable=SC1090
 . "$fixture_dir/scale-fixtures.env"
 [ "${SCALE_FIXTURE_FORMAT:-}" = 1 ] || fail "unsupported fixture metadata format"
+[ -n "${SCALE_FIXTURE_LABELS:-}" ] || fail "fixture labels are missing; regenerate fixtures"
+validate_metadata_selection
 export SCALE_MEASUREMENT_NOW SCALE_DIGEST_SINCE SCALE_DUPLICATE_ADD_NOW
 export SCALE_DUPLICATE_TEXT SCALE_DUPLICATE_AGENT SCALE_DUPLICATE_TAG_1 SCALE_DUPLICATE_TAG_2
 
-python3 "$generator" --output-dir "$fixture_dir" --check
+# SCALE_FIXTURE_LABELS is generated from the validated label choices above.
+# shellcheck disable=SC2086
+python3 "$generator" --output-dir "$fixture_dir" --fixtures $SCALE_FIXTURE_LABELS --check
 
 scratch_root=$(mktemp -d "${TMPDIR:-/tmp}/blotter-scale-baseline.XXXXXX")
 echo "scratch resolve copies retained for inspection: $scratch_root" >&2
@@ -130,6 +207,32 @@ expected_exit() {
         triage | verify | doctor) echo 1 ;;
         *) fail "unknown benchmark command: $1" ;;
     esac
+}
+
+select_fixture() {
+    label=$1
+    case "$label" in
+        1k)
+            fixture_file=${SCALE_1K_FILE:-}
+            resolve_id=${SCALE_1K_RESOLVE_ID:-}
+            ;;
+        10k)
+            fixture_file=${SCALE_10K_FILE:-}
+            resolve_id=${SCALE_10K_RESOLVE_ID:-}
+            ;;
+        100k)
+            fixture_file=${SCALE_100K_FILE:-}
+            resolve_id=${SCALE_100K_RESOLVE_ID:-}
+            ;;
+        300k)
+            fixture_file=${SCALE_300K_FILE:-}
+            resolve_id=${SCALE_300K_RESOLVE_ID:-}
+            ;;
+    esac
+    [ -n "$fixture_file" ] || fail "fixture metadata is missing for selected fixture: $label"
+    [ -n "$resolve_id" ] || fail "resolve metadata is missing for selected fixture: $label"
+    fixture="$fixture_dir/$fixture_file"
+    [ -f "$fixture" ] || fail "fixture is missing: $fixture"
 }
 
 prepare_resolve_copies() {
@@ -283,7 +386,11 @@ run_sample() {
     count=$6
     sample_dir="$scratch_root/$label-$command_name-$sample"
     time_file="$sample_dir/time.txt"
-    prepare_resolve_copies "$sample_dir" "$fixture" "$count"
+    if [ "$command_name" = resolve ]; then
+        prepare_resolve_copies "$sample_dir" "$fixture" "$count"
+    else
+        mkdir "$sample_dir"
+    fi
     run_batch "$command_name" "$fixture" "$resolve_id" "$sample_dir" "$count" "$(expected_exit "$command_name")" "$time_file"
     timing=$(parse_timing "$time_file" "$count")
     wall=$(printf '%s\n' "$timing" | cut -f1)
@@ -302,7 +409,11 @@ warm_up() {
     resolve_id=$4
     sample_dir="$scratch_root/warmup-$label-$command_name"
     time_file="$sample_dir/time.txt"
-    prepare_resolve_copies "$sample_dir" "$fixture" 1
+    if [ "$command_name" = resolve ]; then
+        prepare_resolve_copies "$sample_dir" "$fixture" 1
+    else
+        mkdir "$sample_dir"
+    fi
     run_batch "$command_name" "$fixture" "$resolve_id" "$sample_dir" 1 "$(expected_exit "$command_name")" "$time_file"
 }
 
@@ -335,8 +446,8 @@ peak_kib() {
 print_table() {
     printf '\n| fixture | command | wall ms min / median | CPU ms min / median | peak RSS KiB min / median |\n'
     printf '| --- | --- | ---: | ---: | ---: |\n'
-    for label in 1k 10k; do
-        for command_name in list triage verify digest doctor add_duplicate resolve; do
+    for label in $fixture_labels; do
+        for command_name in $command_names; do
             wall_stats=$(stats "$label" "$command_name" 5)
             cpu_stats=$(stats "$label" "$command_name" 8)
             rss_stats=$(stats "$label" "$command_name" 9)
@@ -357,44 +468,26 @@ print_table() {
 
 printf 'fixture\tcommand\tsample\tinner_runs\twall_s\tuser_s\tsys_s\tcpu_s\tpeak_rss_kib\texpected_exit\n' >"$output"
 
-for label in 1k 10k; do
-    case "$label" in
-        1k)
-            fixture="$fixture_dir/$SCALE_1K_FILE"
-            resolve_id=$SCALE_1K_RESOLVE_ID
-            ;;
-        10k)
-            fixture="$fixture_dir/$SCALE_10K_FILE"
-            resolve_id=$SCALE_10K_RESOLVE_ID
-            ;;
-    esac
-    [ -f "$fixture" ] || fail "fixture is missing: $fixture"
-    for command_name in list triage verify digest doctor add_duplicate resolve; do
+for label in $fixture_labels; do
+    select_fixture "$label"
+    for command_name in $command_names; do
         warm_up "$label" "$command_name" "$fixture" "$resolve_id"
     done
 done
 
 sample=1
 while [ "$sample" -le "$runs" ]; do
-    for label in 1k 10k; do
-        case "$label" in
-            1k)
-                fixture="$fixture_dir/$SCALE_1K_FILE"
-                resolve_id=$SCALE_1K_RESOLVE_ID
-                ;;
-            10k)
-                fixture="$fixture_dir/$SCALE_10K_FILE"
-                resolve_id=$SCALE_10K_RESOLVE_ID
-                ;;
-        esac
-        for command_name in list triage verify digest doctor add_duplicate resolve; do
+    for label in $fixture_labels; do
+        select_fixture "$label"
+        for command_name in $command_names; do
             run_sample "$label" "$command_name" "$sample" "$fixture" "$resolve_id" "$inner_runs"
         done
     done
     sample=$((sample + 1))
 done
 
-python3 "$generator" --output-dir "$fixture_dir" --check
+# shellcheck disable=SC2086
+python3 "$generator" --output-dir "$fixture_dir" --fixtures $SCALE_FIXTURE_LABELS --check
 print_table
 printf '\nraw samples: %s\n' "$output"
 printf 'samples: %s batches per command/fixture; %s invocations per batch\n' "$runs" "$inner_runs"

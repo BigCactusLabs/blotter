@@ -626,6 +626,13 @@ fn generic_home_path_end(bytes: &[u8], start: usize) -> Option<usize> {
         }
         component_end += 1;
     }
+    // A bare `~` is blotter's own redaction marker, not a username: the
+    // redactor emits it behind a generic prefix whose component was empty, and
+    // it always ends at a token boundary, so the marker can only stand alone.
+    // A component that merely starts with `~` is a real directory name.
+    if &bytes[component_start..component_end] == b"~" {
+        return None;
+    }
     (component_end > component_start && path_prefix_boundary(bytes, component_end, separator))
         .then_some(component_end)
 }

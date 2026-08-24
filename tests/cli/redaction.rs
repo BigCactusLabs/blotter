@@ -878,6 +878,79 @@ fn doctor_leaks_reports_dash_encoded_home_slugs() {
     assert!(leaks[0].message.contains("home path"));
 }
 
+#[test]
+fn doctor_leaks_accepts_the_redaction_marker_after_a_generic_home_prefix() {
+    let temp = TempDir::new().unwrap();
+    // The redactor leaves a `~` behind a generic prefix whose own username
+    // component was empty: only the nested exact home matched. Both shapes are
+    // blotter's own output, so its own gate must accept them (r39).
+    let cases = [
+        ("slash", "/Users//Users/alice/x", "/Users/~/x"),
+        ("dash", "-Users-/Users/alice/x", "-Users-~/x"),
+    ];
+    for (name, input, expected) in cases {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        let added: SuccessEnvelope<AddData> = success(
+            &command()
+                .env("HOME", "/Users/alice")
+                .arg("--file")
+                .arg(&file)
+                .args([
+                    "add",
+                    "evidence case",
+                    "--agent",
+                    "tester",
+                    "--evidence",
+                    input,
+                ])
+                .output()
+                .unwrap(),
+        );
+        assert_eq!(
+            added.data.record.cut_evidence().unwrap().note.as_deref(),
+            Some(expected),
+            "{name}"
+        );
+        let output = command()
+            .env("HOME", "/Users/alice")
+            .arg("--file")
+            .arg(&file)
+            .args(["doctor", "--leaks"])
+            .output()
+            .unwrap();
+        let doctor = doctor_response(&output, 0);
+        assert!(doctor.data.findings.is_empty(), "{name}");
+    }
+}
+
+#[test]
+fn doctor_leaks_still_reports_real_usernames_after_a_generic_home_prefix() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("leaking.jsonl");
+    // Only the bare marker is blotter's own output. A component that merely
+    // starts with `~` is a real directory name and stays a leak.
+    let plain = leak_record("/Users/alice/x");
+    let dashed = leak_record("/private/tmp/-Users-alice-x/y");
+    let tilde_prefixed = leak_record("/Users/~abc/x");
+    std::fs::write(&file, format!("{plain}\n{dashed}\n{tilde_prefixed}\n")).unwrap();
+    let output = command()
+        .env("HOME", "/var/root")
+        .arg("--file")
+        .arg(&file)
+        .args(["doctor", "--leaks"])
+        .output()
+        .unwrap();
+    let doctor = doctor_response(&output, 1);
+    let leak_lines: Vec<_> = doctor
+        .data
+        .findings
+        .iter()
+        .filter(|finding| finding.kind == "leak")
+        .map(|finding| finding.line)
+        .collect();
+    assert_eq!(leak_lines, [1, 2, 3]);
+}
+
 fn leak_record(cwd: &str) -> serde_json::Value {
     let id = compute_id(NOW, "tester", cwd, Severity::Minor, &[]);
     json!({
