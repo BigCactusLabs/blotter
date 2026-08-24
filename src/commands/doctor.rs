@@ -94,11 +94,16 @@ pub fn run(
     }
     let leak_scan = args.leaks.then(|| {
         let home = current_home_path();
-        let dash_home = home.as_ref().map(|home| {
-            home.iter()
-                .map(|byte| if *byte == b'/' { b'-' } else { *byte })
-                .collect()
-        });
+        // Byte mirror of `redact::rewrite_home_paths`: the root home's dash
+        // spelling is a bare `-`, not an encoding, and is never matched.
+        let dash_home = home
+            .as_ref()
+            .filter(|home| home.as_slice() != b"/")
+            .map(|home| {
+                home.iter()
+                    .map(|byte| if *byte == b'/' { b'-' } else { *byte })
+                    .collect()
+            });
         LeakScan {
             home,
             dash_home,

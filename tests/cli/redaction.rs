@@ -1843,3 +1843,16 @@ fn doctor_leaks_still_reports_home_bytes_in_a_marker_component_tail() {
     std::fs::write(&file, format!("{record}\n")).unwrap();
     assert_eq!(leak_lines(&file, "/Users/alice"), [1]);
 }
+
+#[test]
+fn root_home_has_no_dash_form() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    // HOME=/ dash-encodes to a bare `-`, which is not an encoding: without
+    // this guard every hyphen ahead of a boundary would read as home bytes
+    // once r40 dropped the start boundary. Hyphenated text stays verbatim and
+    // the gate stays quiet on both the fresh write and the raw line.
+    let note = redacted_evidence(&file, "/", "artifact- plus x--y done");
+    assert_eq!(note, "artifact- plus x--y done");
+    leaks_exit_zero(&file, "/", "root home");
+}

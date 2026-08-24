@@ -67,7 +67,12 @@ pub(crate) fn rewrite_home_paths(input: &str, home: Option<&Path>) -> String {
     // spelling it carries no start boundary: the user's own bytes are a home
     // wherever they appear, so `x-Users-alice` and `-Users--Users-alice-y`
     // redact (r40). Only the generic prefixes need r23's start-boundary rule.
-    let dash_home = home.map(|home| home.replace('/', "-"));
+    // The root home's dash spelling is a bare `-`, which is not an encoding —
+    // no harness slug spells `/` that way, and matching it would turn every
+    // hyphen ahead of a boundary into a home. Skip the dash branch for it.
+    let dash_home = home
+        .filter(|home| *home != "/")
+        .map(|home| home.replace('/', "-"));
     let mut output = String::with_capacity(input.len());
     let mut copied = 0;
     let mut index = 0;
