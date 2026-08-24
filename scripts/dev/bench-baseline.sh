@@ -386,7 +386,11 @@ run_sample() {
     count=$6
     sample_dir="$scratch_root/$label-$command_name-$sample"
     time_file="$sample_dir/time.txt"
-    prepare_resolve_copies "$sample_dir" "$fixture" "$count"
+    if [ "$command_name" = resolve ]; then
+        prepare_resolve_copies "$sample_dir" "$fixture" "$count"
+    else
+        mkdir "$sample_dir"
+    fi
     run_batch "$command_name" "$fixture" "$resolve_id" "$sample_dir" "$count" "$(expected_exit "$command_name")" "$time_file"
     timing=$(parse_timing "$time_file" "$count")
     wall=$(printf '%s\n' "$timing" | cut -f1)
@@ -405,7 +409,11 @@ warm_up() {
     resolve_id=$4
     sample_dir="$scratch_root/warmup-$label-$command_name"
     time_file="$sample_dir/time.txt"
-    prepare_resolve_copies "$sample_dir" "$fixture" 1
+    if [ "$command_name" = resolve ]; then
+        prepare_resolve_copies "$sample_dir" "$fixture" 1
+    else
+        mkdir "$sample_dir"
+    fi
     run_batch "$command_name" "$fixture" "$resolve_id" "$sample_dir" 1 "$(expected_exit "$command_name")" "$time_file"
 }
 
