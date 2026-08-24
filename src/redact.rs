@@ -5,7 +5,9 @@
 use std::path::Path;
 
 // Keep this token-boundary class and `home_path_delimiter` below mirrored in
-// `commands::doctor` for raw leak scans.
+// `commands::doctor` for raw leak scans. The scanner also mirrors the secret
+// marker `commands::add` writes, because it accepts that marker behind a
+// generic home prefix (r41); changing the marker changes both sides.
 // A slash is a path parent, not a delimiter.
 const EVIDENCE_DELIMITERS: &str = ",;)]}&#\"'";
 // Home-path prefixes, in slash form and in the dash-encoded form that harness
@@ -28,14 +30,6 @@ fn path_prefix_boundary(input: &str, end: usize, separator: char) -> bool {
     input[end..].chars().next().is_none_or(|character| {
         character == '/' || character == separator || home_path_delimiter(character)
     })
-}
-
-fn dash_start_boundary(input: &str, start: usize) -> bool {
-    start == 0
-        || input[..start]
-            .chars()
-            .next_back()
-            .is_some_and(|character| home_path_delimiter(character) || character == '/')
 }
 
 fn generic_home_prefix_end(input: &str, start: usize) -> Option<usize> {
@@ -69,8 +63,16 @@ pub(crate) fn rewrite_home_paths(input: &str, home: Option<&Path>) -> String {
     let home = home.and_then(Path::to_str);
     // Exact current home in dash-encoded form. This must win over the generic
     // dash rule: a dash inside the username would otherwise truncate the
-    // rewrite after its first dash-separated component.
-    let dash_home = home.map(|home| home.replace('/', "-"));
+    // rewrite after its first dash-separated component. Like the slash
+    // spelling it carries no start boundary: the user's own bytes are a home
+    // wherever they appear, so `x-Users-alice` and `-Users--Users-alice-y`
+    // redact (r40). Only the generic prefixes need r23's start-boundary rule.
+    // The root home's dash spelling is a bare `-`, which is not an encoding —
+    // no harness slug spells `/` that way, and matching it would turn every
+    // hyphen ahead of a boundary into a home. Skip the dash branch for it.
+    let dash_home = home
+        .filter(|home| *home != "/")
+        .map(|home| home.replace('/', "-"));
     let mut output = String::with_capacity(input.len());
     let mut copied = 0;
     let mut index = 0;
@@ -90,7 +92,6 @@ pub(crate) fn rewrite_home_paths(input: &str, home: Option<&Path>) -> String {
             .or_else(|| {
                 dash_home
                     .as_deref()
-                    .filter(|_| dash_start_boundary(input, index))
                     .filter(|dash| input[index..].starts_with(dash))
                     .map(|dash| index + dash.len())
                     .filter(|end| path_prefix_boundary(input, *end, '-'))

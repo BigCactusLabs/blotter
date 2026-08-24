@@ -1049,6 +1049,13 @@ fn add_and_dogear_redact_home_text_before_identity_hashing() {
             "failed under /private/tmp/session/-Users-jane-doe-workspace/log",
             "failed under /private/tmp/session/~-workspace/log",
         ),
+        // r40 removed the dash-form start boundary, so this text now redacts
+        // and its record ID moves with the redacted bytes.
+        (
+            "dash_after_a_dash",
+            "failed under -Users--Users-jane-doe-y",
+            "failed under -Users-~-y",
+        ),
     ];
 
     for (name, input, expected) in cases {
@@ -1610,4 +1617,242 @@ fn resolve_note_without_a_home_path_stays_byte_identical() {
             .unwrap(),
     );
     assert_eq!(resolved.data["records"][0]["resolution"]["note"], note);
+}
+
+// The entropy heuristic wants >=24 bytes, >=12 distinct bytes, and mixed case
+// plus a digit. Shared by the r40/r41 cases that involve the secret pass.
+const ENTROPY_TOKEN: &str = "aB3xY7zQ9wE2rT5yU8iO1pA4sD6fG0hJ";
+
+fn redacted_evidence(file: &Path, home: &str, note: &str) -> String {
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", home)
+            .arg("--file")
+            .arg(file)
+            .args(["add", "evidence case", "--agent", "tester", "--evidence"])
+            .arg(note)
+            .output()
+            .unwrap(),
+    );
+    added
+        .data
+        .record
+        .cut_evidence()
+        .unwrap()
+        .note
+        .clone()
+        .unwrap()
+}
+
+fn leaks_exit_zero(file: &Path, home: &str, label: &str) {
+    let output = command()
+        .env("HOME", home)
+        .arg("--file")
+        .arg(file)
+        .args(["doctor", "--leaks"])
+        .output()
+        .unwrap();
+    let doctor = doctor_response(&output, 0);
+    assert!(doctor.data.findings.is_empty(), "{label}");
+}
+
+fn leak_lines(file: &Path, home: &str) -> Vec<usize> {
+    let output = command()
+        .env("HOME", home)
+        .arg("--file")
+        .arg(file)
+        .args(["doctor", "--leaks"])
+        .output()
+        .unwrap();
+    let doctor = doctor_response(&output, 1);
+    doctor
+        .data
+        .findings
+        .iter()
+        .filter(|finding| finding.kind == "leak")
+        .map(|finding| finding.line)
+        .collect()
+}
+
+#[test]
+fn exact_dash_home_matches_after_a_dash_and_mid_token() {
+    let temp = TempDir::new().unwrap();
+    // r40: the exact dash-encoded current home has no start boundary, exactly
+    // like its slash spelling. A doubled separator, a mid-token hit, and a home
+    // nested in an encoded path all redact.
+    let cases = [
+        ("doubled", "-Users--Users-alice-y", "-Users-~-y"),
+        ("mid_token", "x-Users-alice", "x~"),
+        ("nested", "-tmp-backup-Users-alice-y", "-tmp-backup~-y"),
+    ];
+    for (name, input, expected) in cases {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        assert_eq!(
+            redacted_evidence(&file, "/Users/alice", input),
+            expected,
+            "{name}"
+        );
+        leaks_exit_zero(&file, "/Users/alice", name);
+    }
+
+    // The same three shapes in a hand-written log, i.e. written before this
+    // rule: the gate reports each one.
+    let raw = temp.path().join("raw.jsonl");
+    let lines: Vec<String> = cases
+        .iter()
+        .map(|(_, input, _)| leak_record(input).to_string())
+        .collect();
+    std::fs::write(&raw, format!("{}\n", lines.join("\n"))).unwrap();
+    assert_eq!(leak_lines(&raw, "/Users/alice"), [1, 2, 3]);
+}
+
+#[test]
+fn dash_home_matching_stops_at_the_component_end() {
+    let temp = TempDir::new().unwrap();
+    // The end boundary is untouched by r40: a longer or shorter component is a
+    // different directory. The leading `x` keeps the generic `-Users-` prefix
+    // out of it, so only the exact-home branch is under test.
+    for (name, input) in [("longer", "x-Users-alicexyz"), ("shorter", "x-Users-alic")] {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        assert_eq!(
+            redacted_evidence(&file, "/Users/alice", input),
+            input,
+            "{name}"
+        );
+        leaks_exit_zero(&file, "/Users/alice", name);
+    }
+}
+
+#[test]
+fn generic_dash_prefixes_keep_their_start_boundary() {
+    let temp = TempDir::new().unwrap();
+    // r23's start-boundary rule survives r40 for the generic prefixes: a
+    // generic prefix after a dash, and a bare mid-token hit, stay unrewritten
+    // and unflagged on both sides.
+    for (name, input) in [
+        ("after_dash", "-Users--home-bob-x"),
+        ("mid_token", "dir-Users-bob-y"),
+    ] {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        assert_eq!(
+            redacted_evidence(&file, "/Users/alice", input),
+            input,
+            "{name}"
+        );
+        leaks_exit_zero(&file, "/Users/alice", name);
+    }
+}
+
+#[test]
+fn real_harness_slugs_with_doubled_separators_redact_once() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let note = redacted_evidence(
+        &file,
+        "/Users/alice",
+        "/private/tmp/claude-501/-Users-alice--claude-skills-x/y",
+    );
+    assert_eq!(note, "/private/tmp/claude-501/~--claude-skills-x/y");
+    leaks_exit_zero(&file, "/Users/alice", "harness slug");
+}
+
+#[test]
+fn dash_home_inside_an_entropy_token_splits_the_secret() {
+    let temp = TempDir::new().unwrap();
+    // The accepted r40 ordering cost: home rewriting runs before the secret
+    // pass (r25), so the emitted `~` splits a high-entropy token and the
+    // fragments fall below the thresholds. The dash spelling now pays exactly
+    // what the slash spelling has always paid.
+    for (name, input, expected) in [
+        ("dash", "AbC1defx-Users-alice-Z9yX8w", "AbC1defx~-Z9yX8w"),
+        ("slash", "AbC1defx/Users/alice/Z9yX8w", "AbC1defx~/Z9yX8w"),
+    ] {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        assert_eq!(
+            redacted_evidence(&file, "/Users/alice", input),
+            expected,
+            "{name}"
+        );
+        leaks_exit_zero(&file, "/Users/alice", name);
+    }
+}
+
+#[test]
+fn doctor_leaks_accepts_composed_redaction_markers() {
+    let temp = TempDir::new().unwrap();
+    // r41: r38's resume-after-match and the secret pass (r25) let the redactor
+    // write `~~`, `~<redacted>`, and their compositions behind a generic home
+    // prefix. Every one of these is blotter's own output, so its own gate must
+    // accept it.
+    let cases = [
+        (
+            "slash_marker_secret",
+            format!("/Users//Users/alice/{ENTROPY_TOKEN}"),
+            "/Users/~<redacted>",
+        ),
+        (
+            "dash_marker_secret",
+            format!("-Users-/Users/alice/{ENTROPY_TOKEN}"),
+            "-Users-~<redacted>",
+        ),
+        (
+            "slash_doubled_marker",
+            "/Users//Users/alice/Users/alice".into(),
+            "/Users/~~",
+        ),
+        (
+            "dash_doubled_marker",
+            "-Users--Users-alice-Users-alice-y".into(),
+            "-Users-~~-y",
+        ),
+        (
+            "doubled_marker_then_secret",
+            format!("/Users//Users/alice/Users/alice/{ENTROPY_TOKEN}"),
+            "/Users/~~<redacted>",
+        ),
+        (
+            "secret_then_marker",
+            format!("/Users//Users/alice/{ENTROPY_TOKEN}/Users/alice"),
+            "/Users/~<redacted>~",
+        ),
+        (
+            "secret_then_tail",
+            format!("/Users//Users/alice/{ENTROPY_TOKEN}@bob"),
+            "/Users/~<redacted>@bob",
+        ),
+    ];
+    for (name, input, expected) in cases {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        assert_eq!(
+            redacted_evidence(&file, "/Users/alice", &input),
+            expected,
+            "{name}"
+        );
+        leaks_exit_zero(&file, "/Users/alice", name);
+    }
+}
+
+#[test]
+fn doctor_leaks_still_reports_home_bytes_in_a_marker_component_tail() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("leaking.jsonl");
+    // Accepting the tail behind a second marker costs no detection: the scan
+    // matches at every index, and under r40 the exact dash home carries no
+    // start boundary, so the nested home still reports at its own position.
+    let record = leak_record("-Users-~<redacted>!-Users-alice");
+    std::fs::write(&file, format!("{record}\n")).unwrap();
+    assert_eq!(leak_lines(&file, "/Users/alice"), [1]);
+}
+
+#[test]
+fn root_home_has_no_dash_form() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    // HOME=/ dash-encodes to a bare `-`, which is not an encoding: without
+    // this guard every hyphen ahead of a boundary would read as home bytes
+    // once r40 dropped the start boundary. Hyphenated text stays verbatim and
+    // the gate stays quiet on both the fresh write and the raw line.
+    let note = redacted_evidence(&file, "/", "artifact- plus x--y done");
+    assert_eq!(note, "artifact- plus x--y done");
+    leaks_exit_zero(&file, "/", "root home");
 }
