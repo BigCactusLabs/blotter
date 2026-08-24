@@ -95,7 +95,10 @@ pub(crate) fn rewrite_home_paths(input: &str, home: Option<&Path>) -> String {
                     .map(|dash| index + dash.len())
                     .filter(|end| path_prefix_boundary(input, *end, '-'))
             })
-            .or_else(|| generic_home_prefix_end(input, index));
+            .or_else(|| generic_home_prefix_end(input, index))
+            // A degenerate home (empty string) matches zero bytes; never accept
+            // a match that makes no progress, or this loop would not terminate.
+            .filter(|end| *end > index);
         if let Some(end) = end {
             output.push_str(&input[copied..index]);
             output.push('~');
