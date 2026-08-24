@@ -246,7 +246,7 @@ pub struct DoctorArgs {
     #[arg(
         long,
         conflicts_with = "fix",
-        help = "Scan raw physical lines for home-path leaks"
+        help = "Scan physical lines for home-path leaks (decoded on a parsing line, raw otherwise)"
     )]
     pub leaks: bool,
     #[arg(

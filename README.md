@@ -75,7 +75,7 @@ blotter export --format otlp-json # one OTLP LogsData JSON line for a collector
 
 ```bash
 blotter doctor                    # validate the log file
-blotter doctor --leaks            # scan raw lines for public home-path leaks
+blotter doctor --leaks            # scan lines for public home-path leaks
 blotter doctor --fix              # quarantine unreadable lines (backup + atomic swap)
 blotter archive --before 180d     # move fully closed, fully old history to a sidecar
 ```
@@ -226,7 +226,7 @@ Records already tagged `auto` stay in the log, because the log is append-only. T
 
 `doctor --fix` repairs unreadable lines by writing a repaired copy and atomically swapping it in — the original is kept as a timestamped backup and every removed line is preserved verbatim in `<log>.quarantine.jsonl`. `--dry-run` plans the repairs without writing.
 
-`doctor --leaks` adds a public-log gate without changing normal doctor output. It scans the raw bytes of every physical line, including malformed lines, for current or generic Unix home paths and reports a diagnose-only `leak` finding. Use it before a push or in CI; add repeatable `--deny LITERAL` values for other literal substrings your repository must not publish. `--deny` requires `--leaks`; both conflict with `--fix`, so the gate stays read-only.
+`doctor --leaks` adds a public-log gate without changing normal doctor output. A physical line that parses as a JSON record is scanned as decoded text — every string, at every depth — for current or generic Unix home paths, so a home path hidden behind JSON's own escaping is still caught; a line that does not parse, including a malformed one, keeps a raw-byte scan of the same rules over the encoded bytes, so malformed lines stay covered. Either way it reports a diagnose-only `leak` finding. Use it before a push or in CI; add repeatable `--deny LITERAL` values for other literal substrings your repository must not publish — `--deny` always matches against raw bytes, on every line, regardless of whether it parses. `--deny` requires `--leaks`; both conflict with `--fix`, so the gate stays read-only.
 
 An unhealthy report is therefore not always something to repair. `id_conflict` in particular has **no correction workflow, by design**. There is no event that rewrites a record's ID or payload: the fold keeps the first record it sees for an ID, so appending a line with the same ID is silently ignored, and `resolve --amend` only replaces resolution fields. The record is not broken — it still folds, lists, and resolves by its stored ID. The finding is a note that the ID predates the current hash, not a defect to repair, and it will keep appearing in every `doctor` run. Changing those bytes means editing the log outside `blotter`, which breaks the append-only invariant; back the file up first and treat it as a deliberate exception, not routine maintenance. If a record's *content* is wrong, the append-only answer is to file a corrected cut and resolve the old one — that supersedes the content but leaves the `id_conflict` finding in place.
 
