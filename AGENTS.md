@@ -41,6 +41,10 @@ For focused Rust tests, `cargo test` accepts one positional filter. To run sever
 
 Project tasks live in `backlog/` (Backlog.md, agent-only). Use the CLI, never hand-edit task files: `backlog task list --plain`, `backlog task create "..."`, `backlog task edit <id> -s "In Progress"`. Always pass `--plain` when reading.
 
+## Orchestrated work
+
+When a task runs through the multi-agent flow (design workers, implementer, reviewers), pace it by size. Small and medium contract changes take three legs: design pass(es) → implementer → one cross-model review of the finished diff. Do not add a separate pre-implementation design-critique leg, and overlap legs where the checkpoint between them is not load-bearing (an implementer can start against a draft spec while a review leg is still in flight; send corrections to the warm worker). Add the pre-implementation critique leg only when the design touches `src/store.rs`, record identity, or several interacting contract rules — there a wrong spec is costlier than the extra serial leg. Whatever the pacing, the diff review is never skipped, and a batch still lands as one PR.
+
 ## Dogfood
 
 Important: when you hit a small friction while working here — a tool call that missed and had to be retried, a confusing or undocumented setup step, a flaky command, a stale cache, a misleading error, a non-obvious gotcha — log it in the moment:
