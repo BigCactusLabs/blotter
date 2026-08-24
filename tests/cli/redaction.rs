@@ -2166,3 +2166,33 @@ fn doctor_leaks_still_reports_a_component_that_only_looks_like_a_marker() {
         assert_eq!(leak_lines(&file, "/Users/alice"), [1], "{name}");
     }
 }
+
+#[test]
+fn doctor_leaks_scans_a_home_path_nested_in_an_unknown_structure() {
+    let temp = TempDir::new().unwrap();
+    // The decoded walk descends: an unknown field's inner objects, arrays, and
+    // object keys are scanned at every depth, not just the line's top level.
+    let id = compute_id(NOW, "tester", "note", Severity::Minor, &[]);
+    for (name, field) in [
+        ("nested_value", "{\"a\":[{\"b\":\"\\/Users\\/alice\"}]}"),
+        ("nested_key", "{\"a\":[{\"\\/Users\\/alice\":\"b\"}]}"),
+    ] {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        let line = format!(
+            "{{\"kind\":\"cut\",\"id\":\"{id}\",\"ts\":\"{NOW}\",\"agent\":\"tester\",\"text\":\"note\",\"tags\":[],\"severity\":\"minor\",\"cwd\":\"/tmp/x\",\"future_field\":{field}}}"
+        );
+        std::fs::write(&file, format!("{line}\n")).unwrap();
+        assert_eq!(leak_lines(&file, "/Users/alice"), [1], "{name}");
+    }
+}
+
+#[test]
+fn r42_marker_acceptance_does_not_reach_the_raw_layer() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("malformed.jsonl");
+    // The raw layer's rule set is frozen at what shipped before r43, so the
+    // `~-` member r42 adds on the decoded layer must not widen it: this
+    // component still reports on a line that does not parse.
+    std::fs::write(&file, "{\"kind\":\"cut\" /Users/~-x\n").unwrap();
+    assert_eq!(leak_lines(&file, "/Users/alice"), [1]);
+}
