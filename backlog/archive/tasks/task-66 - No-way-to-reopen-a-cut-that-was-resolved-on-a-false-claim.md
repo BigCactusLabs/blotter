@@ -4,6 +4,7 @@ title: No way to reopen a cut that was resolved on a false claim
 status: To Do
 assignee: []
 created_date: '2026-08-24 20:53'
+updated_date: '2026-08-24 22:17'
 labels: []
 dependencies: []
 ordinal: 76000
@@ -30,3 +31,9 @@ Likely fix: a `reopen <ID>` command that appends a record clearing the resolutio
 - [ ] #3 A reopened cut is eligible for verify and triage again
 - [ ] #4 Reopening an already-open cut fails with a clear error
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Parked 2026-08-24: deferred under the simplicity bar — one observed case in 66 records, and refiling a similar cut is verify's designed detection shape (similarity linkage, not id linkage). Carried as a dogear in .blotter.jsonl; revisit if false closures recur.
+<!-- SECTION:NOTES:END -->
