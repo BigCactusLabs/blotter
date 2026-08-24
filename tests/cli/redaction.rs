@@ -1856,3 +1856,343 @@ fn root_home_has_no_dash_form() {
     assert_eq!(note, "artifact- plus x--y done");
     leaks_exit_zero(&file, "/", "root home");
 }
+
+#[test]
+fn exact_home_ends_at_a_structural_dash() {
+    let temp = TempDir::new().unwrap();
+    // r42: a `-` ends an exact slash-form home when the bytes it begins are
+    // themselves a dash-encoded home form. The dash spelling always ends there,
+    // because a `-` is its separator.
+    for (name, home, input, expected) in [
+        (
+            "dash_home_follows",
+            "/Users/alice",
+            "-Users-/Users/alice-Users-alice",
+            "-Users-~~",
+        ),
+        (
+            "generic_dash_prefix_follows",
+            "/Users/alice",
+            "-Users-/Users/alice-Users-bob-x",
+            "-Users-~-Users-bob-x",
+        ),
+        (
+            "home_outside_the_generic_roots",
+            "/var/root",
+            "/var/root-Users-alice-x",
+            "~-Users-alice-x",
+        ),
+    ] {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        assert_eq!(redacted_evidence(&file, home, input), expected, "{name}");
+        leaks_exit_zero(&file, home, name);
+    }
+}
+
+#[test]
+fn ordinary_dash_names_are_left_alone() {
+    let temp = TempDir::new().unwrap();
+    // In a slash path a `-` is an ordinary name byte, so a sibling account or a
+    // longer component is a different directory and keeps its bytes. r40's
+    // `-Users-alicexyz` is untouched too.
+    for (name, input) in [
+        ("sibling_branch", "feature/Users/alice-backup"),
+        ("url_tail", "https://host/Users/alice-old"),
+        ("digit_tail", "x/Users/alice2"),
+        ("dot_tail", "x/Users/alice.bak"),
+        ("dash_longer", "x-Users-alicexyz"),
+    ] {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        assert_eq!(
+            redacted_evidence(&file, "/Users/alice", input),
+            input,
+            "{name}"
+        );
+        leaks_exit_zero(&file, "/Users/alice", name);
+    }
+}
+
+#[test]
+fn doctor_leaks_reports_the_r40_era_stored_line() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("r40-era.jsonl");
+    // The spelling r40 stored for `-Users-/Users/alice-Users-alice`: the dash
+    // home redacted, the slash home left standing against the marker that
+    // replaced it. Those are real home bytes and the gate must name them.
+    let record = leak_record("-Users-/Users/alice~");
+    std::fs::write(&file, format!("{record}\n")).unwrap();
+    assert_eq!(leak_lines(&file, "/Users/alice"), [1]);
+}
+
+#[test]
+fn exact_home_ends_at_the_redaction_marker() {
+    let temp = TempDir::new().unwrap();
+    // The marker is blotter's own output, so home bytes standing against one
+    // must still redact — otherwise an r40-era line can never be rewritten.
+    for (name, input, expected) in [
+        ("bare", "x/Users/alice~y", "x~~y"),
+        ("behind_generic", "/Users//Users/alice~y", "/Users/~~y"),
+    ] {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        assert_eq!(
+            redacted_evidence(&file, "/Users/alice", input),
+            expected,
+            "{name}"
+        );
+        leaks_exit_zero(&file, "/Users/alice", name);
+    }
+}
+
+#[test]
+fn doctor_leaks_accepts_a_marker_before_a_generic_dash_prefix() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("marker-dash.jsonl");
+    // r42's one new composition: a slash-form match whose accepted `-` begins a
+    // generic dash prefix leaves the marker inside a slash-form component,
+    // because a `-` does not terminate one.
+    assert_eq!(
+        redacted_evidence(&file, "/Users/alice", "/Users//Users/alice-Users-bob-x"),
+        "/Users/~-Users-bob-x"
+    );
+    leaks_exit_zero(&file, "/Users/alice", "marker before a generic dash prefix");
+
+    // The acceptance costs no current-home detection: the exact dash home in an
+    // accepted tail still reports at its own index.
+    let leaking = temp.path().join("leaking.jsonl");
+    let record = leak_record("/Users/~-Users-alice-x");
+    std::fs::write(&leaking, format!("{record}\n")).unwrap();
+    assert_eq!(leak_lines(&leaking, "/Users/alice"), [1]);
+}
+
+// A hand-written record whose text is JSON-encoded with every `/` escaped as
+// `\/`, so the decoded value holds a home path that never appears as literal
+// bytes on the physical line. Valid JSON; blotter's own encoder never writes it.
+fn escaped_leak_line(text: &str) -> String {
+    let id = compute_id(NOW, "tester", text, Severity::Minor, &[]);
+    let escaped = text
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('/', "\\/");
+    format!(
+        "{{\"kind\":\"cut\",\"id\":\"{id}\",\"ts\":\"{NOW}\",\"agent\":\"tester\",\"text\":\"{escaped}\",\"tags\":[],\"severity\":\"minor\",\"cwd\":\"/tmp/x\"}}"
+    )
+}
+
+#[test]
+fn doctor_leaks_reports_an_escaped_home_behind_an_accepted_marker() {
+    let temp = TempDir::new().unwrap();
+    // r43: the scanner reads the decoded layer, where an escaped home path is
+    // literal `/Users/alice` again. On the raw layer these lines carry no
+    // literal home bytes at all, and no widening of the raw rules reaches them.
+    for (name, text) in [
+        ("escaped_slashes", "/Users/~-/Users/alice"),
+        ("escaped_newline", "/Users/~\n/Users/alice"),
+    ] {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        std::fs::write(&file, format!("{}\n", escaped_leak_line(text))).unwrap();
+        assert_eq!(leak_lines(&file, "/Users/alice"), [1], "{name}");
+    }
+}
+
+#[test]
+fn doctor_leaks_accepts_encoder_escapes_on_a_valid_line() {
+    let temp = TempDir::new().unwrap();
+    // The encoder's backslash is not part of the contract: on the decoded layer
+    // the component simply ends at the delimiter and the bare marker is
+    // accepted, whatever the physical line spells.
+    let file = temp.path().join("quote.jsonl");
+    assert_eq!(
+        redacted_evidence(&file, "/Users/alice", "/Users//Users/alice\""),
+        "/Users/~\""
+    );
+    let raw = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        raw.contains("~\\\""),
+        "physical line carries the escape: {raw}"
+    );
+    leaks_exit_zero(&file, "/Users/alice", "marker against an escaped quote");
+
+    let newline = temp.path().join("newline.jsonl");
+    let stderr_file = temp.path().join("stderr.txt");
+    std::fs::write(&stderr_file, "/Users//Users/alice\nrest").unwrap();
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", "/Users/alice")
+            .arg("--file")
+            .arg(&newline)
+            .args(["add", "stderr case", "--agent", "tester", "--stderr-file"])
+            .arg(&stderr_file)
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(
+        added
+            .data
+            .record
+            .cut_evidence()
+            .unwrap()
+            .stderr
+            .as_deref()
+            .unwrap(),
+        "/Users/~\nrest"
+    );
+    let raw = std::fs::read_to_string(&newline).unwrap();
+    assert!(
+        raw.contains("~\\n"),
+        "physical line carries the escape: {raw}"
+    );
+    leaks_exit_zero(
+        &newline,
+        "/Users/alice",
+        "marker against an escaped newline",
+    );
+}
+
+#[test]
+fn doctor_leaks_still_scans_a_malformed_line_raw() {
+    let temp = TempDir::new().unwrap();
+    // A line that does not parse keeps today's raw scan, rules unchanged: r22
+    // has the gate cover malformed lines, and that coverage survives r43.
+    let leaking = temp.path().join("malformed-leak.jsonl");
+    std::fs::write(&leaking, "{\"kind\":\"cut\" /Users/alice\n").unwrap();
+    assert_eq!(leak_lines(&leaking, "/Users/alice"), [1]);
+
+    // r41's raw acceptances are unchanged there: the doubled marker still passes.
+    let accepted = temp.path().join("malformed-marker.jsonl");
+    std::fs::write(&accepted, "{\"kind\":\"cut\" /Users/~~\n").unwrap();
+    assert_eq!(leak_lines(&accepted, "/Users/alice"), Vec::<usize>::new());
+}
+
+#[test]
+fn doctor_leaks_scans_unknown_fields_on_a_valid_line() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("unknown-field.jsonl");
+    // r24 has unknown stored values pass through opaquely, so the decoded scan
+    // walks the parsed value rather than the typed record: a field a future
+    // release adds is covered without a change here.
+    let id = compute_id(NOW, "tester", "note", Severity::Minor, &[]);
+    let line = format!(
+        "{{\"kind\":\"cut\",\"id\":\"{id}\",\"ts\":\"{NOW}\",\"agent\":\"tester\",\"text\":\"note\",\"tags\":[],\"severity\":\"minor\",\"cwd\":\"/tmp/x\",\"future_field\":\"\\/Users\\/alice\"}}"
+    );
+    std::fs::write(&file, format!("{line}\n")).unwrap();
+    assert_eq!(leak_lines(&file, "/Users/alice"), [1]);
+}
+
+#[test]
+fn stderr_truncation_never_splits_the_secret_marker() {
+    let temp = TempDir::new().unwrap();
+    // The redacted text is "x"*n + " /Users/~" + "<redacted>", so the emitted
+    // marker starts at n + 9. These two lengths put the 4096-byte cut one byte
+    // and nine bytes inside it; the cut backtracks to the span's start, so no
+    // partial marker is ever stored. The space before `/Users/` is required or
+    // r23's start boundary declines the generic prefix.
+    for (name, n) in [("cut_offset_1", 4086usize), ("cut_offset_9", 4078usize)] {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        let stderr_file = temp.path().join(format!("{name}.txt"));
+        std::fs::write(
+            &stderr_file,
+            format!("{} /Users//Users/alice/{ENTROPY_TOKEN}", "x".repeat(n)),
+        )
+        .unwrap();
+        let added: SuccessEnvelope<AddData> = success(
+            &command()
+                .env("HOME", "/Users/alice")
+                .arg("--file")
+                .arg(&file)
+                .args(["add", "stderr case", "--agent", "tester", "--stderr-file"])
+                .arg(&stderr_file)
+                .output()
+                .unwrap(),
+        );
+        let stderr = added
+            .data
+            .record
+            .cut_evidence()
+            .unwrap()
+            .stderr
+            .clone()
+            .unwrap();
+        assert_eq!(stderr, format!("{} /Users/~", "x".repeat(n)), "{name}");
+        assert!(stderr.len() <= 4096, "{name}: {}", stderr.len());
+        assert!(stderr.len() > 4086, "{name}: {}", stderr.len());
+        leaks_exit_zero(&file, "/Users/alice", name);
+    }
+}
+
+#[test]
+fn stderr_truncation_keeps_evidence_that_merely_looks_like_a_marker() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("lookalike.jsonl");
+    let stderr_file = temp.path().join("stderr.txt");
+    // The backtrack keys on provenance, not on the marker's spelling: no marker
+    // was emitted here, so authentic evidence ending `~<red` keeps its bytes.
+    std::fs::write(&stderr_file, format!("{}~<redZ", "x".repeat(4091))).unwrap();
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", "/Users/alice")
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "stderr case", "--agent", "tester", "--stderr-file"])
+            .arg(&stderr_file)
+            .output()
+            .unwrap(),
+    );
+    let stderr = added
+        .data
+        .record
+        .cut_evidence()
+        .unwrap()
+        .stderr
+        .clone()
+        .unwrap();
+    assert_eq!(stderr, format!("{}~<red", "x".repeat(4091)));
+    assert_eq!(stderr.len(), 4096);
+}
+
+#[test]
+fn doctor_leaks_still_reports_a_component_that_only_looks_like_a_marker() {
+    let temp = TempDir::new().unwrap();
+    // Every component outside the decoded enumeration is bytes the redactor
+    // never wrote, so a near-miss of the secret marker stays a leak.
+    for (name, cwd) in [
+        ("username", "/Users/~abc"),
+        ("marker_prefix", "/Users/~<reda"),
+        ("marker_lookalike", "/Users/~<redx"),
+    ] {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        let record = leak_record(cwd);
+        std::fs::write(&file, format!("{record}\n")).unwrap();
+        assert_eq!(leak_lines(&file, "/Users/alice"), [1], "{name}");
+    }
+}
+
+#[test]
+fn doctor_leaks_scans_a_home_path_nested_in_an_unknown_structure() {
+    let temp = TempDir::new().unwrap();
+    // The decoded walk descends: an unknown field's inner objects, arrays, and
+    // object keys are scanned at every depth, not just the line's top level.
+    let id = compute_id(NOW, "tester", "note", Severity::Minor, &[]);
+    for (name, field) in [
+        ("nested_value", "{\"a\":[{\"b\":\"\\/Users\\/alice\"}]}"),
+        ("nested_key", "{\"a\":[{\"\\/Users\\/alice\":\"b\"}]}"),
+    ] {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        let line = format!(
+            "{{\"kind\":\"cut\",\"id\":\"{id}\",\"ts\":\"{NOW}\",\"agent\":\"tester\",\"text\":\"note\",\"tags\":[],\"severity\":\"minor\",\"cwd\":\"/tmp/x\",\"future_field\":{field}}}"
+        );
+        std::fs::write(&file, format!("{line}\n")).unwrap();
+        assert_eq!(leak_lines(&file, "/Users/alice"), [1], "{name}");
+    }
+}
+
+#[test]
+fn r42_marker_acceptance_does_not_reach_the_raw_layer() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("malformed.jsonl");
+    // The raw layer's rule set is frozen at what shipped before r43, so the
+    // `~-` member r42 adds on the decoded layer must not widen it: this
+    // component still reports on a line that does not parse.
+    std::fs::write(&file, "{\"kind\":\"cut\" /Users/~-x\n").unwrap();
+    assert_eq!(leak_lines(&file, "/Users/alice"), [1]);
+}

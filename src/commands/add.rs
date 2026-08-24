@@ -161,16 +161,30 @@ fn read_stderr(path: &std::path::Path) -> AppResult<String> {
 }
 
 pub(crate) fn redact_and_truncate(value: &str, max_bytes: usize, home: Option<&Path>) -> String {
-    truncate_utf8(&redact_evidence(value, home), max_bytes)
+    let (redacted, markers) = redact_evidence_marked(value, home);
+    truncate_utf8(&redacted, max_bytes, &markers)
 }
 
-fn truncate_utf8(value: &str, max_bytes: usize) -> String {
+fn truncate_utf8(value: &str, max_bytes: usize, markers: &[(usize, usize)]) -> String {
     if value.len() <= max_bytes {
         return value.to_owned();
     }
     let mut end = max_bytes;
     while !value.is_char_boundary(end) {
         end -= 1;
+    }
+    // The cap is applied after redaction (r25), so the cut can land inside a
+    // marker the secret pass wrote and store a partial `<redacted>` — a
+    // component no decoded acceptance holds, and none can hold it without
+    // blinding the gate to a real `/Users/~<reda` (r43). Back the cut up to the
+    // span's start instead. The key is provenance, not spelling: authentic
+    // evidence that merely ends `~<red` was written by nobody's marker and
+    // keeps its bytes. At most nine further bytes are dropped, and only here.
+    if let Some((start, _)) = markers
+        .iter()
+        .find(|(start, marker_end)| *start < end && end < *marker_end)
+    {
+        end = *start;
     }
     value[..end].to_owned()
 }
@@ -208,6 +222,13 @@ fn extend_one_token(input: &str, end: usize) -> usize {
 }
 
 pub(crate) fn redact_evidence(input: &str, home: Option<&Path>) -> String {
+    redact_evidence_marked(input, home).0
+}
+
+/// `redact_evidence` plus the output spans at which the secret pass wrote
+/// `SECRET_MARKER`. Only the truncating stderr lane needs the spans, so the
+/// plumbing stays here and `dogear`/`resolve` keep the plain wrapper.
+fn redact_evidence_marked(input: &str, home: Option<&Path>) -> (String, Vec<(usize, usize)>) {
     let rewritten = rewrite_home_paths(input, home);
     let input = rewritten.as_str();
     let lower = input.to_ascii_lowercase();
@@ -275,14 +296,17 @@ pub(crate) fn redact_evidence(input: &str, home: Option<&Path>) -> String {
         }
     }
     let mut output = String::with_capacity(input.len());
+    let mut markers = Vec::with_capacity(merged.len());
     let mut cursor = 0;
     for (start, end) in merged {
         output.push_str(&input[cursor..start]);
+        let marker_start = output.len();
         output.push_str(SECRET_MARKER);
+        markers.push((marker_start, output.len()));
         cursor = end;
     }
     output.push_str(&input[cursor..]);
-    output
+    (output, markers)
 }
 
 pub(crate) fn read_text(
