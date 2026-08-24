@@ -603,7 +603,55 @@ fn path_prefix_boundary(bytes: &[u8], end: usize, separator: u8) -> bool {
         .is_none_or(|byte| *byte == b'/' || *byte == separator || home_path_delimiter(*byte))
 }
 
-fn generic_home_path_end(bytes: &[u8], start: usize) -> Option<usize> {
+// The end boundary of an exact current-home match on the decoded layer: the
+// byte mirror of `redact::exact_home_boundary` (r42). The raw layer keeps
+// `path_prefix_boundary` — it makes no new acceptance claims and its rule set
+// is exactly what shipped before r43.
+fn exact_home_boundary(bytes: &[u8], end: usize, separator: u8, dash_home: Option<&[u8]>) -> bool {
+    let Some(byte) = bytes.get(end).copied() else {
+        return true;
+    };
+    if byte == b'/' || byte == b'~' || home_path_delimiter(byte) {
+        return true;
+    }
+    if byte != b'-' {
+        return false;
+    }
+    let rest = &bytes[end..];
+    separator == b'-'
+        || dash_home.is_some_and(|dash| rest.starts_with(dash))
+        || rest.starts_with(b"-Users-")
+        || rest.starts_with(b"-home-")
+}
+
+// The decoded-layer marker enumeration, complete after r39, r41 and r42: the
+// bare marker, or a leading `~` immediately followed by another `~`, by a `-`,
+// or by the secret marker, whatever follows after. Every other component is
+// bytes the redactor never wrote, so `~abc` and `~<reda` stay leaks.
+fn is_redaction_marker_component(component: &[u8]) -> bool {
+    component.strip_prefix(b"~").is_some_and(|tail| {
+        tail.is_empty()
+            || tail.starts_with(b"~")
+            || tail.starts_with(b"-")
+            || tail.starts_with(crate::commands::add::SECRET_MARKER.as_bytes())
+    })
+}
+
+// The raw layer's acceptance, frozen at what shipped before r43: r39's bare
+// marker and r41's `~~`/`~<redacted>` compositions, with no r42 member.
+fn is_raw_marker_component(component: &[u8]) -> bool {
+    component.strip_prefix(b"~").is_some_and(|tail| {
+        tail.is_empty()
+            || tail.starts_with(b"~")
+            || tail.starts_with(crate::commands::add::SECRET_MARKER.as_bytes())
+    })
+}
+
+fn generic_home_path_end(
+    bytes: &[u8],
+    start: usize,
+    marker_accepted: fn(&[u8]) -> bool,
+) -> Option<usize> {
     let prefix = HOME_PREFIXES
         .into_iter()
         .find(|prefix| bytes[start..].starts_with(prefix))?;
@@ -631,38 +679,49 @@ fn generic_home_path_end(bytes: &[u8], start: usize) -> Option<usize> {
     // not always stand alone — r38's resume-after-match lets two home forms
     // abut as `~~`, and the secret pass (r25) runs afterwards over a token
     // class holding no `~`, so it can swallow the separator behind one and
-    // leave `~<redacted>`. Accept the bare marker and either composition,
-    // whatever follows (r41). A component whose second element is neither is a
-    // real directory name, so `~abc` stays a leak.
-    let component = &bytes[component_start..component_end];
-    let composed = component.starts_with(b"~~")
-        || component
-            .strip_prefix(b"~")
-            .is_some_and(|tail| tail.starts_with(crate::commands::add::SECRET_MARKER.as_bytes()));
-    if component == b"~" || composed {
+    // leave `~<redacted>`. The accepted set differs by layer, so the caller
+    // passes it: r42's `~-` member is sound only on the decoded text.
+    if marker_accepted(&bytes[component_start..component_end]) {
         return None;
     }
     (component_end > component_start && path_prefix_boundary(bytes, component_end, separator))
         .then_some(component_end)
 }
 
-fn contains_home_path(bytes: &[u8], home: Option<&[u8]>, dash_home: Option<&[u8]>) -> bool {
+fn contains_home_path(
+    bytes: &[u8],
+    home: Option<&[u8]>,
+    dash_home: Option<&[u8]>,
+    decoded: bool,
+) -> bool {
+    let marker_accepted: fn(&[u8]) -> bool = if decoded {
+        is_redaction_marker_component
+    } else {
+        is_raw_marker_component
+    };
+    let boundary = |end: usize, separator: u8| {
+        if decoded {
+            exact_home_boundary(bytes, end, separator, dash_home)
+        } else {
+            path_prefix_boundary(bytes, end, separator)
+        }
+    };
     let mut start = 0;
     while start < bytes.len() {
         let home_end = home
             .filter(|home| bytes[start..].starts_with(home))
             .map(|home| start + home.len())
-            .filter(|end| path_prefix_boundary(bytes, *end, b'/'));
+            .filter(|end| boundary(*end, b'/'));
         // Exact current home in dash-encoded form; mirrors the redaction-side
         // precedence so dashed usernames and non-generic homes are caught, and
         // like the slash form it carries no start boundary (r40).
         let dash_home_end = dash_home
             .filter(|dash| bytes[start..].starts_with(dash))
             .map(|dash| start + dash.len())
-            .filter(|end| path_prefix_boundary(bytes, *end, b'-'));
+            .filter(|end| boundary(*end, b'-'));
         if home_end.is_some()
             || dash_home_end.is_some()
-            || generic_home_path_end(bytes, start).is_some()
+            || generic_home_path_end(bytes, start, marker_accepted).is_some()
         {
             return true;
         }
@@ -671,17 +730,52 @@ fn contains_home_path(bytes: &[u8], home: Option<&[u8]>, dash_home: Option<&[u8]
     false
 }
 
+// Every string a parsed line holds — object keys and values alike, at every
+// depth. The typed `LogEvent` drops unknown fields and r24 has unknown stored
+// values pass through opaquely, so scanning the typed record would silently
+// stop covering a field a future release adds.
+fn decoded_contains_home_path(value: &serde_json::Value, leak_scan: &LeakScan<'_>) -> bool {
+    let scan = |text: &str| {
+        contains_home_path(
+            text.as_bytes(),
+            leak_scan.home.as_deref(),
+            leak_scan.dash_home.as_deref(),
+            true,
+        )
+    };
+    match value {
+        serde_json::Value::String(text) => scan(text),
+        serde_json::Value::Array(items) => items
+            .iter()
+            .any(|item| decoded_contains_home_path(item, leak_scan)),
+        serde_json::Value::Object(fields) => fields
+            .iter()
+            .any(|(key, field)| scan(key) || decoded_contains_home_path(field, leak_scan)),
+        _ => false,
+    }
+}
+
 fn add_leak_findings(
     findings: &mut Vec<Finding>,
     line: usize,
     raw: &[u8],
     leak_scan: &LeakScan<'_>,
 ) {
-    if contains_home_path(
-        raw,
-        leak_scan.home.as_deref(),
-        leak_scan.dash_home.as_deref(),
-    ) {
+    // A line that parses is scanned as decoded text — the same bytes the
+    // redactor wrote and `list` renders, so the mirror means the same thing on
+    // both sides (r43). A line that does not parse keeps the raw scan, rules
+    // frozen: r22 has the gate cover malformed lines, and a false flag there
+    // fails safe. The split is on parse success, not record validity.
+    let leaked = match serde_json::from_slice::<serde_json::Value>(raw) {
+        Ok(value) => decoded_contains_home_path(&value, leak_scan),
+        Err(_) => contains_home_path(
+            raw,
+            leak_scan.home.as_deref(),
+            leak_scan.dash_home.as_deref(),
+            false,
+        ),
+    };
+    if leaked {
         findings.push(finding(
             line,
             "leak",

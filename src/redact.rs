@@ -5,10 +5,12 @@
 use std::path::Path;
 
 // Keep this token-boundary class and `home_path_delimiter` below mirrored in
-// `commands::doctor` for raw leak scans. The scanner also mirrors the secret
-// marker `commands::add` writes, because it accepts that marker behind a
-// generic home prefix (r41); changing the marker changes both sides.
-// A slash is a path parent, not a delimiter.
+// `commands::doctor`, which scans a line that parses as JSON on its decoded
+// text — the same logical bytes this module writes (r43). The scanner also
+// mirrors the secret marker `commands::add` writes, because it accepts that
+// marker behind a generic home prefix (r41/r42); changing the marker changes
+// both sides. The JSONL encoder's escape set is not part of the contract on
+// either side. A slash is a path parent, not a delimiter.
 const EVIDENCE_DELIMITERS: &str = ",;)]}&#\"'";
 // Home-path prefixes, in slash form and in the dash-encoded form that harness
 // scratchpad and session slugs embed, such as `-Users-<name>-<repo>`.
@@ -30,6 +32,29 @@ fn path_prefix_boundary(input: &str, end: usize, separator: char) -> bool {
     input[end..].chars().next().is_none_or(|character| {
         character == '/' || character == separator || home_path_delimiter(character)
     })
+}
+
+// The end boundary of an *exact* current-home match, in either spelling (r42).
+// Wider than `path_prefix_boundary`, which stays the generic branch's rule: a
+// `~` is blotter's own marker and home bytes standing against one must still
+// redact, and a `-` is structural where the bytes it begins are themselves a
+// dash-encoded home form. In a dash-encoded slug a `-` is the separator, so it
+// always ends that spelling; in a slash path it is an ordinary name byte, so
+// `/Users/alice-backup` names a sibling account and keeps its bytes.
+fn exact_home_boundary(input: &str, end: usize, separator: char, dash_home: Option<&str>) -> bool {
+    let Some(character) = input[end..].chars().next() else {
+        return true;
+    };
+    if character == '/' || character == '~' || home_path_delimiter(character) {
+        return true;
+    }
+    if character != '-' {
+        return false;
+    }
+    separator == '-'
+        || dash_home.is_some_and(|dash| input[end..].starts_with(dash))
+        || input[end..].starts_with("-Users-")
+        || input[end..].starts_with("-home-")
 }
 
 fn generic_home_prefix_end(input: &str, start: usize) -> Option<usize> {
@@ -88,13 +113,13 @@ pub(crate) fn rewrite_home_paths(input: &str, home: Option<&Path>) -> String {
         let end = home
             .filter(|home| input[index..].starts_with(home))
             .map(|home| index + home.len())
-            .filter(|end| path_prefix_boundary(input, *end, '/'))
+            .filter(|end| exact_home_boundary(input, *end, '/', dash_home.as_deref()))
             .or_else(|| {
                 dash_home
                     .as_deref()
                     .filter(|dash| input[index..].starts_with(dash))
                     .map(|dash| index + dash.len())
-                    .filter(|end| path_prefix_boundary(input, *end, '-'))
+                    .filter(|end| exact_home_boundary(input, *end, '-', dash_home.as_deref()))
             })
             .or_else(|| generic_home_prefix_end(input, index))
             // A degenerate home (empty string) matches zero bytes; never accept
