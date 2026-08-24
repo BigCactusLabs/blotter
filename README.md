@@ -220,7 +220,7 @@ Records already tagged `auto` stay in the log, because the log is append-only. T
 | `torn_line`, `malformed`, `conflict_marker` | yes | Run `blotter doctor --fix`. Removed lines are quarantined verbatim. |
 | `id_conflict` | no | A record's ID does not recompute from its payload, usually because it was written before an ID-format change. Leave it — see below. |
 | `duplicate_cut`, `duplicate_dogear` | no | First-wins fold warnings. Harmless — compaction is not worth a rewrite. |
-| `orphan_resolve` | no | A resolve event with no matching record, often from merge ordering. Harmless to the fold. |
+| `orphan_resolve` | no | Either a resolve event whose ID matches no record — often merge ordering, harmless to the fold — or an amend for a known record that has no base resolve anywhere in the log. The second cannot come from merge ordering, so it points at a truncated or hand-edited log; append the missing base resolve. One finding per orphan line. |
 | `unknown_kind` | no | A record kind this build does not know. Left alone for forward compatibility. |
 | `gitignored` | no | Fix `.gitignore`, not the log. |
 

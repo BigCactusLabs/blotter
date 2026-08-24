@@ -39,6 +39,77 @@ fn doctor_accepts_amend_for_existing_resolved_record() {
     assert!(doctor.data.healthy);
 }
 
+/// The two halves of design doc r36: an amend with no base resolve anywhere in
+/// the log is a diagnose-only `orphan_resolve`, and a base resolve appearing
+/// after the amend clears both the finding and the fold's orphan warning.
+#[test]
+fn doctor_reports_an_amend_whose_record_has_no_base_resolve() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "amend without a base");
+    let id = cut.data.record.cut_id().to_owned();
+    let original = std::fs::read_to_string(&file).unwrap();
+    let amend = json!({
+        "kind": "resolve",
+        "id": id,
+        "ts": "2026-07-09T18:30:00.123Z",
+        "agent": "fixture",
+        "note": "base-missing amend",
+        "amend": true
+    });
+    std::fs::write(&file, format!("{original}{amend}\n")).unwrap();
+
+    let doctor = doctor_response(&run_file(&file, &["doctor"]), 1);
+    assert!(!doctor.data.healthy);
+    assert_eq!(doctor.data.findings.len(), 1);
+    let finding = &doctor.data.findings[0];
+    assert_eq!(finding.kind, "orphan_resolve");
+    assert_eq!(finding.line, 2);
+    assert!(
+        finding.message.contains(&id) && finding.message.contains("base resolve"),
+        "message: {}",
+        finding.message
+    );
+    assert!(!finding.fixable);
+}
+
+#[test]
+fn doctor_accepts_an_amend_that_precedes_its_base_resolve() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "amend ahead of its base");
+    let id = cut.data.record.cut_id().to_owned();
+    let original = std::fs::read_to_string(&file).unwrap();
+    let amend = json!({
+        "kind": "resolve",
+        "id": id,
+        "ts": "2026-07-09T18:30:00.123Z",
+        "agent": "fixture",
+        "note": "amend written first",
+        "amend": true
+    });
+    let base = json!({
+        "kind": "resolve",
+        "id": id,
+        "ts": "2026-07-09T18:29:00.000Z",
+        "agent": "fixture",
+        "note": "base written second"
+    });
+    std::fs::write(&file, format!("{original}{amend}\n{base}\n")).unwrap();
+
+    let doctor: SuccessEnvelope<DoctorData> = success(&run_file(&file, &["doctor"]));
+    assert!(doctor.data.healthy, "findings: {:?}", doctor.data.findings);
+
+    // Doctor and the fold agree in this direction too: no orphan warning.
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
+    assert_eq!(listed.data.items[0].status, ItemStatus::Resolved);
+    assert!(
+        listed.meta.warnings.is_empty(),
+        "warnings: {:?}",
+        listed.meta.warnings
+    );
+}
+
 #[test]
 fn doctor_reports_all_core_findings_and_recomputed_ids() {
     let temp = TempDir::new().unwrap();
