@@ -4,7 +4,8 @@
 
 use std::path::Path;
 
-// Keep this token-boundary class mirrored in `commands::doctor` for raw leak scans.
+// Keep this token-boundary class and `home_path_delimiter` below mirrored in
+// `commands::doctor` for raw leak scans.
 // A slash is a path parent, not a delimiter.
 const EVIDENCE_DELIMITERS: &str = ",;)]}&#\"'";
 // Home-path prefixes, in slash form and in the dash-encoded form that harness
@@ -15,9 +16,17 @@ pub(crate) fn evidence_delimiter(character: char) -> bool {
     character.is_ascii_whitespace() || EVIDENCE_DELIMITERS.contains(character)
 }
 
+// A colon separates entries in Unix path lists such as PATH. Keep it specific
+// to home-path scanning: `evidence_delimiter` is also used by the secret-value
+// redactor, where treating every colon as a token boundary would change URL and
+// assignment parsing.
+fn home_path_delimiter(character: char) -> bool {
+    evidence_delimiter(character) || character == ':'
+}
+
 fn path_prefix_boundary(input: &str, end: usize, separator: char) -> bool {
     input[end..].chars().next().is_none_or(|character| {
-        character == '/' || character == separator || evidence_delimiter(character)
+        character == '/' || character == separator || home_path_delimiter(character)
     })
 }
 
@@ -26,7 +35,7 @@ fn dash_start_boundary(input: &str, start: usize) -> bool {
         || input[..start]
             .chars()
             .next_back()
-            .is_some_and(|character| evidence_delimiter(character) || character == '/')
+            .is_some_and(|character| home_path_delimiter(character) || character == '/')
 }
 
 fn generic_home_prefix_end(input: &str, start: usize) -> Option<usize> {
@@ -39,7 +48,7 @@ fn generic_home_prefix_end(input: &str, start: usize) -> Option<usize> {
     // /tmp/Users/alice; a dash-encoded slug normally does follow a slash.
     if start != 0
         && !input[..start].chars().next_back().is_some_and(|character| {
-            evidence_delimiter(character) || (separator == '-' && character == '/')
+            home_path_delimiter(character) || (separator == '-' && character == '/')
         })
     {
         return None;
@@ -48,7 +57,7 @@ fn generic_home_prefix_end(input: &str, start: usize) -> Option<usize> {
     let component_end = input[component_start..]
         .char_indices()
         .find_map(|(offset, character)| {
-            (character == '/' || character == separator || evidence_delimiter(character))
+            (character == '/' || character == separator || home_path_delimiter(character))
                 .then_some(component_start + offset)
         })
         .unwrap_or(input.len());
@@ -58,7 +67,7 @@ fn generic_home_prefix_end(input: &str, start: usize) -> Option<usize> {
 
 fn token_end(input: &str, start: usize) -> usize {
     input[start..]
-        .find(|character: char| evidence_delimiter(character))
+        .find(|character: char| home_path_delimiter(character))
         .map_or(input.len(), |offset| start + offset)
 }
 

@@ -12,10 +12,10 @@ use std::process::{Command, Stdio};
 
 const EMPTY_WARNING: &str = "no blotter file yet; healthy empty state";
 const EMPTY_FIX: &str = "Pass an existing --file PATH or omit --file to inspect discovered state.";
-// Byte mirror of `commands::add::EVIDENCE_DELIMITERS` for raw leak scans.
+// Byte mirror of `redact::EVIDENCE_DELIMITERS` for raw leak scans.
 // A slash is a path parent, not a delimiter.
 const EVIDENCE_DELIMITERS: &[u8] = b",;)]}&#\"'";
-// Byte mirror of `commands::add::HOME_PREFIXES`.
+// Byte mirror of `redact::HOME_PREFIXES`.
 const HOME_PREFIXES: [&[u8]; 4] = [b"/Users/", b"/home/", b"-Users-", b"-home-"];
 
 struct LeakScan<'a> {
@@ -581,21 +581,26 @@ fn current_home_path() -> Option<Vec<u8>> {
         .and_then(|home| home.to_str().map(|home| home.as_bytes().to_vec()))
 }
 
-fn evidence_delimiter(byte: u8) -> bool {
-    byte.is_ascii_whitespace() || EVIDENCE_DELIMITERS.contains(&byte)
+// Byte mirror of `redact::home_path_delimiter`: the shared evidence delimiters
+// plus the colon that separates entries in Unix path lists such as PATH. Both
+// classes must stay in sync with `redact.rs`, where the colon is deliberately
+// kept out of `evidence_delimiter` so secret-value and URL parsing are
+// unchanged.
+fn home_path_delimiter(byte: u8) -> bool {
+    byte.is_ascii_whitespace() || EVIDENCE_DELIMITERS.contains(&byte) || byte == b':'
 }
 
 fn path_prefix_boundary(bytes: &[u8], end: usize, separator: u8) -> bool {
     bytes
         .get(end)
-        .is_none_or(|byte| *byte == b'/' || *byte == separator || evidence_delimiter(*byte))
+        .is_none_or(|byte| *byte == b'/' || *byte == separator || home_path_delimiter(*byte))
 }
 
 fn dash_start_boundary(bytes: &[u8], start: usize) -> bool {
     start == 0
         || bytes
             .get(start - 1)
-            .is_some_and(|byte| evidence_delimiter(*byte) || *byte == b'/')
+            .is_some_and(|byte| home_path_delimiter(*byte) || *byte == b'/')
 }
 
 fn generic_home_path_end(bytes: &[u8], start: usize) -> Option<usize> {
@@ -609,14 +614,14 @@ fn generic_home_path_end(bytes: &[u8], start: usize) -> Option<usize> {
     if start != 0
         && !bytes
             .get(start - 1)
-            .is_some_and(|byte| evidence_delimiter(*byte) || (separator == b'-' && *byte == b'/'))
+            .is_some_and(|byte| home_path_delimiter(*byte) || (separator == b'-' && *byte == b'/'))
     {
         return None;
     }
     let component_start = start + prefix.len();
     let mut component_end = component_start;
     while let Some(byte) = bytes.get(component_end) {
-        if *byte == b'/' || *byte == separator || evidence_delimiter(*byte) {
+        if *byte == b'/' || *byte == separator || home_path_delimiter(*byte) {
             break;
         }
         component_end += 1;
