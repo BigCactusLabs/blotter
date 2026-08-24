@@ -3,9 +3,10 @@ id: TASK-63
 title: >-
   doctor --leaks raw-layer residual: JSON escaping and stderr truncation can
   break a marker component
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-24 18:41'
+updated_date: '2026-08-24 20:52'
 labels: []
 dependencies: []
 ordinal: 73000

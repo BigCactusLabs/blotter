@@ -3,9 +3,10 @@ id: TASK-62
 title: >-
   End-boundary adjacency under-redaction: exact home followed by a non-boundary
   byte stores home bytes verbatim
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-24 18:15'
+updated_date: '2026-08-24 20:52'
 labels: []
 dependencies: []
 ordinal: 72000
