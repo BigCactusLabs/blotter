@@ -2113,7 +2113,7 @@ fn stderr_truncation_never_splits_the_secret_marker() {
             .stderr
             .clone()
             .unwrap();
-        // r45 re-runs the home pass over the capped bytes, so the `/Users/~`
+        // r46 re-runs the home pass over the capped bytes, so the `/Users/~`
         // the backtrack left collapses one step further. The backtrack itself
         // is unchanged: the cut still lands at the span start, and no partial
         // marker is ever stored.
@@ -2127,7 +2127,7 @@ fn stderr_truncation_never_splits_the_secret_marker() {
 #[test]
 fn stderr_truncation_never_ends_in_an_exact_home() {
     let temp = TempDir::new().unwrap();
-    // r45: the 4096-byte cap manufactures an end-of-input boundary the home
+    // r46: the 4096-byte cap manufactures an end-of-input boundary the home
     // pass never judged, promoting r42's declined `x/Users/alice2` class into a
     // match after the only pass is over. The cap re-runs the home pass over the
     // bytes it kept, so the promoted home redacts instead of reaching the log.
@@ -2168,7 +2168,7 @@ fn stderr_truncation_never_ends_in_an_exact_home() {
 fn untruncated_stderr_keeps_the_r42_declined_home_class() {
     let temp = TempDir::new().unwrap();
     // The control the promotion is measured against: the same bytes, short
-    // enough to skip the cap, store verbatim and pass the gate. r45's second
+    // enough to skip the cap, store verbatim and pass the gate. r46's second
     // pass runs only when the cap cuts, so `--stderr-file` and `--evidence`
     // keep spelling one input one way.
     for (name, home_form) in [("slash", "/Users/alice"), ("dash", "-Users-alice")] {
@@ -2202,7 +2202,7 @@ fn untruncated_stderr_keeps_the_r42_declined_home_class() {
 #[test]
 fn stderr_truncation_backtrack_survives_the_home_pass() {
     let temp = TempDir::new().unwrap();
-    // AC#3, pinned on a shape the r45 home pass cannot touch: no `/` and no `-`
+    // AC#3, pinned on a shape the r46 home pass cannot touch: no `/` and no `-`
     // anywhere near the cut, so the stored bytes are the backtrack's alone.
     let file = temp.path().join("backtrack.jsonl");
     let stderr_file = temp.path().join("backtrack.txt");
