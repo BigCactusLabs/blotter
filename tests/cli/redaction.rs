@@ -2113,11 +2113,127 @@ fn stderr_truncation_never_splits_the_secret_marker() {
             .stderr
             .clone()
             .unwrap();
-        assert_eq!(stderr, format!("{} /Users/~", "x".repeat(n)), "{name}");
+        // r45 re-runs the home pass over the capped bytes, so the `/Users/~`
+        // the backtrack left collapses one step further. The backtrack itself
+        // is unchanged: the cut still lands at the span start, and no partial
+        // marker is ever stored.
+        assert_eq!(stderr, format!("{} ~", "x".repeat(n)), "{name}");
         assert!(stderr.len() <= 4096, "{name}: {}", stderr.len());
-        assert!(stderr.len() > 4086, "{name}: {}", stderr.len());
+        assert!(!stderr.contains("<red"), "{name}: {stderr}");
         leaks_exit_zero(&file, "/Users/alice", name);
     }
+}
+
+#[test]
+fn stderr_truncation_never_ends_in_an_exact_home() {
+    let temp = TempDir::new().unwrap();
+    // r45: the 4096-byte cap manufactures an end-of-input boundary the home
+    // pass never judged, promoting r42's declined `x/Users/alice2` class into a
+    // match after the only pass is over. The cap re-runs the home pass over the
+    // bytes it kept, so the promoted home redacts instead of reaching the log.
+    for (name, home_form) in [("slash", "/Users/alice"), ("dash", "-Users-alice")] {
+        let file = temp.path().join(format!("{name}.jsonl"));
+        let stderr_file = temp.path().join(format!("{name}.txt"));
+        let padding = "z".repeat(4096 - home_form.len());
+        std::fs::write(&stderr_file, format!("{padding}{home_form}XXXX")).unwrap();
+        let added: SuccessEnvelope<AddData> = success(
+            &command()
+                .env("HOME", "/Users/alice")
+                .arg("--file")
+                .arg(&file)
+                .args(["add", "stderr case", "--agent", "tester", "--stderr-file"])
+                .arg(&stderr_file)
+                .output()
+                .unwrap(),
+        );
+        let stderr = added
+            .data
+            .record
+            .cut_evidence()
+            .unwrap()
+            .stderr
+            .clone()
+            .unwrap();
+        assert_eq!(
+            stderr,
+            format!("{}~", "z".repeat(4096 - home_form.len())),
+            "{name}"
+        );
+        assert!(stderr.len() <= 4096, "{name}: {}", stderr.len());
+        leaks_exit_zero(&file, "/Users/alice", name);
+    }
+}
+
+#[test]
+fn untruncated_stderr_keeps_the_r42_declined_home_class() {
+    let temp = TempDir::new().unwrap();
+    // The control the promotion is measured against: the same bytes, short
+    // enough to skip the cap, store verbatim and pass the gate. r45's second
+    // pass runs only when the cap cuts, so `--stderr-file` and `--evidence`
+    // keep spelling one input one way.
+    for (name, home_form) in [("slash", "/Users/alice"), ("dash", "-Users-alice")] {
+        let file = temp.path().join(format!("short_{name}.jsonl"));
+        let stderr_file = temp.path().join(format!("short_{name}.txt"));
+        let raw = format!("zzzzzzzzzz{home_form}XXXX");
+        std::fs::write(&stderr_file, &raw).unwrap();
+        let added: SuccessEnvelope<AddData> = success(
+            &command()
+                .env("HOME", "/Users/alice")
+                .arg("--file")
+                .arg(&file)
+                .args(["add", "stderr case", "--agent", "tester", "--stderr-file"])
+                .arg(&stderr_file)
+                .output()
+                .unwrap(),
+        );
+        let stderr = added
+            .data
+            .record
+            .cut_evidence()
+            .unwrap()
+            .stderr
+            .clone()
+            .unwrap();
+        assert_eq!(stderr, raw, "{name}");
+        leaks_exit_zero(&file, "/Users/alice", name);
+    }
+}
+
+#[test]
+fn stderr_truncation_backtrack_survives_the_home_pass() {
+    let temp = TempDir::new().unwrap();
+    // AC#3, pinned on a shape the r45 home pass cannot touch: no `/` and no `-`
+    // anywhere near the cut, so the stored bytes are the backtrack's alone.
+    let file = temp.path().join("backtrack.jsonl");
+    let stderr_file = temp.path().join("backtrack.txt");
+    // The entropy rule spans `token=<value>` as one token starting at 4087, so
+    // the marker occupies 4087..4097 and the 4096-byte cut falls inside it.
+    std::fs::write(
+        &stderr_file,
+        format!("{} token={ENTROPY_TOKEN}", "x".repeat(4086)),
+    )
+    .unwrap();
+    let added: SuccessEnvelope<AddData> = success(
+        &command()
+            .env("HOME", "/Users/alice")
+            .arg("--file")
+            .arg(&file)
+            .args(["add", "stderr case", "--agent", "tester", "--stderr-file"])
+            .arg(&stderr_file)
+            .output()
+            .unwrap(),
+    );
+    let stderr = added
+        .data
+        .record
+        .cut_evidence()
+        .unwrap()
+        .stderr
+        .clone()
+        .unwrap();
+    assert_eq!(stderr, format!("{} ", "x".repeat(4086)));
+    assert!(!stderr.contains("<red"));
+    leaks_exit_zero(&file, "/Users/alice", "backtrack");
 }
 
 #[test]
