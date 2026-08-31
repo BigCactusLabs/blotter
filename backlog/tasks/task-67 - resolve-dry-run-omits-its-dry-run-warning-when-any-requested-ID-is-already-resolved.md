@@ -3,9 +3,10 @@ id: TASK-67
 title: >-
   resolve --dry-run omits its dry-run warning when any requested ID is already
   resolved
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-31 14:21'
+updated_date: '2026-08-31 15:08'
 labels: []
 dependencies: []
 ordinal: 77000

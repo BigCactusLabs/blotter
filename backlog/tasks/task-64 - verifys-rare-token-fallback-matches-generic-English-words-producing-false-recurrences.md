@@ -3,9 +3,10 @@ id: TASK-64
 title: >-
   verify's rare-token fallback matches generic English words, producing false
   recurrences
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-24 20:53'
+updated_date: '2026-08-31 15:08'
 labels: []
 dependencies: []
 ordinal: 74000

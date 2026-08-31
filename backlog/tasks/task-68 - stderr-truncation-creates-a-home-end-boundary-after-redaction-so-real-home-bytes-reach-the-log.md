@@ -3,9 +3,10 @@ id: TASK-68
 title: >-
   stderr truncation creates a home end boundary after redaction, so real home
   bytes reach the log
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-31 14:40'
+updated_date: '2026-08-31 15:08'
 labels: []
 dependencies: []
 ordinal: 78000
