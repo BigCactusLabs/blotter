@@ -202,6 +202,83 @@ fn verify_links_tagged_near_duplicates() {
 }
 
 #[test]
+fn verify_does_not_link_filler_words_but_keeps_a_content_recurrence() {
+    // TASK-64. Four records, every one tagged `tooling`, so a shared tag is
+    // present and provably not what separates the pairs. N is 4 — two open cuts
+    // plus two eligible anchors — so `rare_limit` is `max(2, ceil(4/4))` = 2 and
+    // every shared token is locally rare. That is the regime where a frequency
+    // ceiling cannot tell filler from content, which is why r44 moves the
+    // filter and leaves the ceiling alone.
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    // Under r19 this anchor and the open cut below shared exactly
+    // `{would, not, only}`: three rare tokens and one tag, and a reported
+    // recurrence.
+    let filler_anchor = add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "backlog fetch would not write only reference",
+        &["tooling"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:31:00Z",
+        filler_anchor.data.record.cut_id(),
+        &["--agent", "fixer"],
+    );
+    let filler_open = add_at(
+        &file,
+        "2026-07-09T18:32:00Z",
+        "patch apply would not reverse only diff",
+        &["tooling"],
+    );
+    // Eight shared content tokens, none of them in any stopword list. Overlap
+    // is 8/11 = 0.727, below the 4/5 bar, so the rare path alone carries this
+    // pair before and after the change.
+    let content_anchor = add_at(
+        &file,
+        "2026-07-09T18:33:00Z",
+        "raster codec module map lookup returns stale entry rebuild index cache",
+        &["tooling"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:34:00Z",
+        content_anchor.data.record.cut_id(),
+        &["--agent", "fixer"],
+    );
+    let content_open = add_at(
+        &file,
+        "2026-07-09T18:35:00Z",
+        "raster codec module map lookup returns stale entry differs probe journal",
+        &["tooling"],
+    );
+
+    let verify = verify_success(&run_file(&file, &["verify"]), 1);
+    assert_eq!(verify.data["count"], 1);
+    assert_eq!(verify.data["scanned"], 2);
+    let recurrences = verify.data["recurrences"].as_array().unwrap();
+    assert_eq!(
+        recurrences[0]["resolved_id"],
+        json!(content_anchor.data.record.cut_id())
+    );
+    assert_eq!(
+        recurrences[0]["recurrence_ids"],
+        json!([content_open.data.record.cut_id()])
+    );
+    assert!(
+        !recurrences.iter().any(|recurrence| {
+            recurrence["recurrence_ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|id| id.as_str() == Some(filler_open.data.record.cut_id()))
+        }),
+        "a pair sharing one tag and three English function words is not a recurrence"
+    );
+}
+
+#[test]
 fn verify_ignores_dogear_noise() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
