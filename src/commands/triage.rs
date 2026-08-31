@@ -925,6 +925,38 @@ mod tests {
         );
     }
 
+    /// Every entry must be a token the tokenizer can actually emit. A stopword
+    /// list that disagrees with its own tokenizer silently does nothing:
+    /// scikit-learn documents exactly this against its own default tokenizer,
+    /// which splits `we've` into `we` and `ve`, so listing `we've` without `ve`
+    /// retains `ve`; Nothman, Qin and Yurchak (ACL 2018, W18-2502) found the
+    /// same class of defect across the popular published lists. r44's list is
+    /// derived *through* `normalized_title` so that it does not have it -- 174
+    /// Snowball entries become 118 after normalization and the length floor,
+    /// plus the four r19 retentions -- and this test is what stops a later hand
+    /// edit from reintroducing it.
+    ///
+    /// Asserting against the real normalizer rather than restating its rules
+    /// keeps the two from drifting apart: `normalized_title` lowercases and
+    /// replaces every non-alphanumeric character with a space, so any entry it
+    /// does not return unchanged is one no token can equal. `scoring_tokens`
+    /// then drops tokens of two or fewer characters before the lookup, so a
+    /// shorter entry is unreachable as well.
+    #[test]
+    fn stopwords_are_tokens_the_tokenizer_can_emit() {
+        for word in STOPWORDS {
+            assert_eq!(
+                normalized_title(word),
+                *word,
+                "`{word}` is not what the tokenizer produces, so no token can ever match it"
+            );
+            assert!(
+                word.chars().count() > 2,
+                "`{word}` is below the length filter `scoring_tokens` applies before the lookup"
+            );
+        }
+    }
+
     fn candidate(index: usize, text: &str, tags: &[&str]) -> Candidate {
         let timestamp = format!("2026-08-18T00:00:{index:02}.000Z");
         let normalized_title = normalized_title(text);
