@@ -2168,9 +2168,14 @@ fn stderr_truncation_never_ends_in_an_exact_home() {
 fn untruncated_stderr_keeps_the_r42_declined_home_class() {
     let temp = TempDir::new().unwrap();
     // The control the promotion is measured against: the same bytes, short
-    // enough to skip the cap, store verbatim and pass the gate. r46's second
-    // pass runs only when the cap cuts, so `--stderr-file` and `--evidence`
-    // keep spelling one input one way.
+    // enough to skip the cap, store verbatim and pass the gate.
+    //
+    // This does NOT pin the `len <= max_bytes` gate. These bytes are a fixed
+    // point of `rewrite_home_paths`, so one pass and two agree and the test
+    // stays green with the gate removed. The gate is pinned incidentally by
+    // `doctor_leaks_accepts_encoder_escapes_on_a_valid_line`, whose
+    // `--stderr-file` value stores `/Users/~\nrest` and collapses to `~\nrest`
+    // without it — the only failure in the suite under that mutation.
     for (name, home_form) in [("slash", "/Users/alice"), ("dash", "-Users-alice")] {
         let file = temp.path().join(format!("short_{name}.jsonl"));
         let stderr_file = temp.path().join(format!("short_{name}.txt"));
