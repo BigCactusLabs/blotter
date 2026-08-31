@@ -592,9 +592,151 @@ pub(crate) fn normalized_title(text: &str) -> String {
         .join(" ")
 }
 
+/// Tokens that carry no topical signal. This is the Snowball English stopword
+/// list (https://snowballstem.org/algorithms/english/stop.txt, 174 entries)
+/// passed through blotter's own normalization — lowercased, every
+/// non-alphanumeric character replaced by a space, split on whitespace — and
+/// reduced to the tokens `scoring_tokens` can see: three or more characters.
+/// Deriving it through the normalizer instead of copying it verbatim is what
+/// makes `wouldn`, `doesn` and `let` members: blotter splits `wouldn't` into
+/// `wouldn` and `t`, so the published apostrophe spellings would never match.
+///
+/// Four r19 entries Snowball does not carry are retained because they are
+/// filler in friction narration: `need`, `one`, `use`, `uses`. r19's `to` is
+/// dropped as dead weight — a two-character token never reaches this check.
+///
+/// Frequency cannot do this job at fixture scale. `is_rare` accepts
+/// `df <= max(2, ceil(N/4))`, a token shared by the two candidates under test
+/// always has `df >= 2`, and the floor of 2 exists because a lower floor would
+/// make no shared token rare and retire the path. In a four-candidate analysis
+/// every shared token is rare, so no ratio separates filler from content there.
+/// A common English word is removable as a word at every scale, and as a
+/// frequency only at some. See design doc r44.
+///
+/// Sorted and unique; `scoring_tokens` binary-searches it.
 const STOPWORDS: &[&str] = &[
-    "and", "are", "but", "cannot", "for", "from", "into", "need", "one", "that", "the", "this",
-    "to", "use", "uses", "with",
+    "about",
+    "above",
+    "after",
+    "again",
+    "against",
+    "all",
+    "and",
+    "any",
+    "are",
+    "aren",
+    "because",
+    "been",
+    "before",
+    "being",
+    "below",
+    "between",
+    "both",
+    "but",
+    "can",
+    "cannot",
+    "could",
+    "couldn",
+    "did",
+    "didn",
+    "does",
+    "doesn",
+    "doing",
+    "don",
+    "down",
+    "during",
+    "each",
+    "few",
+    "for",
+    "from",
+    "further",
+    "had",
+    "hadn",
+    "has",
+    "hasn",
+    "have",
+    "haven",
+    "having",
+    "her",
+    "here",
+    "hers",
+    "herself",
+    "him",
+    "himself",
+    "his",
+    "how",
+    "into",
+    "isn",
+    "its",
+    "itself",
+    "let",
+    "more",
+    "most",
+    "mustn",
+    "myself",
+    "need",
+    "nor",
+    "not",
+    "off",
+    "once",
+    "one",
+    "only",
+    "other",
+    "ought",
+    "our",
+    "ours",
+    "ourselves",
+    "out",
+    "over",
+    "own",
+    "same",
+    "shan",
+    "she",
+    "should",
+    "shouldn",
+    "some",
+    "such",
+    "than",
+    "that",
+    "the",
+    "their",
+    "theirs",
+    "them",
+    "themselves",
+    "then",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "through",
+    "too",
+    "under",
+    "until",
+    "use",
+    "uses",
+    "very",
+    "was",
+    "wasn",
+    "were",
+    "weren",
+    "what",
+    "when",
+    "where",
+    "which",
+    "while",
+    "who",
+    "whom",
+    "why",
+    "with",
+    "won",
+    "would",
+    "wouldn",
+    "you",
+    "your",
+    "yours",
+    "yourself",
+    "yourselves",
 ];
 const MIN_OVERLAP_NUMERATOR: usize = 4;
 const MIN_OVERLAP_DENOMINATOR: usize = 5;
@@ -603,7 +745,7 @@ const MIN_RARE_SHARED_TOKENS: usize = 3;
 pub(crate) fn scoring_tokens(normalized_title: &str) -> BTreeSet<String> {
     normalized_title
         .split_whitespace()
-        .filter(|token| token.chars().count() > 2 && !STOPWORDS.contains(token))
+        .filter(|token| token.chars().count() > 2 && STOPWORDS.binary_search(token).is_err())
         .map(str::to_owned)
         .collect()
 }
@@ -774,6 +916,14 @@ fn materialize_cluster(cluster: &ChronicCluster) -> TriageCluster {
 mod tests {
     use super::*;
     use crate::Severity;
+
+    #[test]
+    fn stopwords_are_sorted_and_unique_for_binary_search() {
+        assert!(
+            STOPWORDS.windows(2).all(|pair| pair[0] < pair[1]),
+            "STOPWORDS must be sorted and deduplicated: binary_search depends on it"
+        );
+    }
 
     fn candidate(index: usize, text: &str, tags: &[&str]) -> Candidate {
         let timestamp = format!("2026-08-18T00:00:{index:02}.000Z");
