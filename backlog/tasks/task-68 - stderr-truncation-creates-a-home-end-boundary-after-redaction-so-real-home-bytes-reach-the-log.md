@@ -3,10 +3,10 @@ id: TASK-68
 title: >-
   stderr truncation creates a home end boundary after redaction, so real home
   bytes reach the log
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-31 14:40'
-updated_date: '2026-08-31 15:08'
+updated_date: '2026-08-31 17:30'
 labels: []
 dependencies: []
 ordinal: 78000
@@ -28,8 +28,8 @@ Candidate fix, verified by hand but not implemented: re-run rewrite_home_paths a
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Stored evidence.stderr never ends in an exact-home match, in either spelling, after the 4096-byte cap
-- [ ] #2 doctor --leaks exits 0 on any log written by add --stderr-file
-- [ ] #3 The 4096-byte ceiling still holds and the secret-marker backtrack of TASK-63 is unchanged
-- [ ] #4 Regression test lands in tests/cli/redaction.rs beside stderr_truncation_never_splits_the_secret_marker, covering the slash and dash spellings
+- [x] #1 Stored evidence.stderr never ends in an exact-home match, in either spelling, after the 4096-byte cap
+- [x] #2 doctor --leaks exits 0 on any log written by add --stderr-file
+- [x] #3 The 4096-byte ceiling still holds and the secret-marker backtrack of TASK-63 is unchanged
+- [x] #4 Regression test lands in tests/cli/redaction.rs beside stderr_truncation_never_splits_the_secret_marker, covering the slash and dash spellings
 <!-- AC:END -->

@@ -3,10 +3,10 @@ id: TASK-64
 title: >-
   verify's rare-token fallback matches generic English words, producing false
   recurrences
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-24 20:53'
-updated_date: '2026-08-31 15:08'
+updated_date: '2026-08-31 17:30'
 labels: []
 dependencies: []
 ordinal: 74000
@@ -36,7 +36,7 @@ Likely fix: extend STOPWORDS with the common function words above, and/or tighte
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A regression test builds a corpus where two unrelated cuts share one tag and three filler words, and asserts verify reports no recurrence for that pair
-- [ ] #2 The true-positive pair with 8 shared content tokens still links in the same test corpus
-- [ ] #3 The chosen rule for STOPWORDS and/or is_rare is recorded in a design doc or code comment with the frequency reasoning
+- [x] #1 A regression test builds a corpus where two unrelated cuts share one tag and three filler words, and asserts verify reports no recurrence for that pair
+- [x] #2 The true-positive pair with 8 shared content tokens still links in the same test corpus
+- [x] #3 The chosen rule for STOPWORDS and/or is_rare is recorded in a design doc or code comment with the frequency reasoning
 <!-- AC:END -->

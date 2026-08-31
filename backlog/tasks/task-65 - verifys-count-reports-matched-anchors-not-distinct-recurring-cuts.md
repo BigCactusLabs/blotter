@@ -1,10 +1,10 @@
 ---
 id: TASK-65
 title: 'verify''s count reports matched anchors, not distinct recurring cuts'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-24 20:53'
-updated_date: '2026-08-31 15:08'
+updated_date: '2026-08-31 17:30'
 labels: []
 dependencies: []
 ordinal: 75000
@@ -24,7 +24,7 @@ Likely fix: report the distinct recurring cut ids alongside the anchor count, or
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 verify output distinguishes the number of matched anchors from the number of distinct recurring cuts
-- [ ] #2 A test covers the many-anchors-to-one-recurring-cut shape
-- [ ] #3 README and schema are updated if the output envelope changes
+- [x] #1 verify output distinguishes the number of matched anchors from the number of distinct recurring cuts
+- [x] #2 A test covers the many-anchors-to-one-recurring-cut shape
+- [x] #3 README and schema are updated if the output envelope changes
 <!-- AC:END -->

@@ -3,10 +3,10 @@ id: TASK-67
 title: >-
   resolve --dry-run omits its dry-run warning when any requested ID is already
   resolved
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-08-31 14:21'
-updated_date: '2026-08-31 15:08'
+updated_date: '2026-08-31 17:30'
 labels: []
 dependencies: []
 ordinal: 77000
@@ -30,7 +30,7 @@ No state is wrong and nothing is appended -- the warning set is incomplete, so a
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A dry run always warns that no resolve event was appended, whatever the mix of open and already-resolved IDs
-- [ ] #2 The already-resolved warnings keep their current wording and counts
-- [ ] #3 Regression test in tests/cli/resolve.rs covers the mixed and all-resolved dry runs
+- [x] #1 A dry run always warns that no resolve event was appended, whatever the mix of open and already-resolved IDs
+- [x] #2 The already-resolved warnings keep their current wording and counts
+- [x] #3 Regression test in tests/cli/resolve.rs covers the mixed and all-resolved dry runs
 <!-- AC:END -->
