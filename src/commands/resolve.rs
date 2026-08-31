@@ -191,7 +191,13 @@ pub fn run(
             already_resolved_ids.len(),
             already_resolved_ids.join(", ")
         ));
-    } else if dry_run {
+    }
+    // The two warnings answer different questions — which IDs were already
+    // resolved, and whether anything was appended — so a dry run says so
+    // whatever the mix. Chained behind the already-resolved arms, a mixed dry
+    // run and a mixed real run emitted an identical warning set, and only
+    // `data.changed` told a consumer which one it was reading.
+    if dry_run {
         meta.warnings
             .push("dry run; no resolve event appended".into());
     }

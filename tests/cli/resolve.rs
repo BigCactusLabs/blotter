@@ -892,6 +892,52 @@ fn mixed_multi_resolve_warns_with_sorted_already_resolved_ids() {
 }
 
 #[test]
+fn dry_run_warns_that_nothing_was_appended_whatever_the_already_resolved_mix() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let first = add(&file, "dry run mix first")
+        .data
+        .record
+        .cut_id()
+        .to_owned();
+    let second = add(&file, "dry run mix second")
+        .data
+        .record
+        .cut_id()
+        .to_owned();
+    let _: SuccessEnvelope<ResolveData> =
+        success(&run_file(&file, &["resolve", &first, "--agent", "fixer"]));
+    let before = std::fs::read(&file).unwrap();
+
+    // One open, one already resolved: the already-resolved warning must not
+    // consume the dry-run warning, or this run is indistinguishable from the
+    // real one that appends.
+    let mixed: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &["resolve", &second, &first, "--agent", "fixer", "--dry-run"],
+    ));
+    assert!(!mixed.data.changed);
+    assert_eq!(
+        mixed.meta.warnings,
+        [
+            format!("already resolved: 1 ID ({first})"),
+            "dry run; no resolve event appended".to_owned(),
+        ]
+    );
+
+    let all: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &["resolve", &first, "--agent", "fixer", "--dry-run"],
+    ));
+    assert!(!all.data.changed);
+    assert_eq!(
+        all.meta.warnings,
+        ["already resolved", "dry run; no resolve event appended"]
+    );
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
+
+#[test]
 fn multi_resolve_with_ambiguous_prefix_is_atomic_and_returns_sorted_candidates() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
