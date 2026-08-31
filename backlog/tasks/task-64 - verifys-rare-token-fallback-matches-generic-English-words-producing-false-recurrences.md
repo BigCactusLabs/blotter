@@ -3,9 +3,10 @@ id: TASK-64
 title: >-
   verify's rare-token fallback matches generic English words, producing false
   recurrences
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-24 20:53'
+updated_date: '2026-08-31 15:08'
 labels: []
 dependencies: []
 ordinal: 74000
@@ -14,7 +15,7 @@ ordinal: 74000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Found while auditing a real 66-record log (walkmaxx). `blotter verify` reported 6 recurrences; 3 are false.
+Found while auditing a real 66-record log from another project. `blotter verify` reported 6 recurrences; 3 are false.
 
 `similar_enough` (src/commands/triage.rs) accepts a pair on its second path when they share at least MIN_RARE_SHARED_TOKENS (3) tokens that `is_rare` accepts, and `linked` only additionally requires one shared tag. Two causes compound:
 

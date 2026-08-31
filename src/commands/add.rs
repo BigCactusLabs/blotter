@@ -162,7 +162,15 @@ fn read_stderr(path: &std::path::Path) -> AppResult<String> {
 
 pub(crate) fn redact_and_truncate(value: &str, max_bytes: usize, home: Option<&Path>) -> String {
     let (redacted, markers) = redact_evidence_marked(value, home);
-    truncate_utf8(&redacted, max_bytes, &markers)
+    if redacted.len() <= max_bytes {
+        return redacted;
+    }
+    // r46: the cut manufactures an end-of-input boundary the home pass never
+    // judged, promoting a declined exact home into a match after the only pass
+    // is over. Re-run the home pass over exactly the bytes about to be stored.
+    // Only when the cap cuts: the pass is not idempotent, so running it on
+    // untruncated text would spell one input two ways across the evidence lanes.
+    rewrite_home_paths(&truncate_utf8(&redacted, max_bytes, &markers), home)
 }
 
 fn truncate_utf8(value: &str, max_bytes: usize, markers: &[(usize, usize)]) -> String {

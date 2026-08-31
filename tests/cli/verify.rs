@@ -27,7 +27,7 @@ fn verify_no_recurrence_is_empty_and_successful() {
     let verify = verify_success(&run_file(&file, &["verify"]), 0);
     assert_eq!(
         verify.data,
-        json!({"recurrences": [], "count": 0, "scanned": 1})
+        json!({"recurrences": [], "count": 0, "distinct_recurring_cuts": 0, "scanned": 1})
     );
     assert_eq!(std::fs::read(&file).unwrap(), before);
 }
@@ -85,6 +85,7 @@ fn verify_reports_an_exact_title_recurrence_with_the_full_envelope() {
                     "first_recurrence_ts": "2026-07-09T18:32:00.000Z",
                 }],
                 "count": 1,
+                "distinct_recurring_cuts": 1,
                 "scanned": 1,
             },
             "meta": {"contract": 5, "file": file},
@@ -198,6 +199,83 @@ fn verify_links_tagged_near_duplicates() {
     assert_eq!(
         verify.data["recurrences"][0]["recurrence_ids"],
         json!([recurring.data.record.cut_id()])
+    );
+}
+
+#[test]
+fn verify_does_not_link_filler_words_but_keeps_a_content_recurrence() {
+    // TASK-64. Four records, every one tagged `tooling`, so a shared tag is
+    // present and provably not what separates the pairs. N is 4 — two open cuts
+    // plus two eligible anchors — so `rare_limit` is `max(2, ceil(4/4))` = 2 and
+    // every shared token is locally rare. That is the regime where a frequency
+    // ceiling cannot tell filler from content, which is why r44 moves the
+    // filter and leaves the ceiling alone.
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    // Under r19 this anchor and the open cut below shared exactly
+    // `{would, not, only}`: three rare tokens and one tag, and a reported
+    // recurrence.
+    let filler_anchor = add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "backlog fetch would not write only reference",
+        &["tooling"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:31:00Z",
+        filler_anchor.data.record.cut_id(),
+        &["--agent", "fixer"],
+    );
+    let filler_open = add_at(
+        &file,
+        "2026-07-09T18:32:00Z",
+        "patch apply would not reverse only diff",
+        &["tooling"],
+    );
+    // Eight shared content tokens, none of them in any stopword list. Overlap
+    // is 8/11 = 0.727, below the 4/5 bar, so the rare path alone carries this
+    // pair before and after the change.
+    let content_anchor = add_at(
+        &file,
+        "2026-07-09T18:33:00Z",
+        "raster codec module map lookup returns stale entry rebuild index cache",
+        &["tooling"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:34:00Z",
+        content_anchor.data.record.cut_id(),
+        &["--agent", "fixer"],
+    );
+    let content_open = add_at(
+        &file,
+        "2026-07-09T18:35:00Z",
+        "raster codec module map lookup returns stale entry differs probe journal",
+        &["tooling"],
+    );
+
+    let verify = verify_success(&run_file(&file, &["verify"]), 1);
+    assert_eq!(verify.data["count"], 1);
+    assert_eq!(verify.data["scanned"], 2);
+    let recurrences = verify.data["recurrences"].as_array().unwrap();
+    assert_eq!(
+        recurrences[0]["resolved_id"],
+        json!(content_anchor.data.record.cut_id())
+    );
+    assert_eq!(
+        recurrences[0]["recurrence_ids"],
+        json!([content_open.data.record.cut_id()])
+    );
+    assert!(
+        !recurrences.iter().any(|recurrence| {
+            recurrence["recurrence_ids"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|id| id.as_str() == Some(filler_open.data.record.cut_id()))
+        }),
+        "a pair sharing one tag and three English function words is not a recurrence"
     );
 }
 
@@ -436,6 +514,105 @@ fn verify_reports_one_open_cut_against_every_matching_anchor_and_link_path() {
 }
 
 #[test]
+fn verify_counts_anchors_and_distinct_recurring_cuts() {
+    // TASK-65. r16 makes every eligible resolved cut an independent anchor, so
+    // one returning problem reports once per historical cut it resembles.
+    // `count` stays that anchor count -- a top-level `count` is the length of
+    // the primary array in every blotter envelope -- and
+    // `distinct_recurring_cuts` is the number of live problems behind it.
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let first_anchor = add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "Cache warmer drops the sled index",
+        &["ops"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:31:00Z",
+        first_anchor.data.record.cut_id(),
+        &["--agent", "fixer"],
+    );
+    let second_anchor = add_at(
+        &file,
+        "2026-07-09T18:32:00Z",
+        "cache warmer drops the sled index!",
+        &["ops"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:33:00Z",
+        second_anchor.data.record.cut_id(),
+        &["--agent", "fixer"],
+    );
+    // Different raw text from both anchors' resolutions onward, so a distinct
+    // ID, but the same normalized title: it links to each anchor on the
+    // exact-title override.
+    let recurring = add_at(
+        &file,
+        "2026-07-09T18:34:00Z",
+        "Cache warmer drops the sled index",
+        &["ops"],
+    );
+
+    let verify = verify_success(&run_file(&file, &["verify"]), 1);
+    assert_eq!(verify.data["count"], 2);
+    assert_eq!(verify.data["distinct_recurring_cuts"], 1);
+    assert_eq!(verify.data["scanned"], 1);
+    for recurrence in verify.data["recurrences"].as_array().unwrap() {
+        assert_eq!(
+            recurrence["recurrence_ids"],
+            json!([recurring.data.record.cut_id()])
+        );
+    }
+
+    // A second live problem with its own anchor, proving the field counts
+    // distinct cuts rather than clamping to one. It needs a third anchor: the
+    // two above have identical normalized titles and identical tags, so no cut
+    // can link to one of them without linking to the other.
+    let third_anchor = add_at(
+        &file,
+        "2026-07-09T18:35:00Z",
+        "Compaction thread stalls on the write barrier",
+        &["ops"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:36:00Z",
+        third_anchor.data.record.cut_id(),
+        &["--agent", "fixer"],
+    );
+    let second_recurring = add_at(
+        &file,
+        "2026-07-09T18:37:00Z",
+        "compaction thread stalls on the write barrier",
+        &["ops"],
+    );
+
+    let verify = verify_success(&run_file(&file, &["verify"]), 1);
+    assert_eq!(verify.data["count"], 3);
+    assert_eq!(verify.data["distinct_recurring_cuts"], 2);
+    assert_eq!(verify.data["scanned"], 2);
+    let recurrences = verify.data["recurrences"].as_array().unwrap();
+    assert_eq!(recurrences.len(), 3);
+    for recurrence in &recurrences[..2] {
+        assert_eq!(
+            recurrence["recurrence_ids"],
+            json!([recurring.data.record.cut_id()])
+        );
+    }
+    assert_eq!(
+        recurrences[2]["resolved_id"],
+        json!(third_anchor.data.record.cut_id())
+    );
+    assert_eq!(
+        recurrences[2]["recurrence_ids"],
+        json!([second_recurring.data.record.cut_id()])
+    );
+}
+
+#[test]
 fn verify_sorts_recurrence_ids_and_anchors_by_first_recurrence() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
@@ -519,7 +696,7 @@ fn schema_documents_verify() {
     );
     assert_eq!(
         verify["output"],
-        "{recurrences:[{resolved_id,resolved_text,source?,resolution:{ts,task?,pr?,commit?},recurrence_ids,count,first_recurrence_ts}],count,scanned}"
+        "{recurrences:[{resolved_id,resolved_text,source?,resolution:{ts,task?,pr?,commit?},recurrence_ids,count,first_recurrence_ts}],count,distinct_recurring_cuts,scanned}"
     );
     assert!(
         verify["semantics"]

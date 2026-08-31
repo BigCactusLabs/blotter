@@ -17,7 +17,7 @@ A cut closed on a claim that later proves false cannot be returned to the open q
 
 `resolve --amend` appends a correcting resolve record, but the folded status stays `resolved` (verified on a scratch log: status resolved, amended true), and there is no `reopen` subcommand.
 
-Real case from the walkmaxx log: pc_94e284f52022 was closed 2026-07-19 with "Resolved upstream: codex exec resume now supports the required resume workflow flags." Re-checked 2026-08-24: `codex exec resume --help` still has no `--cd` (only `-o, --output-last-message`), so half the cut is unfixed.
+Real case from another project's log: pc_94e284f52022 was closed 2026-07-19 with "Resolved upstream: codex exec resume now supports the required resume workflow flags." Re-checked 2026-08-24: `codex exec resume --help` still has no `--cd` (only `-o, --output-last-message`), so half the cut is unfixed.
 
 Consequence: verify can never flag it, triage never clusters it, and the only remedy is to file a duplicate cut under a new id, which breaks the recurrence link that verify depends on. An audit can detect a false closure but cannot correct it.
 

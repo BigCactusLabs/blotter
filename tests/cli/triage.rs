@@ -99,6 +99,33 @@ fn triage_does_not_cluster_common_filler_with_a_shared_tag() {
 }
 
 #[test]
+fn triage_does_not_cluster_english_filler_with_a_shared_tag() {
+    // Linkage lives in triage, so the r44 stopword list is pinned here as well
+    // as at the verify surface TASK-64 names. Under r19 these two cuts shared
+    // exactly `would`, `not` and `only` — three tokens that are locally rare in
+    // any corpus small enough to write as a fixture — plus one tag, which is
+    // the reported defect.
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "backlog fetch would not write only reference",
+        &["tooling"],
+    );
+    add_at(
+        &file,
+        "2026-07-09T18:32:00Z",
+        "patch apply would not reverse only diff",
+        &["tooling"],
+    );
+
+    let triage = triage_success(&run_file(&file, &["triage", "--min-count", "2"]), 0);
+    assert_eq!(triage.data["count"], 0);
+    assert_eq!(triage.data["clusters"], json!([]));
+}
+
+#[test]
 fn triage_does_not_cluster_empty_scoring_tokens() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");

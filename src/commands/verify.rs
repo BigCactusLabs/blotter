@@ -6,12 +6,14 @@ use crate::store;
 use crate::{ItemStatus, ListItem};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VerifyData {
     pub recurrences: Vec<Recurrence>,
     pub count: usize,
+    pub distinct_recurring_cuts: usize,
     pub scanned: usize,
 }
 
@@ -108,8 +110,19 @@ fn verify(items: Vec<ListItem>) -> VerifyData {
         .map(materialize_recurrence)
         .collect();
 
+    // r16 makes every eligible resolved cut an independent anchor, so one open
+    // cut recurs once against each anchor it resembles. `count` is therefore
+    // the number of historical cuts that came back, and this is the number of
+    // live ones.
+    let distinct_recurring_cuts = recurrences
+        .iter()
+        .flat_map(|recurrence| recurrence.recurrence_ids.iter().map(String::as_str))
+        .collect::<BTreeSet<_>>()
+        .len();
+
     VerifyData {
         count: recurrences.len(),
+        distinct_recurring_cuts,
         recurrences,
         scanned: analysis.scanned,
     }
