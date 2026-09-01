@@ -1,7 +1,7 @@
 # Blotter v2 — implementation plan
 
 **Date:** 2026-09-01
-**Status:** Draft for review. Not contract. The normative spec lands as design-doc amendment r48 in Phase 0.
+**Status:** Reworked 2026-09-01 after a Codex sol review (§9). Not contract. The normative spec lands as design-doc amendment r48 in Phase 0.
 **Input:** `blotter-v2-signal-floor-checkpoint-2026-09-01.md` (the checkpoint). This plan turns its 18 decisions into ordered, reviewable batches.
 
 ## 1. Where the tree is today
@@ -12,17 +12,17 @@ Facts the phases below depend on (verified 2026-09-01):
 |---|---|
 | Crate / envelope contract | 0.15.0 / `meta.contract` 5 |
 | Newest design amendment | r47 (2026-08-31) |
-| Auto-capture write lane | retired in r32; read-side `--include-auto` filtering still live in 8 commands |
+| Auto-capture write lane | retired in r32; read-side `--include-auto` filtering still live in 6 commands (list, triage, digest, verify, sweep, export); retrospect includes by default |
 | `severity` | `enum Severity` in `src/lib.rs:16`; hashed into the cut ID by `compute_id` (`src/lib.rs:350`) |
 | `source` field | `Option<String>` on the folded item; set only by the retired hook lane, always `None` from `add` |
 | Retrospect candidate types | string literals (`wrapper_alias`, `doc_repair`, `skill_candidate`), no enum |
 | Resolution | `struct Resolution` (`src/lib.rs:110`): note/task/pr/commit/url/dropped/amended, no disposition |
-| Legacy `pc_` records | r12 promises they fold "forever"; the dogfood log holds zero; `tests/cli/legacy.rs` spends 15 references on them |
-| Dogfood log | 165 cuts, 8 dogears, 23 resolves — the polluted history the checkpoint describes |
-| Open backlog | TASK-2 (distribution), TASK-71 (is_rare weighting) |
+| Legacy `pc_` records | r12 promises they fold "forever"; the dogfood log holds zero; `tests/cli/legacy.rs` spends 17 references on them, and its first three tests cover `source` provenance, not `pc_` |
+| Dogfood log | 166 cuts, 8 dogears, 23 resolves — the polluted history the checkpoint describes |
+| Open backlog | TASK-2 (distribution), TASK-71 (is_rare weighting); TASK-72..78 created 2026-09-01 for the phases below |
 | Specs dir | `docs/superpowers/specs/` absent (normal) |
 
-Two of these change the pacing. The cut ID hashes severity, so the rename is a record-identity change and takes the full orchestrated chain (pre-implementation critique leg, implementer, cross-model diff review, 5x gate). And `source` is dead on the write side already, so replacing it with `origin` costs nothing on the read side.
+Two of these change the pacing. The cut ID hashes severity, so the rename is a record-identity change and takes the full orchestrated chain (pre-implementation critique leg, implementer, cross-model diff review, 5x gate). `source` is dead on the write side, but not on the read side: it is materialized into list items and into triage, digest and verify output, and `tests/cli/legacy.rs` carries the propagation tests. Replacing it with `origin` is a port, not a delete.
 
 ## 2. Research addendum
 
@@ -57,7 +57,19 @@ The checkpoint leaves seven open questions for the spec. The plan pre-answers fi
 Decided 2026-09-01:
 
 - **Crate version: 1.0.0**, `meta.contract` 6. Quinn's call: the v2 model is the first stable contract.
-- **Accepted friction in triage and digest.** `accepted` cuts are resolved, so they leave open-cut views as any resolved cut does, and `verify` never anchors on them. `digest` gains no section and no listing, only one count field, `accepted`, for cuts accepted in the period. Reason: `accepted` is the one disposition that hides friction on purpose, and a count keeps the hide rate visible for near-zero code. Left to my judgment by Quinn.
+- **Accepted friction in triage and digest.** `accepted` cuts are resolved, so they leave open-cut views as any resolved cut does, and `verify` never anchors on them. `digest` gains no section and no listing, only one count field, `accepted`, for cuts accepted in the period. Reason: `accepted` is the one disposition that hides friction on purpose, and a count keeps the hide rate visible for near-zero code. Left to my judgment by Quinn. The period is judged by the winning resolution's timestamp, since that is when the acceptance happened; cut time and base-event time are not used.
+
+Decided in the 2026-09-01 review rework (§9), each a rule r48 must state:
+
+- **One contract bump, one merge to main.** Phases 2 through 5 stack on an integration branch `v2`, each as its own reviewed PR into that branch. `meta.contract` becomes 6 in Phase 2 on that branch and `v2` merges to `main` once, with Phase 6. Consumers never see an intermediate 6.
+- **The v1 refusal is a pre-fold, in-lock version probe.** Before any fold, on every path that opens a log for read or write, the probe reads the file under the lock and refuses it with one named non-retryable error (proposed `unsupported_log_version`, exit 65) if any parseable record lacks `v: 2` or carries another value. It appends nothing, tear-heals nothing, creates no backup, and no partial fold escapes. An empty file is a fresh v2 log. Malformed lines stay malformed findings and do not by themselves trigger the refusal. `doctor` reports the file as one non-fixable `unsupported_version` finding and `--fix` refuses to touch it; `archive` refuses the same way; `sweep` names the log in its per-log error list and keeps exit 0, as it does for every per-log failure today, so one v1 log does not abort a multi-log sweep.
+- **Identity framing.** r48 states the exact hash input for each kind: domain literal `bl2` (cuts and dogears both move off `bl1`), field order, framing, digest width, sorted-unique tags, and sorted-unique sources for promotions. `v` and `origin` are excluded from every hash: `v` is format, `origin` is provenance, and neither changes what the friction is (same reasoning r34 used to keep evidence out).
+- **Promotion in `list`.** A promotion has no status and no resolution. `list --kind promotion` shows promotions only; `--kind all` shows cuts, dogears and promotions; the default stays cut-only. Output is a tagged union with a `PromotionItem` shape, ordered newest first then by id, rendered in JSON and `--format md`. The `--kind` enum splits so `sweep` does not grow a `promotion` value; sweep stays cut/dogear.
+- **Promotions pin their sources.** `archive` never removes a resolved cut that any promotion names in `sources[]`; provenance is the reason the record exists. `doctor` validates every `sources[]` id resolves to a cut and reports a dangling one as a non-fixable finding.
+- **Promotion text fields are authored text.** `artifact.ref` and `note` are redacted per r34 before hashing and before append, with the same length bounds as cut text.
+- **Amend and disposition.** On `resolve --amend`, `--disposition` is optional and inherited from the winning resolution when omitted; `--promotion` is kept while the disposition stays `promoted` and cleared when an amend moves the disposition elsewhere. A mixed cut/dogear batch is rejected before any append, as `--url`/`--dropped` already are.
+- **Retrospect ships two patterns, not four.** `recurrent_friction` and `failed_intervention` have deterministic sources today. `repeated_recovery` and `documentation_gap` have none, so they are not in the v2 vocabulary; the checkpoint called them potential. Add one when an emission rule exists.
+- **The hook receiver goes, and r32's fail-open promise goes with it.** r48 supersedes r32 explicitly. An installed `hook exec claude-code` on 1.0.0 exits 2 with a clap error, so the CHANGELOG and README carry a mandatory upgrade step: remove the hook entry from Claude Code settings before upgrading. Keeping a no-op receiver in a release whose purpose is to remove dead code was rejected.
 
 ## 4. Phases
 
@@ -66,58 +78,59 @@ Each phase is one PR. Phases 2 through 5 touch persistence or record identity an
 ### Phase 0 — Normative v2 spec (amendment r48)
 
 Depends on: this plan approved.
-Deliverable: one amendment to `docs/plans/2026-07-09-papercuts-design.md` covering admission policy, `impact`, the cut/dogear/promotion ontology, dispositions and their recurrence behaviour, the promotion record and artifact vocabulary, `origin`, the `auto` deletion, retrospect's pattern/intervention split, the v1-file refusal rule, and contract 6. Every later phase quotes r48, not the checkpoint.
+Deliverable: one amendment to `docs/plans/2026-07-09-papercuts-design.md` covering admission policy, `impact`, the cut/dogear/promotion ontology, dispositions and their recurrence behaviour, the promotion record and artifact vocabulary, `origin`, the `auto` deletion and the r32 supersession, retrospect's pattern/intervention split, the v1-file refusal rule as a pre-fold in-lock probe with its `doctor`/`archive`/`sweep` behaviour, the exact identity framing per kind, promotion's list shape, source pinning and redaction, the amend rules for disposition, and contract 6. Every rule in §3 is restated as contract text. Every later phase quotes r48, not the checkpoint.
 Routing: design-judge-opus-med drafts against the checkpoint plus §3; I integrate; one Codex read-only review of the amendment text (cross-model, r3 precedent). Full chain, because it touches identity and several interacting rules.
 Gate: `cargo test docs` (repo-layout gates) still passes; no code.
 
 ### Phase 1 — Policy before mechanism (docs + copy)
 
-Depends on: nothing. Runs alongside Phase 0.
-Change: rewrite the admission guidance where agents actually read it: `AGENTS.md` Dogfood section, `README.md` "what is a cut" copy, and the `add --help` severity string (`src/cli.rs`, `src/commands/schema.rs`). The repo ships no agent skill file, so those three are the whole surface. Replace "log every friction, default minor" with the five admission tests and the skip list from checkpoint §5–6. Keep `severity` vocabulary in this phase; the rename lands in Phase 3.
+Depends on: nothing. Runs alongside Phase 0 and lands before Phase 2 starts: both touch `src/cli.rs`, `src/commands/schema.rs`, `README.md` and `AGENTS.md`, and the review found no safe way to run them in parallel worktrees.
+Change: rewrite the admission guidance where agents actually read it: `AGENTS.md` Dogfood section, `README.md` "what is a cut" copy, and the `add --help` severity string (`src/cli.rs`, `src/commands/schema.rs`). The repo ships no agent skill file, so those three are the whole surface. Replace "log every friction, default minor" with the five admission tests and the skip list from checkpoint §5–6. Keep `severity` vocabulary in this phase; the rename lands in Phase 3. The README auto/hook sections belong to Phase 2 and are not touched here.
 Why first: the checkpoint's own conclusion is that the signal problem is "largely explained by instructions that explicitly encourage trivial filing". This is the cheapest lever and it needs no contract change.
 Routing: I write it (taste-critical copy). Small PR, direct merge allowed.
 Gate: four commands; `schema_documents_*` tests updated.
 
 ### Phase 2 — Delete the `auto` lane
 
-Depends on: nothing contractual (r32 already retired the write side). Merge after Phase 0 so the contract bump is spec'd.
-Change: remove `is_auto_capture` and the partition helper (`src/lib.rs:210–223`), `--include-auto` from list/triage/digest/verify/sweep/export and its schema entries, the "N auto-captured records hidden" warning, retrospect's include-by-default special case, `src/commands/hook.rs` and the `hook` subcommand, `tests/cli/hook.rs`, `tests/cli/auto_capture.rs` (700 lines), the `hook` and `auto_capture` module declarations in `tests/cli/main.rs`, and the AGENTS.md invariant bullet. `auto` becomes a plain tag. Archive `docs/archive/2026-08-09-auto-capture-default-hidden-design.md` stays as is.
-Contract: 5 → 6 (default reads change for any log holding `auto` records; `hook` subcommand removed).
+Depends on: Phase 1 merged (shared files), Phase 0 drafted (the contract bump and the r32 supersession are spec'd). First PR into the `v2` integration branch.
+Change: remove `is_auto_capture` and the partition helper (`src/lib.rs:210–223`), `--include-auto` from list/triage/digest/verify/sweep/export and its schema entries, the "N auto-captured records hidden" warning, retrospect's include-by-default special case, `src/commands/hook.rs` and the `hook` subcommand, `tests/cli/hook.rs`, `tests/cli/auto_capture.rs` (700 lines), the `hook` and `auto_capture` module declarations in `tests/cli/main.rs`, the AGENTS.md invariant bullet, the hook fast path in `src/main.rs` (`is_hook_exec`), the hook types and dispatch in `src/cli.rs` and `src/commands/mod.rs`, the schema and env entries for hook, the no-op hook assertion in `tests/cli/contract.rs`, the stale include-auto guidance in `src/commands/resolve.rs` and its assertion in `tests/cli/resolve.rs`, and the README auto/hook sections (the read-command paragraph and the Hooks section). `auto` becomes a plain tag. Archive `docs/archive/2026-08-09-auto-capture-default-hidden-design.md` stays as is.
+Contract: 5 → 6 on the `v2` branch (default reads change for any log holding `auto` records; `hook` subcommand removed; r32 fail-open superseded, with the upgrade step in CHANGELOG).
 Routing: Codex terra @ max in its own worktree. Passes the Luna test on verifiability but fails it on blast radius (8 command files, one test-module deletion), so terra. Cross-model review: my own diff read plus tests; a Codex diff over 200 lines in a default-read domain gets one pr-reviewer-high pass.
 Gate: four commands; `every_test_module_file_is_declared_in_main` passes after the module removals.
 
 ### Phase 3 — Record model break
 
-Depends on: Phase 0 (r48), Phase 2 (so `auto` is gone before the fold changes).
+Depends on: Phase 0 (r48), Phase 2 (so `auto` is gone before the fold changes). PR into `v2`.
 Change, in one PR because they share the fold and the ID hash:
 - `severity` → `impact` with `low|material|blocking`: enum, `--impact` flag (`--severity` removed, not aliased), envelope field, list sort, export's OTLP severity map, digest/triage rendering, README/schema copy.
-- Every record carries `v: 2`; the scanner rejects a log holding records without it with the named error from decision 1; `compute_id` hashes `impact`; the v1 hash path, the `pc_` namespace, and `IdNamespace` go.
-- `origin` replaces `source`: `{type: "agent"}` written by `add`; optional `provider`, `trace_id`, `span_id`, `trace_flags` accepted, width-validated, and stored, but never set by any command.
+- Every record carries `v: 2`; the pre-fold in-lock probe from §3 refuses a log holding records without it, on every open path (`add`, `dogear`, `resolve`, every read command, `doctor`, `archive`, `sweep` per log); `compute_id` hashes `impact` under the `bl2` framing r48 states; the v1 hash path, the `pc_` namespace, and `IdNamespace` go, including their uses in `src/commands/archive.rs`.
+- `origin` replaces `source`: `{type: "agent"}` written by `add`; optional `provider`, `trace_id`, `span_id`, `trace_flags` accepted, width-validated, and stored, but never set by any command. `origin` is carried wherever `source` is carried today: list items, triage, digest and verify output.
 - Resolution gains `disposition: fixed|promoted|accepted|invalid` via `resolve --disposition`, required for cuts, rejected for dogears; `--amend` may change it.
-- `tests/cli/legacy.rs` is deleted; the v1-file-refused case and the mixed-file case move to `contract.rs`.
+- `tests/cli/legacy.rs` is deleted. Its three `source` provenance tests are ported to a new `tests/cli/origin.rs` (declared in `main.rs`) against the structured field; only the `pc_` tests die. The v1-file-refused case and the mixed-file case go to `contract.rs`; the `doctor --fix` and `archive` refusals go to `doctor.rs` and `archive.rs`.
+- Repo tooling moves with the model: `scripts/dev/generate-scale-fixtures.py` (emits `bl1`, `severity`, no `v`), `scripts/dev/bench-baseline.sh` (`--severity`, disposition-less resolve), and `tests/fixtures/export-otlp-json-golden.jsonl` (0.15.0, severity attributes).
 Routing: full chain. implementer-opus-med in a worktree (silent-failure domain: persistence, identity); pr-reviewer-xhigh on the diff plus `codex review` for the cross-model axis. `gate-5x.sh` required. A pre-implementation critique of the r48 identity rules happens in Phase 0, not here.
-Tests: `contract.rs` for the exit matrix, envelope shape, and the v1-file refusal; `doctor.rs` for how a v1 line is reported.
+Tests: `contract.rs` for the exit matrix, envelope shape, and the v1-file refusal with a byte-identical file afterwards; `doctor.rs` for the non-fixable `unsupported_version` finding and the `--fix` refusal; `store.rs` for no tear-heal on a refused file.
 
 ### Phase 4 — `promotion` record and `promote` command
 
-Depends on: Phase 3.
-Change: new record kind `promotion` (`id`, `ts`, `agent`, `sources[]`, `artifact{type,ref}`, `note?`), artifact types `doc|skill|guard|test|tool|process`; `blotter promote --source <id>... --artifact-type X --artifact-ref R [--note]`; mutation runs read→fold→validate every source is a cut (66 if missing, `invalid_argument` if a dogear)→append under the exclusive lock, same shape as `add`. `list --kind promotion|all` shows them; `list --kind cut` default is untouched. `resolve --disposition promoted --promotion <id>` links to an existing promotion. `doctor` learns the kind. `schema` publishes it.
+Depends on: Phase 3. PR into `v2`.
+Change: new record kind `promotion` (`id`, `ts`, `agent`, `sources[]`, `artifact{type,ref}`, `note?`), artifact types `doc|skill|guard|test|tool|process`; `blotter promote --source <id>... --artifact-type X --artifact-ref R [--note]`; mutation runs read→fold→validate every source is a cut (66 if missing, `invalid_argument` if a dogear)→append under the exclusive lock, same shape as `add`. `list --kind promotion|all` shows them as `PromotionItem` in the union from §3; `list --kind cut` default is untouched; the `--kind` enum splits so `sweep` stays cut/dogear. `artifact.ref` and `note` are redacted before hash and append. `archive` pins any cut a promotion names. `resolve --disposition promoted --promotion <id>` links to an existing promotion. `doctor` learns the kind and validates `sources[]`. `schema` publishes it.
 Routing: implementer-opus-med (new mutation path, lock discipline). pr-reviewer-high on the diff. `gate-5x.sh`.
-Tests: new module `tests/cli/promote.rs`, declared in `main.rs`.
+Tests: new module `tests/cli/promote.rs`, declared in `main.rs`; an archive-pinning case in `archive.rs`; a redaction case in `redaction.rs`.
 
 ### Phase 5 — Analysis semantics
 
-Depends on: Phase 3 and 4.
+Depends on: Phase 3 and 4. Last PR into `v2`.
 Change:
 - `verify`: anchors are resolved cuts with disposition `fixed` or `promoted` only; `accepted` and `invalid` are excluded and named in `schema`. Envelope adds `disposition` to `resolution{}`.
-- `retrospect`: candidate `type` becomes `pattern` from `recurrent_friction|failed_intervention|repeated_recovery|documentation_gap`, plus `suggested: [doc|skill|guard|...]`. Same clustering and recurrence rules; `wrapper_alias` and `doc_repair` become suggestions on a `recurrent_friction` pattern; `skill_candidate` becomes `failed_intervention` with suggestion `skill`. Deterministic, no window, same exit codes.
-- `triage`: vocabulary only (impact). `digest`: vocabulary plus one `accepted` count field (cuts accepted in the period); no section, no listing.
+- `retrospect`: candidate `type` becomes `pattern` from `recurrent_friction|failed_intervention`, plus `suggested: [doc|skill|guard|tool|test|process]`. Same clustering and recurrence rules; `wrapper_alias` and `doc_repair` become suggestions on a `recurrent_friction` pattern; `skill_candidate` becomes `failed_intervention` with suggestion `skill`. Deterministic, no window, same exit codes.
+- `triage`: vocabulary only (impact). `digest`: vocabulary plus one `accepted` count field (cuts whose winning resolution is `accepted` and falls in the period); no section, no listing. This is the first place digest walks resolved items, so the window rule is stated in r48.
 Routing: implementer-opus-med (retrospect's typing is judgment-adjacent). One pr-reviewer-high pass. No store.rs touch, so single gate run.
 
 ### Phase 6 — Release 1.0.0
 
-Depends on: everything above merged.
-Change: CHANGELOG (each phase adds its entry in its own PR; this phase only cuts the version header), `Cargo.toml` version, `scripts/dev/check-msrv.sh` run on 1.89.0, archive the checkpoint doc to `docs/archive/` with an archived date, update `docs/superpowers/specs/` if any spec was written (none planned; r48 is the spec), README quickstart re-recorded against the new envelope.
+Depends on: Phases 2 through 5 merged into `v2`. This PR is `v2` → `main`, the one merge consumers see.
+Change: CHANGELOG (with the mandatory hook-removal upgrade step) (each phase adds its entry in its own PR; this phase only cuts the version header), `Cargo.toml` and `Cargo.lock` version, `scripts/dev/check-msrv.sh` run on 1.89.0, archive the checkpoint doc to `docs/archive/` with an archived date, update `docs/superpowers/specs/` if any spec was written (none planned; r48 is the spec), README quickstart re-recorded against the new envelope.
 Routing: luna @ max for the mechanical sync (CHANGELOG header, version, MSRV run), me for the README read-through. Direct merge as docs housekeeping is not allowed here: the version bump ships, so it is a PR.
 
 ## 5. Sequence
@@ -128,22 +141,22 @@ gantt
     axisFormat  %s
     section Spec & policy
     P0 r48 spec (full chain)      :p0, 0, 3
-    P1 policy copy PR             :p1, 0, 2
-    section Delete
+    P1 policy copy PR             :p1, 0, 1
+    section Delete (into v2)
     P2 auto lane removal (Codex)  :p2, 1, 3
-    section Break
+    section Break (into v2)
     P3 record model (full chain)  :p3, 3, 6
     P4 promotion record           :p4, 6, 8
     P5 analysis semantics         :p5, 8, 10
-    section Ship
+    section Ship (v2 to main)
     P6 release 1.0.0              :p6, 10, 11
 ```
 
-Units are review checkpoints, not days. P1 and P2 overlap P0; P2's implementer starts against the draft amendment and receives corrections warm. P3 is the serial bottleneck and the only phase with a pre-implementation critique leg.
+Units are review checkpoints, not days. P1 overlaps P0 and lands first; P2 starts after P1 merges and works against the draft amendment, receiving corrections warm. P3 is the serial bottleneck and the only phase with a pre-implementation critique leg.
 
 ## 6. Backlog tasks to create
 
-Created only after this plan is approved, with `backlog task create`, one per phase, parented where a phase splits:
+Created 2026-09-01 with `backlog task create`, one per phase. Descriptions are updated after each rework of this plan:
 
 - TASK-72 v2 spec: design-doc amendment r48
 - TASK-73 Admission policy copy: AGENTS.md, README, `add --help`
@@ -155,8 +168,11 @@ Created only after this plan is approved, with `backlog task create`, one per ph
 
 ## 7. Risks and how the plan handles them
 
-- **Silent v1 read.** A v2 binary pointed at a 0.15 log must fail loudly, not fold a subset. Handled by the scanner-level refusal in Phase 3 and a mixed-file test in `contract.rs`.
-- **Lost dogfood history.** 165 cuts and 23 resolves stop being readable by the new binary. Accepted: the old file stays on disk, the 0.15 binary still reads it, and the history is the noise the floor is being raised against.
+- **Silent v1 read, or a v1 write.** A v2 binary pointed at a 0.15 log must fail loudly, fold nothing, and write nothing, not even a tear-heal byte. Today a record missing a field is a `Malformed` scan issue that append skips and `doctor --fix` would quarantine. Handled by the pre-fold in-lock probe in §3, a byte-identical-after-refusal test, and refusals in `doctor --fix` and `archive`.
+- **Intermediate contract 6.** Four phases change shapes under one number. Handled by the `v2` integration branch and a single merge to `main`.
+- **Installed hook breaks the host session.** After upgrade the removed receiver exits 2 on every failed tool call. Handled by the mandatory upgrade step in CHANGELOG and README, and accepted as the cost of removing the lane.
+- **Dangling promotion provenance.** `archive` could remove a promoted source. Handled by source pinning in `archive` and a `doctor` check.
+- **Lost dogfood history.** 166 cuts and 23 resolves stop being readable by the new binary. Accepted: the old file stays on disk, the 0.15 binary still reads it, and the history is the noise the floor is being raised against.
 - **Reviewer fatigue on Phase 3.** The largest diff and the only one where a silent bug corrupts every later fold. Full chain, 5x gate, and the identity rules critiqued before code exists.
 - **Scope creep into workflow management.** `promote` records provenance and nothing else. Any brief that asks a worker to touch the artifact it points at is out of scope by construction.
 - **Policy copy that still invites exhaust.** Phase 1 is reviewed by Quinn line by line, not by a worker.
@@ -165,3 +181,12 @@ Created only after this plan is approved, with `backlog task create`, one per ph
 ## 8. What this plan does not do
 
 No importance scores, no LLM admission classifier, no raw event kind, no telemetry ingestion, no promotion plugin framework, no dogear promotion. Each is listed in checkpoint §13 and stays out.
+
+## 9. Review record
+
+Codex gpt-5.6-sol at reasoning high reviewed the plan read-only on 2026-09-01 and returned 14 findings with the verdict "rework needed". Every finding was checked against the source before this rework. Disposition:
+
+- Adopted as written: intermediate contract 6 (→ `v2` branch), the refusal boundary (→ pre-fold in-lock probe), identity underspecified (→ framing in r48), promotion not fitting `ListItem` (→ union and enum split), archive vs promotion sources (→ pinning), Phase 1 ∥ Phase 2 conflict (→ sequenced), promotion redaction (→ r34 applies), amend and digest window rules, the missed deletion sites, the `legacy.rs` provenance tests (→ `origin.rs`), the scripts and golden fixture, `Cargo.lock`, and the stale facts.
+- Adopted with a different resolution: the hook receiver. The review offered keeping it or superseding r32 with an upgrade step; this plan supersedes r32.
+- Adopted by subtraction: retrospect's four patterns become two.
+- Not a finding of fact: `src/commands/schema.rs` is 56 lines, not a monolith, but the file overlap it was cited for is real.
