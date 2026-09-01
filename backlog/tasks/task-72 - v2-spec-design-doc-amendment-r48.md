@@ -1,10 +1,10 @@
 ---
 id: TASK-72
 title: 'v2 spec: design-doc amendment r48'
-status: In Progress
+status: To Do
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-01 22:26'
+updated_date: '2026-09-01 22:27'
 labels:
   - v2
   - spec
