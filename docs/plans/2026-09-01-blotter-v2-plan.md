@@ -66,7 +66,7 @@ Each phase is one PR. Phases 2 through 5 touch persistence or record identity an
 ### Phase 0 — Normative v2 spec (amendment r48)
 
 Depends on: this plan approved.
-Deliverable: one amendment to `docs/plans/2026-07-09-papercuts-design.md` covering admission policy, `impact`, the cut/dogear/promotion ontology, dispositions and their recurrence behaviour, the promotion record and artifact vocabulary, `origin`, the `auto` deletion, retrospect's pattern/intervention split, the upcast rule, and contract 6. Every later phase quotes r48, not the checkpoint.
+Deliverable: one amendment to `docs/plans/2026-07-09-papercuts-design.md` covering admission policy, `impact`, the cut/dogear/promotion ontology, dispositions and their recurrence behaviour, the promotion record and artifact vocabulary, `origin`, the `auto` deletion, retrospect's pattern/intervention split, the v1-file refusal rule, and contract 6. Every later phase quotes r48, not the checkpoint.
 Routing: design-judge-opus-med drafts against the checkpoint plus §3; I integrate; one Codex read-only review of the amendment text (cross-model, r3 precedent). Full chain, because it touches identity and several interacting rules.
 Gate: `cargo test docs` (repo-layout gates) still passes; no code.
 
