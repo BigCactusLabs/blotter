@@ -54,10 +54,10 @@ The checkpoint leaves seven open questions for the spec. The plan pre-answers fi
 4. **Patterns are not persisted.** Retrospect stays a derived view.
 5. **Dogear promotion is out of v2 scope.** Sources of a promotion are cuts only; dogears keep `--url` and `--dropped`. Revisit with evidence.
 
-Left to Quinn:
+Decided 2026-09-01:
 
-- **Crate version.** 1.0.0 (v2 model = first stable contract) or 0.16.0. This plan assumes 1.0.0 and `meta.contract` 6.
-- **Accepted friction in triage and digest.** Checkpoint says probably visible in historical views. Plan assumes: `accepted` cuts are resolved, so they leave open-cut views as today; `verify` never anchors on them; `digest` gains no new section.
+- **Crate version: 1.0.0**, `meta.contract` 6. Quinn's call: the v2 model is the first stable contract.
+- **Accepted friction in triage and digest.** `accepted` cuts are resolved, so they leave open-cut views as any resolved cut does, and `verify` never anchors on them. `digest` gains no section and no listing, only one count field, `accepted`, for cuts accepted in the period. Reason: `accepted` is the one disposition that hides friction on purpose, and a count keeps the hide rate visible for near-zero code. Left to my judgment by Quinn.
 
 ## 4. Phases
 
@@ -111,7 +111,7 @@ Depends on: Phase 3 and 4.
 Change:
 - `verify`: anchors are resolved cuts with disposition `fixed` or `promoted` only; `accepted` and `invalid` are excluded and named in `schema`. Envelope adds `disposition` to `resolution{}`.
 - `retrospect`: candidate `type` becomes `pattern` from `recurrent_friction|failed_intervention|repeated_recovery|documentation_gap`, plus `suggested: [doc|skill|guard|...]`. Same clustering and recurrence rules; `wrapper_alias` and `doc_repair` become suggestions on a `recurrent_friction` pattern; `skill_candidate` becomes `failed_intervention` with suggestion `skill`. Deterministic, no window, same exit codes.
-- `triage`/`digest`: vocabulary only (impact), unless Quinn's open decision on `accepted` adds a digest section.
+- `triage`: vocabulary only (impact). `digest`: vocabulary plus one `accepted` count field (cuts accepted in the period); no section, no listing.
 Routing: implementer-opus-med (retrospect's typing is judgment-adjacent). One pr-reviewer-high pass. No store.rs touch, so single gate run.
 
 ### Phase 6 — Release 1.0.0
