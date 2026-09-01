@@ -17,6 +17,8 @@ Facts the phases below depend on (verified 2026-09-01):
 | `source` field | `Option<String>` on the folded item; set only by the retired hook lane, always `None` from `add` |
 | Retrospect candidate types | string literals (`wrapper_alias`, `doc_repair`, `skill_candidate`), no enum |
 | Resolution | `struct Resolution` (`src/lib.rs:110`): note/task/pr/commit/url/dropped/amended, no disposition |
+| Legacy `pc_` records | r12 promises they fold "forever"; the dogfood log holds zero; `tests/cli/legacy.rs` spends 15 references on them |
+| Dogfood log | 165 cuts, 8 dogears, 23 resolves — the polluted history the checkpoint describes |
 | Open backlog | TASK-2 (distribution), TASK-71 (is_rare weighting) |
 | Specs dir | `docs/superpowers/specs/` absent (normal) |
 
@@ -32,11 +34,11 @@ The checkpoint's research pass validated the architecture. This pass targeted th
 
 **Dispositions.** Sentry's issue states (docs.sentry.io/product/issues/states-triage) are the closest live analogue: Resolved (any later event is a regression), Archived until-escalating or forever (events still recorded, never flagged), Regressed, Escalating. Map: `fixed`/`promoted` = Resolved with regression detection, `accepted` = Archived forever, `invalid` has no Sentry analogue because Sentry deletes instead. `verify` already implements Regressed; the disposition split gives it the Archived exclusion it lacks. The Codex sweep added the tracker view: Jira, GitHub, and Linear all separate closure meaning from priority (Done / Won't do / Duplicate / Cannot reproduce; COMPLETED / NOT_PLANNED / DUPLICATE), and Bugzilla and Google Issue Tracker go one step further with a VERIFIED state that only QA can set. Blotter's `verify` plays that verifier role after the fact, so `fixed` needs no separate verified sub-state. `duplicate` was considered and left out: triage clusters already carry that relation, and a resolve disposition would duplicate it. *T1, consensus on the split; labels vary by tool.*
 
-**Migration.** Event-store practice (Marten docs, martendb.io/events/versioning) is unanimous: transform on read ("upcasting ... performed on the fly each time the event is read"), keep stored bytes immutable, and no documented one-time rewrite. The checkpoint leans toward a fresh ledger; the practitioner literature leans the other way and blotter's own append-only invariant agrees with it. Recommendation in §3. *T1/T4 consensus.*
+**Migration.** Event-store practice (Marten docs, martendb.io/events/versioning) is unanimous: transform on read ("upcasting ... performed on the fly each time the event is read"), keep stored bytes immutable, and no documented one-time rewrite. That is the right answer for a store whose history is an asset. Blotter's v1 history is the exhaust the checkpoint exists to stop collecting, and an upcaster keeps the v1 hash alive forever, which is dead code by another name. The literature informs the shape of the break (immutable old file, explicit boundary), not whether to make it. Recommendation in §3. *T1/T4 consensus on mechanics; the choice is blotter's.*
 
 **Origin seam.** The right anchor is not the GenAI conventions (still provisional, with agent fields already moved or deprecated in the registry) but the Stable OTel Logs Data Model, which defines optional `TraceId`, `SpanId`, and `TraceFlags` on a log record and states "If SpanId is present TraceId SHOULD be also present." W3C Trace Context fixes the widths (32 and 16 hex characters). The `origin` shape should reserve exactly `trace_id`, `span_id`, and `trace_flags` under a provider discriminator, validate the widths when present, and never require them for admission. *T1, consensus.*
 
-**Record versioning.** The sweep's one recommendation this plan had not made: put an in-band version on each new v2 record (`v: 2`), treat a missing version as v1, and normalize both through the read-through fold. JSON Lines has no file header, so a per-record marker is the only version information that survives a mixed-history file. Adopted into decision 1 below. *T1 for the format constraint; the local-file design is an inference both tracks reached independently.*
+**Record versioning.** The sweep's one recommendation this plan had not made: put an in-band version on each record (`v: 2`). JSON Lines has no file header, so a per-record marker is the only version information a file can carry. Adopted: v2 writes it on every record and refuses records without it, so the next break has a boundary to key on. *T1 for the format constraint; the local-file design is an inference both tracks reached independently.*
 
 Sources: arxiv.org/html/2606.29178v1 · arxiv.org/abs/2606.29914 · arxiv.org/html/2608.14036 · wiki.ubuntu.com/One%20Hundred%20Papercuts · github.com/TerenceBristol/claude-improve · github.com/maxdmyers/recall · docs.sentry.io/product/issues/states-triage/ · developers.google.com/issue-tracker/concepts/issues · linear.app/docs/configuring-workflows · martendb.io/events/versioning · docs.axoniq.io/axon-framework-reference/5.1/events/event-versioning/ · jsonlines.org · opentelemetry.io/docs/specs/otel/logs/data-model/ · www.w3.org/TR/trace-context/
 
@@ -46,7 +48,7 @@ Tier coverage: T1 (specs, vendor docs), T3 (three 2026 preprints), T4/T5 thin �
 
 The checkpoint leaves seven open questions for the spec. The plan pre-answers five so Phase 0 starts from a position, and leaves two to Quinn.
 
-1. **Migration: upcast on read, no rewrite, no fresh ledger.** The severity→impact map is total and lossless (`minor→low`, `major→material`, `blocker→blocking`). Every v2 record carries `v: 2`; a record without `v` is v1. The fold applies the map to v1 cuts; stored bytes never move; `doctor` verifies a v1 record's ID under the v1 hash and a v2 record's under the v2 hash, keyed by `v`. Old `auto`-tagged records simply become cuts with a plain `auto` tag. This keeps the append-only invariant, needs no migration command, and costs one match arm in the fold. A fresh ledger would throw away the very recurrence history `verify` and `retrospect` need. *Overrides the checkpoint's lean; Quinn can reverse it in Phase 0.*
+1. **Migration: fresh ledger, no upcaster, no migrate command.** Every v2 record carries `v: 2` and v2 reads nothing else. A discovered log whose records lack `v: 2` is a named structured error (a new `error.rs` code, exit 65-class) telling the operator to rename it to a v1 filename and start clean; it is never a silent skip and never a partial fold. The old file stays beside the new one for the 0.15 binary. Nothing rewrites it. Removed outright: the v1 ID hash, the severity→impact map, the `pc_` namespace and r12's "forever" promise, the `source` fold, and `tests/cli/legacy.rs`. The 0.15 history is the exhaust the checkpoint describes, and an upcaster would keep dead code alive to preserve it. *Quinn's call, confirmed 2026-09-01: full break.*
 2. **Promotion IDs share the `bl_` namespace.** One ID scheme, one doctor verifier, `kind` disambiguates. The hash covers ts, agent, sources, artifact type, artifact ref.
 3. **Promotion and resolution stay separate events.** As the checkpoint recommends. `promote` never writes a resolve; `resolve --disposition promoted` names the friction's fate and may carry `--promotion <id>` as a link, validated to exist (exit 66 otherwise).
 4. **Patterns are not persisted.** Retrospect stays a derived view.
@@ -89,11 +91,12 @@ Gate: four commands; `every_test_module_file_is_declared_in_main` passes after t
 Depends on: Phase 0 (r48), Phase 2 (so `auto` is gone before the fold changes).
 Change, in one PR because they share the fold and the ID hash:
 - `severity` → `impact` with `low|material|blocking`: enum, `--impact` flag (`--severity` removed, not aliased), envelope field, list sort, export's OTLP severity map, digest/triage rendering, README/schema copy.
-- Every new record carries `v: 2`; `compute_id` hashes `impact` for v2 records; fold upcasts v1 `severity` on read; `doctor` verifies each record under the hash its `v` implies.
-- `origin` replaces `source`: `{type: "agent"}` written by `add`; optional `provider`, `trace_id`, `span_id`, `trace_flags` accepted, width-validated, and stored, but never set by any command. `source` is dropped from output; stored v1 `source` folds into `origin.type = "hook"`.
-- Resolution gains `disposition: fixed|promoted|accepted|invalid` via `resolve --disposition`, required for cuts, rejected for dogears; `--amend` may change it; stored v1 resolutions without a disposition fold as `fixed` (they were all fixes or dismissals, and `verify` already anchors on them).
+- Every record carries `v: 2`; the scanner rejects a log holding records without it with the named error from decision 1; `compute_id` hashes `impact`; the v1 hash path, the `pc_` namespace, and `IdNamespace` go.
+- `origin` replaces `source`: `{type: "agent"}` written by `add`; optional `provider`, `trace_id`, `span_id`, `trace_flags` accepted, width-validated, and stored, but never set by any command.
+- Resolution gains `disposition: fixed|promoted|accepted|invalid` via `resolve --disposition`, required for cuts, rejected for dogears; `--amend` may change it.
+- `tests/cli/legacy.rs` is deleted; the v1-file-refused case and the mixed-file case move to `contract.rs`.
 Routing: full chain. implementer-opus-med in a worktree (silent-failure domain: persistence, identity); pr-reviewer-xhigh on the diff plus `codex review` for the cross-model axis. `gate-5x.sh` required. A pre-implementation critique of the r48 identity rules happens in Phase 0, not here.
-Tests: `tests/cli/legacy.rs` is the home for upcast cases (v1 severity line, v1 source line, v1 resolve without disposition, mixed log ID verification). `contract.rs` for the exit matrix and envelope shape.
+Tests: `contract.rs` for the exit matrix, envelope shape, and the v1-file refusal; `doctor.rs` for how a v1 line is reported.
 
 ### Phase 4 — `promotion` record and `promote` command
 
@@ -152,7 +155,8 @@ Created only after this plan is approved, with `backlog task create`, one per ph
 
 ## 7. Risks and how the plan handles them
 
-- **Identity drift.** A v1 record verified under the v2 hash reports `id_conflict` falsely. Handled by the per-record hash rule in Phase 3 and a mixed-log doctor test in `legacy.rs`.
+- **Silent v1 read.** A v2 binary pointed at a 0.15 log must fail loudly, not fold a subset. Handled by the scanner-level refusal in Phase 3 and a mixed-file test in `contract.rs`.
+- **Lost dogfood history.** 165 cuts and 23 resolves stop being readable by the new binary. Accepted: the old file stays on disk, the 0.15 binary still reads it, and the history is the noise the floor is being raised against.
 - **Reviewer fatigue on Phase 3.** The largest diff and the only one where a silent bug corrupts every later fold. Full chain, 5x gate, and the identity rules critiqued before code exists.
 - **Scope creep into workflow management.** `promote` records provenance and nothing else. Any brief that asks a worker to touch the artifact it points at is out of scope by construction.
 - **Policy copy that still invites exhaust.** Phase 1 is reviewed by Quinn line by line, not by a worker.
