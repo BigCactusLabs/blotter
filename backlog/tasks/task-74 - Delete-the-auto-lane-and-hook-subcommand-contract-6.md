@@ -1,10 +1,10 @@
 ---
 id: TASK-74
 title: Delete the auto lane and hook subcommand (contract 6)
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-02 01:53'
+updated_date: '2026-09-02 02:00'
 labels:
   - v2
   - breaking
