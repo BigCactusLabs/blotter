@@ -6,7 +6,7 @@
 
 - **Breaking:** `meta.contract` is now 6. `--include-auto` is removed from `list`, `triage`, `digest`, `verify`, `sweep`, and `export`; `auto` is a plain tag, so default reads now include those records.
 - The `hook` subcommand is removed.
-- **Mandatory upgrade:** Before upgrading, remove the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from Claude Code settings. Otherwise every failed tool call surfaces a Clap usage error (exit 2) in the host session.
+- **Mandatory upgrade:** Before upgrading, remove the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from Claude Code settings. Otherwise every failed tool call puts an `invalid_argument` error envelope (exit 2, unrecognized subcommand) into the host session: Claude Code shows that stderr to the agent on `PostToolUseFailure` and blocks nothing, but it is noise on every failure.
 
 ### Added
 

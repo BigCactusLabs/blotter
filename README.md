@@ -30,7 +30,7 @@ The crate is named `blotter-cli` (the crates.io name `blotter` is already taken 
 
 ## Upgrade to 1.0.0
 
-Before upgrading, remove the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from your Claude Code settings. Otherwise every failed tool call surfaces a Clap usage error (exit 2) in the host session.
+Before upgrading, remove the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from your Claude Code settings. Otherwise every failed tool call puts an `invalid_argument` error envelope (exit 2, unrecognized subcommand) into the host session: Claude Code shows that stderr to the agent on `PostToolUseFailure` and blocks nothing, but it is noise on every failure.
 
 ## How it works
 
