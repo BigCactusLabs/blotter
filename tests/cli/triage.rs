@@ -42,8 +42,42 @@ fn triage_clusters_three_near_duplicate_open_cuts() {
             "tags": ["api", "tooling"],
             "text": "Cargo test fails because config is missing again",
             "origin": {"type":"agent"},
-            "suggested_action": "graduate",
         }])
+    );
+}
+
+#[test]
+fn triage_cluster_carries_no_suggested_action() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "Cargo test fails because config is missing",
+        &["api", "tooling"],
+    );
+    add_at(
+        &file,
+        "2026-07-09T18:31:00Z",
+        "cargo-test fails because config is missing!",
+        &["tooling"],
+    );
+    add_at(
+        &file,
+        "2026-07-09T18:32:00Z",
+        "Cargo test fails because config is missing again",
+        &["api"],
+    );
+
+    let triage = triage_success(&run_file(&file, &["triage"]), 1);
+    let cluster = &triage.data["clusters"][0];
+    assert!(
+        cluster
+            .as_object()
+            .unwrap()
+            .get("suggested_action")
+            .is_none(),
+        "suggested_action was withdrawn (r51) and must not appear on a triage cluster"
     );
 }
 
@@ -180,7 +214,6 @@ fn triage_surfaces_repeated_normalized_title_occurrences() {
             "tags": ["build"],
             "text": "Workspace cache missing during build",
             "origin": {"type":"agent"},
-            "suggested_action": "graduate",
         }])
     );
 }
@@ -261,7 +294,6 @@ fn triage_links_identical_titles_with_disjoint_nonempty_tags() {
             "tags": ["alpha", "beta", "gamma"],
             "text": "Workspace cache missing during build",
             "origin": {"type":"agent"},
-            "suggested_action": "graduate",
         }])
     );
 }
@@ -286,7 +318,6 @@ fn triage_does_not_transitively_merge_an_untagged_similarity_chain() {
             "tags": [],
             "text": "alpha beta gamma delta",
             "origin": {"type":"agent"},
-            "suggested_action": "graduate",
         }])
     );
     assert!(
@@ -437,7 +468,6 @@ fn triage_min_count_two_flags_a_pair_and_rejects_one() {
             "tags": [],
             "text": "the command output is missing a summary!",
             "origin": {"type":"agent"},
-            "suggested_action": "graduate",
         })
     );
     error(
@@ -458,7 +488,7 @@ fn schema_documents_triage() {
     assert!(triage["flags"].get("--include-auto").is_none());
     assert_eq!(
         triage["output"],
-        "{clusters:[{count,occurrences,ids,tags,text,origin?,suggested_action}],count,scanned}"
+        "{clusters:[{count,occurrences,ids,tags,text,origin?}],count,scanned}"
     );
     assert!(
         triage["semantics"]
