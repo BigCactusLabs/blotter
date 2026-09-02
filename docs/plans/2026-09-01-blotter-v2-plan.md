@@ -240,3 +240,11 @@ Phase 4 proceeds once TASK-81 merges. Phase 5's scope is now r48 §verify/§retr
 - **"Do not add for 1.0" list (no action).** Every item is already in r48's Non-goals or excluded by r51. **"Keep the Phase 5 plan" (no action).** TASK-77's notes already carry `disposition_ts`, the `suggested_action` removal and the TASK-71 gate exactly as r51 states them.
 
 Not adopted: nothing in the note was rejected outright. The one framing the note over-reaches on — calling promotion a "security boundary" in the paper's voice — is restated in r52 in the paper's actual words.
+
+## 14. Phase 5 landed, 2026-09-02
+
+PR #26 (TASK-77, TASK-71) closes Phase 5 on `v2`. Every §12 ruling is in the tree: `verify` anchors only `fixed|promoted` and measures from `disposition_ts` (TASK-79 landed first as PR #25), `retrospect` reports `pattern` and `suggested[]`, `digest` reports `accepted_cuts`, and `suggested_action` is gone.
+
+The TASK-71 gate was measured rather than assumed and it failed: two thirds of rare-token links across five real logs were not the same friction (`docs/research/2026-09-02-task71-linkage-precision.md`). Six rule shapes were measured against the same hand judgments; r53 reshapes the ceiling to `max(2, ceil(N / 16))` and records the table. The residual third is the limit of a lexical rule on pre-floor logs and is accepted for 1.0.0.
+
+Phase 6 (TASK-78, Release 1.0.0) is the only contract work left. `v2` still merges into `main` only at that release, as §5 planned.
