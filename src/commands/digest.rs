@@ -59,7 +59,9 @@ pub fn run(
 ) -> AppResult<i32> {
     let since = parse_since(&args.since, now)?;
     let resolved = store::discover(file)?;
-    let store::LoadedFold { items, warnings } = store::load_folded(&resolved)?;
+    let store::LoadedFold {
+        items, warnings, ..
+    } = store::load_folded(&resolved)?;
 
     let data = digest(items, since, now);
     if args.format == OutputFormat::Md {

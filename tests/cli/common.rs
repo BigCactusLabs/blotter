@@ -1,13 +1,15 @@
 pub use assert_cmd::Command;
 pub use blotter::commands::add::AddData;
 pub use blotter::commands::doctor::DoctorData;
-pub use blotter::commands::list::ListData;
+pub use blotter::commands::list::{ListData, ListEntry};
+pub use blotter::commands::promote::PromoteData;
 pub use blotter::commands::resolve::ResolveData;
 pub use blotter::commands::sweep::SweepData;
 pub use blotter::error::exit_code_map;
 pub use blotter::output::{ErrorEnvelope, SuccessEnvelope};
 pub use blotter::{
-    Disposition, Evidence, Impact, ItemStatus, LogEvent, Origin, compute_dogear_id, compute_id,
+    Artifact, ArtifactType, Disposition, Evidence, Impact, ItemStatus, ListItem, LogEvent, Origin,
+    PromotionItem, compute_dogear_id, compute_id, compute_promotion_id,
 };
 pub use serde::de::DeserializeOwned;
 pub use serde_json::{Value, json};
@@ -24,6 +26,23 @@ pub use std::thread;
 pub use tempfile::TempDir;
 
 pub const NOW: &str = "2026-07-09T18:30:00.123456Z";
+
+/// The cut and dogear arms of a `list` union, for comparing against a command
+/// that reports `ListItem`s directly.
+pub fn list_records(items: &[ListEntry]) -> Vec<ListItem> {
+    items
+        .iter()
+        .filter_map(|entry| entry.as_record().cloned())
+        .collect()
+}
+
+/// The promotion arms of a `list` union.
+pub fn list_promotions(items: &[ListEntry]) -> Vec<PromotionItem> {
+    items
+        .iter()
+        .filter_map(|entry| entry.as_promotion().cloned())
+        .collect()
+}
 
 pub trait CutEventExt {
     fn cut_id(&self) -> &str;
@@ -193,6 +212,28 @@ pub fn dogear_at(file: &Path, now: &str, text: &str, tags: &[&str]) -> SuccessEn
         cmd.arg("--tag").arg(*tag);
     }
     success(&cmd.output().unwrap())
+}
+
+/// One `promote` invocation at a fixed clock, filed as `tester`. Returns the
+/// raw output so error lanes can assert on it too.
+pub fn promote_at(file: &Path, now: &str, args: &[&str]) -> std::process::Output {
+    command()
+        .env("BLOTTER_NOW", now)
+        .arg("--file")
+        .arg(file)
+        .arg("promote")
+        .args(args)
+        .args(["--agent", "tester"])
+        .output()
+        .unwrap()
+}
+
+/// The promotion ID from a successful `promote`.
+pub fn promotion_id(record: &LogEvent) -> String {
+    match record {
+        LogEvent::Promotion { id, .. } => id.clone(),
+        _ => panic!("promote responses must contain promotion events"),
+    }
 }
 
 pub fn triage_success(output: &std::process::Output, exit: i32) -> SuccessEnvelope<Value> {

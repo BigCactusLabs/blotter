@@ -343,7 +343,11 @@ fn schema_documents_sweep() {
             .contains("invalid_input (65)")
     );
     assert_eq!(sweep["flags"]["--since"], "full RFC3339|Nd|Nh; optional");
-    assert_eq!(sweep["flags"]["--kind"], "cut|dogear|all; default cut");
+    // The two --kind enums are separate types, so a promotion value cannot
+    // reach sweep at all (r48).
+    let sweep_kind = sweep["flags"]["--kind"].as_str().unwrap();
+    assert!(sweep_kind.starts_with("cut|dogear|all; default cut"));
+    assert!(sweep_kind.contains("never accepts promotion"));
     assert!(sweep["flags"].get("--include-auto").is_none());
     assert!(sweep["output"].as_str().unwrap().contains("repos_skipped"));
     assert!(

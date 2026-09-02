@@ -147,7 +147,7 @@ fn doctor_accepts_an_amend_that_precedes_its_base_resolve() {
 
     // Doctor and the fold agree in this direction too: no orphan warning.
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
-    assert_eq!(listed.data.items[0].status, ItemStatus::Resolved);
+    assert_eq!(listed.data.items[0].record().status, ItemStatus::Resolved);
     assert!(
         listed.meta.warnings.is_empty(),
         "warnings: {:?}",
@@ -1001,7 +1001,147 @@ fn doctor_reports_invalid_resolutions_for_rules_one_to_three() {
             .data
             .items
             .iter()
-            .all(|item| item.status == ItemStatus::Open)
+            .all(|item| item.record().status == ItemStatus::Open)
     );
     assert_eq!(listed.meta.warnings, ["skipped 3 invalid resolutions"]);
+}
+
+#[test]
+fn promotion_lines_are_healthy_and_their_ids_recompute() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let cut = add_at(&file, "2026-07-01T00:00:00Z", "friction", &[]);
+    let cut = cut.data.record.cut_id().to_owned();
+    success::<PromoteData>(&promote_at(
+        &file,
+        "2026-07-02T00:00:00Z",
+        &[
+            "--source",
+            &cut,
+            "--artifact-type",
+            "doc",
+            "--artifact-ref",
+            "docs/x.md",
+        ],
+    ));
+
+    let healthy: SuccessEnvelope<DoctorData> = doctor_response(&run_file(&file, &["doctor"]), 0);
+    assert!(healthy.data.healthy);
+    assert_eq!(healthy.data.checked_lines, 2);
+
+    // A byte-identical repeat is a warning-class duplicate; a same-ID line with
+    // a different payload stays id_conflict, as for every kind.
+    let stored = std::fs::read_to_string(&file).unwrap();
+    let promotion_line = stored.lines().next_back().unwrap().to_owned();
+    let mut altered: Value = serde_json::from_str(&promotion_line).unwrap();
+    altered["note"] = json!("rewritten");
+    append_lines(&file, &[promotion_line, altered.to_string()]);
+
+    let report: SuccessEnvelope<DoctorData> = doctor_response(&run_file(&file, &["doctor"]), 1);
+    let kinds: Vec<_> = report
+        .data
+        .findings
+        .iter()
+        .map(|finding| (finding.line, finding.kind.as_str(), finding.fixable))
+        .collect();
+    assert_eq!(
+        kinds,
+        [(3, "duplicate_promotion", false), (4, "id_conflict", false)]
+    );
+}
+
+#[test]
+fn a_promotion_naming_a_source_that_is_not_a_cut_is_a_dangling_source() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let cut = add_at(&file, "2026-07-01T00:00:00Z", "friction", &[]);
+    let cut = cut.data.record.cut_id().to_owned();
+    let dogear: SuccessEnvelope<Value> = dogear_at(&file, "2026-07-02T00:00:00Z", "idea", &[]);
+    let dogear = dogear.data["record"]["id"].as_str().unwrap().to_owned();
+    let missing = "bl_00000000000000000000";
+    // Hand-written: the CLI refuses a non-cut source, so only a foreign writer
+    // can produce this.
+    let ts = "2026-07-03T00:00:00.000Z";
+    let mut sources = vec![cut.clone(), dogear.clone(), missing.to_owned()];
+    sources.sort();
+    let id = compute_promotion_id(ts, "hand", &sources, "doc", "docs/x.md");
+    append_lines(
+        &file,
+        &[
+            json!({"v":2,"kind":"promotion","id":id,"ts":ts,"agent":"hand",
+                 "sources":sources,"artifact":{"type":"doc","ref":"docs/x.md"},"cwd":"."})
+            .to_string(),
+        ],
+    );
+
+    let report: SuccessEnvelope<DoctorData> = doctor_response(&run_file(&file, &["doctor"]), 1);
+    let dangling: Vec<_> = report
+        .data
+        .findings
+        .iter()
+        .filter(|finding| finding.kind == "dangling_source")
+        .collect();
+    assert_eq!(dangling.len(), 2);
+    assert!(dangling.iter().all(|finding| finding.line == 3));
+    assert!(dangling.iter().all(|finding| !finding.fixable));
+    assert!(dangling.iter().all(|finding| finding.message.contains(&id)));
+    assert!(
+        dangling
+            .iter()
+            .any(|finding| finding.message.contains(&dogear) && finding.message.contains("dogear"))
+    );
+    assert!(dangling.iter().any(
+        |finding| finding.message.contains(missing) && finding.message.contains("in no record")
+    ));
+
+    // The promotion still folds and lists; a dangling source is a diagnosis.
+    let listed: SuccessEnvelope<ListData> =
+        success(&run_file(&file, &["list", "--kind", "promotion"]));
+    assert_eq!(listed.data.count, 1);
+}
+
+#[test]
+fn doctor_fix_never_repairs_a_promotion_finding() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let cut = add_at(&file, "2026-07-01T00:00:00Z", "friction", &[]);
+    let cut = cut.data.record.cut_id().to_owned();
+    success::<PromoteData>(&promote_at(
+        &file,
+        "2026-07-02T00:00:00Z",
+        &[
+            "--source",
+            &cut,
+            "--artifact-type",
+            "doc",
+            "--artifact-ref",
+            "docs/x.md",
+        ],
+    ));
+    let stored = std::fs::read_to_string(&file).unwrap();
+    append_lines(&file, &[stored.lines().next_back().unwrap().to_owned()]);
+    let before = std::fs::read(&file).unwrap();
+
+    let fixed: SuccessEnvelope<DoctorData> =
+        doctor_response(&run_file(&file, &["doctor", "--fix"]), 1);
+    let fix = fixed.data.fix.as_ref().unwrap();
+    assert!(!fix.changed);
+    assert!(fix.applied.is_empty());
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
+
+#[test]
+fn schema_documents_the_promotion_doctor_findings() {
+    let schema: SuccessEnvelope<Value> = success(&run(&["schema"]));
+    let kinds = schema.data["commands"]["doctor"]["finding_kinds"]
+        .as_str()
+        .unwrap();
+    assert!(kinds.contains("duplicate_promotion"));
+    assert!(kinds.contains("dangling_source"));
+    // Both sit on the not-fixable side of the sentence.
+    let (fixable, not_fixable) = kinds.split_once("(fixable);").unwrap();
+    assert!(!fixable.contains("duplicate_promotion"));
+    assert!(!fixable.contains("dangling_source"));
+    assert!(not_fixable.contains("duplicate_promotion"));
+    assert!(not_fixable.contains("dangling_source"));
 }

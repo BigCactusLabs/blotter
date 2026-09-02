@@ -48,6 +48,41 @@ pub enum Disposition {
     Invalid,
 }
 
+/// The closed promotion artifact vocabulary (r48). An unrecognized
+/// `--artifact-type` is rejected by clap as `invalid_argument`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtifactType {
+    Doc,
+    Skill,
+    Guard,
+    Test,
+    Tool,
+    Process,
+}
+
+impl ArtifactType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Doc => "doc",
+            Self::Skill => "skill",
+            Self::Guard => "guard",
+            Self::Test => "test",
+            Self::Tool => "tool",
+            Self::Process => "process",
+        }
+    }
+}
+
+/// What a promotion says these experiences became.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Artifact {
+    #[serde(rename = "type")]
+    pub kind: ArtifactType,
+    #[serde(rename = "ref")]
+    pub r#ref: String,
+}
+
 /// Structured provenance (r49). A typed three-member struct, never flattened
 /// and never an opaque `Value`: a `null` published member reads as absent, a
 /// non-string one fails the line, and an unknown member survives in the log's
@@ -134,6 +169,20 @@ pub enum LogEvent {
         disposition: Option<Disposition>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         disposition_ts: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        promotion: Option<String>,
+    },
+    Promotion {
+        id: String,
+        ts: String,
+        agent: String,
+        sources: Vec<String>,
+        artifact: Artifact,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<Origin>,
+        cwd: String,
     },
     #[serde(other)]
     Unknown,
@@ -142,7 +191,10 @@ pub enum LogEvent {
 impl LogEvent {
     pub fn id(&self) -> Option<&str> {
         match self {
-            Self::Cut { id, .. } | Self::Dogear { id, .. } | Self::Resolve { id, .. } => Some(id),
+            Self::Cut { id, .. }
+            | Self::Dogear { id, .. }
+            | Self::Resolve { id, .. }
+            | Self::Promotion { id, .. } => Some(id),
             Self::Unknown => None,
         }
     }
@@ -169,6 +221,10 @@ pub struct Resolution {
     pub disposition: Option<Disposition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disposition_ts: Option<String>,
+    /// The promotion this resolution links to (r48). Present only under
+    /// `disposition: promoted`, and only when the link is mutual.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promotion: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -247,9 +303,56 @@ impl ListItem {
                 status,
                 resolution,
             },
-            LogEvent::Resolve { .. } | LogEvent::Unknown => {
-                unreachable!("folded records are cut or dogear")
+            LogEvent::Resolve { .. } | LogEvent::Promotion { .. } | LogEvent::Unknown => {
+                unreachable!("folded list items are cut or dogear")
             }
+        }
+    }
+}
+
+/// The promotion arm of `list`'s tagged union (r48). It carries no `status`,
+/// `resolution`, `text`, `tags`, `impact`, or `evidence`: a promotion has no
+/// lifecycle to filter and no friction text of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromotionItem {
+    pub kind: String,
+    pub id: String,
+    pub ts: String,
+    pub agent: String,
+    pub sources: Vec<String>,
+    pub artifact: Artifact,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<Origin>,
+}
+
+impl PromotionItem {
+    pub(crate) fn from_record(event: LogEvent) -> Self {
+        let LogEvent::Promotion {
+            id,
+            ts,
+            agent,
+            sources,
+            artifact,
+            note,
+            origin,
+            cwd,
+        } = event
+        else {
+            unreachable!("only promotion records become promotion items")
+        };
+        Self {
+            kind: "promotion".into(),
+            id,
+            ts,
+            agent,
+            sources,
+            artifact,
+            note,
+            cwd,
+            origin,
         }
     }
 }
@@ -396,6 +499,35 @@ pub fn compute_dogear_id(ts: &str, agent: &str, text: &str, tags: &[String]) -> 
     let mut fields: Vec<&str> = vec!["bl2", "dogear", ts, agent, text, count.as_str()];
     fields.extend(tags.iter().map(String::as_str));
     compute_id_fields_bytes(&fields, 10)
+}
+
+/// The `bl2` promotion identity (r48, r51): `note` stays outside the hash for
+/// r34's reason — it is authored commentary, and a promotion whose note is
+/// reworded is the same promotion. `sources` are normalized exactly as tags are:
+/// ascending raw UTF-8 byte order, exact-byte deduplication, case-sensitive.
+pub fn compute_promotion_id(
+    ts: &str,
+    agent: &str,
+    sources: &[String],
+    artifact_type: &str,
+    artifact_ref: &str,
+) -> String {
+    let sources = normalized(sources);
+    let count = sources.len().to_string();
+    let mut fields: Vec<&str> = vec!["bl2", "promotion", ts, agent, count.as_str()];
+    fields.extend(sources.iter().map(String::as_str));
+    fields.push(artifact_type);
+    fields.push(artifact_ref);
+    compute_id_fields_bytes(&fields, 10)
+}
+
+/// Ascending raw UTF-8 byte order with exact-byte deduplication (r48). The one
+/// normalization every hashed list — tags and promotion sources — runs through.
+pub fn normalized(values: &[String]) -> Vec<String> {
+    let mut values = values.to_vec();
+    values.sort();
+    values.dedup();
+    values
 }
 
 fn compute_id_fields_bytes(fields: &[&str], bytes: usize) -> String {

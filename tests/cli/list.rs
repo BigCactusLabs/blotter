@@ -22,7 +22,7 @@ fn list_filters_sorts_limits_since_and_markdown() {
         success::<AddData>(&output);
     }
     let limited: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--limit", "1"]));
-    assert_eq!(limited.data.items[0].text, "old blocking");
+    assert_eq!(limited.data.items[0].record().text, "old blocking");
     assert_eq!(limited.data.total, 3);
     assert!(limited.data.truncated);
 
@@ -36,7 +36,7 @@ fn list_filters_sorts_limits_since_and_markdown() {
             .unwrap(),
     );
     assert_eq!(since.data.items.len(), 1);
-    assert_eq!(since.data.items[0].text, "new material");
+    assert_eq!(since.data.items[0].record().text, "new material");
 
     let markdown = run_file(&file, &["list", "--format", "md", "--impact", "material"]);
     assert!(markdown.status.success());
@@ -230,6 +230,7 @@ fn list_markdown_collapses_multiline_resolution_note() {
         success(&run_file(&file, &["list", "--status", "resolved"]));
     assert_eq!(
         listed.data.items[0]
+            .record()
             .resolution
             .as_ref()
             .unwrap()
@@ -258,7 +259,7 @@ fn list_sorts_rfc3339_offsets_by_instant_not_text() {
     let later = json!({"v":2,"kind":"cut","id":"bl_22222222222222222222","ts":"2026-07-09T09:00:00Z","agent":"a","text":"later","tags":[],"impact":"low","cwd":"/tmp","repo":null});
     std::fs::write(&file, format!("{earlier}\n{later}\n")).unwrap();
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
-    assert_eq!(listed.data.items[0].text, "later");
+    assert_eq!(listed.data.items[0].record().text, "later");
 }
 
 #[test]
@@ -302,7 +303,7 @@ fn severity_is_removed_and_impact_replaces_it() {
     add_at(&file, "2026-07-09T18:00:00Z", "default impact", &[]);
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
     assert_eq!(
-        serde_json::to_value(listed.data.items[0].impact).unwrap(),
+        serde_json::to_value(listed.data.items[0].record().impact).unwrap(),
         json!("low")
     );
 
@@ -314,5 +315,230 @@ fn severity_is_removed_and_impact_replaces_it() {
     );
     success::<AddData>(&blocking);
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
-    assert_eq!(listed.data.items[0].text, "stopped");
+    assert_eq!(listed.data.items[0].record().text, "stopped");
+}
+
+/// A log holding one open cut, one dogear, and two promotions.
+fn mixed_log(file: &Path) -> (String, String, String) {
+    let cut = add_at(file, "2026-07-01T00:00:00Z", "friction", &["build"]);
+    let cut = cut.data.record.cut_id().to_owned();
+    dogear_at(file, "2026-07-02T00:00:00Z", "idea", &["build"]);
+    let first: SuccessEnvelope<PromoteData> = success(&promote_at(
+        file,
+        "2026-07-03T00:00:00Z",
+        &[
+            "--source",
+            &cut,
+            "--artifact-type",
+            "doc",
+            "--artifact-ref",
+            "docs/a.md",
+        ],
+    ));
+    let second: SuccessEnvelope<PromoteData> = success(&promote_at(
+        file,
+        "2026-07-04T00:00:00Z",
+        &[
+            "--source",
+            &cut,
+            "--artifact-type",
+            "skill",
+            "--artifact-ref",
+            "skills/b.md",
+            "--note",
+            "second",
+        ],
+    ));
+    (
+        cut,
+        promotion_id(&first.data.record),
+        promotion_id(&second.data.record),
+    )
+}
+
+#[test]
+fn kind_promotion_lists_promotions_only_newest_first() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let (cut, older, newer) = mixed_log(&file);
+
+    let listed: SuccessEnvelope<ListData> =
+        success(&run_file(&file, &["list", "--kind", "promotion"]));
+    let promotions = list_promotions(&listed.data.items);
+    assert_eq!(listed.data.count, 2);
+    assert_eq!(promotions.len(), 2);
+    // ts descending, then id ascending (r48).
+    assert_eq!(promotions[0].id, newer);
+    assert_eq!(promotions[1].id, older);
+    assert_eq!(promotions[0].kind, "promotion");
+    assert_eq!(promotions[0].sources, [cut]);
+    assert_eq!(promotions[0].artifact.kind, ArtifactType::Skill);
+    assert_eq!(promotions[0].note.as_deref(), Some("second"));
+    assert_eq!(promotions[0].origin, Some(Origin::agent()));
+
+    // A promotion item carries no lifecycle or friction members at all.
+    let raw: SuccessEnvelope<Value> = success(&run_file(&file, &["list", "--kind", "promotion"]));
+    let item = &raw.data["items"][0];
+    for absent in ["status", "resolution", "text", "tags", "impact", "evidence"] {
+        assert!(item.get(absent).is_none(), "{absent}");
+    }
+}
+
+#[test]
+fn kind_all_appends_promotions_after_cuts_and_dogears() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let (_, older, newer) = mixed_log(&file);
+
+    let listed: SuccessEnvelope<Value> = success(&run_file(&file, &["list", "--kind", "all"]));
+    let kinds: Vec<_> = listed.data["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["cut", "dogear", "promotion", "promotion"]);
+    assert_eq!(listed.data["items"][2]["id"], newer.as_str());
+    assert_eq!(listed.data["items"][3]["id"], older.as_str());
+
+    // `--status all` also retains them; an explicit lifecycle status does not.
+    let all: SuccessEnvelope<ListData> = success(&run_file(
+        &file,
+        &["list", "--kind", "all", "--status", "all"],
+    ));
+    assert_eq!(list_promotions(&all.data.items).len(), 2);
+    for status in ["open", "resolved"] {
+        let filtered: SuccessEnvelope<ListData> = success(&run_file(
+            &file,
+            &["list", "--kind", "all", "--status", status],
+        ));
+        assert!(list_promotions(&filtered.data.items).is_empty(), "{status}");
+    }
+    // `--tag` excludes them under `--kind all`.
+    let tagged: SuccessEnvelope<ListData> = success(&run_file(
+        &file,
+        &["list", "--kind", "all", "--tag", "build"],
+    ));
+    assert!(list_promotions(&tagged.data.items).is_empty());
+}
+
+#[test]
+fn promotion_filters_that_cannot_select_are_rejected() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    mixed_log(&file);
+
+    for args in [
+        vec!["list", "--kind", "promotion", "--status", "open"],
+        vec!["list", "--kind", "promotion", "--status", "resolved"],
+        vec!["list", "--kind", "promotion", "--tag", "build"],
+        vec!["list", "--kind", "promotion", "--impact", "low"],
+    ] {
+        error(&run_file(&file, &args), 2, "invalid_argument");
+    }
+    // `--status all` is accepted and is a no-op.
+    let listed: SuccessEnvelope<ListData> = success(&run_file(
+        &file,
+        &["list", "--kind", "promotion", "--status", "all"],
+    ));
+    assert_eq!(listed.data.count, 2);
+}
+
+#[test]
+fn promotions_honour_agent_and_since_and_have_their_own_empty_hint() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    mixed_log(&file);
+
+    let since: SuccessEnvelope<ListData> = success(&run_file(
+        &file,
+        &[
+            "list",
+            "--kind",
+            "promotion",
+            "--since",
+            "2026-07-04T00:00:00Z",
+        ],
+    ));
+    assert_eq!(since.data.count, 1);
+
+    let empty: SuccessEnvelope<ListData> = success(&run_file(
+        &file,
+        &["list", "--kind", "promotion", "--agent", "nobody"],
+    ));
+    assert_eq!(empty.data.count, 0);
+    // No `--status` in the hint: promotions have none.
+    assert_eq!(
+        empty.meta.warnings,
+        ["no promotions matched; try broader filters"]
+    );
+}
+
+#[test]
+fn markdown_renders_promotions_after_dogears() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let (_, older, newer) = mixed_log(&file);
+
+    let output = run_file(&file, &["list", "--kind", "all", "--format", "md"]);
+    assert!(output.status.success());
+    let rendered = String::from_utf8(output.stdout).unwrap();
+    let lines: Vec<_> = rendered.lines().collect();
+    let promotions = lines
+        .iter()
+        .position(|line| *line == "## Promotions")
+        .unwrap();
+    let dogears = lines.iter().position(|line| *line == "## Dogears").unwrap();
+    assert!(dogears < promotions);
+    assert_eq!(
+        lines[promotions + 1],
+        format!("- [{newer}] skill: skills/b.md — tester, 2026-07-04T00:00:00.000Z")
+    );
+    assert_eq!(lines[promotions + 2], "  - second");
+    assert_eq!(
+        lines[promotions + 3],
+        format!("- [{older}] doc: docs/a.md — tester, 2026-07-03T00:00:00.000Z")
+    );
+    assert_eq!(lines.len(), promotions + 4);
+}
+
+/// The union is untagged, so serde picks its arm structurally rather than from
+/// the `kind` string. Disjointness is what makes that safe, and it is pinned
+/// here rather than assumed: only a lifecycle record carries `status`, and only
+/// a promotion carries `sources`.
+#[test]
+fn the_items_union_arms_are_structurally_disjoint() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    mixed_log(&file);
+
+    let raw: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &["list", "--kind", "all", "--status", "all"],
+    ));
+    let items = raw.data["items"].as_array().unwrap();
+    let cut = items
+        .iter()
+        .find(|item| item["kind"] == "cut")
+        .unwrap()
+        .clone();
+    let promotion = items
+        .iter()
+        .find(|item| item["kind"] == "promotion")
+        .unwrap()
+        .clone();
+
+    // Each arm deserializes only as itself.
+    assert!(serde_json::from_value::<ListItem>(cut.clone()).is_ok());
+    assert!(serde_json::from_value::<PromotionItem>(cut.clone()).is_err());
+    assert!(serde_json::from_value::<PromotionItem>(promotion.clone()).is_ok());
+    assert!(serde_json::from_value::<ListItem>(promotion.clone()).is_err());
+
+    // And the union routes each to the arm its shape names, with `Record` tried
+    // first, so a promotion that fell through to it would be caught here.
+    let entries: Vec<ListEntry> = serde_json::from_value(json!([cut, promotion])).unwrap();
+    assert!(entries[0].as_record().is_some());
+    assert!(entries[0].as_promotion().is_none());
+    assert!(entries[1].as_promotion().is_some());
+    assert!(entries[1].as_record().is_none());
 }

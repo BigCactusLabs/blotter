@@ -307,7 +307,7 @@ fn export_otlp_json_since_matches_list() {
         .data
         .items
         .iter()
-        .map(|item| item.id.as_str())
+        .map(|item| item.record().id.as_str())
         .collect::<Vec<_>>();
     export_ids.sort_unstable();
     list_ids.sort_unstable();

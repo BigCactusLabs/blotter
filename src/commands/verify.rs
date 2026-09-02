@@ -79,7 +79,9 @@ fn is_verify_eligible(item: &ListItem) -> bool {
 
 pub fn run(_args: VerifyArgs, file: Option<PathBuf>, pretty: bool) -> AppResult<i32> {
     let resolved = store::discover(file)?;
-    let store::LoadedFold { items, warnings } = store::load_folded(&resolved)?;
+    let store::LoadedFold {
+        items, warnings, ..
+    } = store::load_folded(&resolved)?;
 
     let data = verify(items);
     let exit = i32::from(!data.recurrences.is_empty());

@@ -18,7 +18,7 @@ fn valid_final_record_without_newline_is_accepted_not_resurrected() {
     // would resurrect), and doctor agrees a valid tail is healthy.
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
     assert_eq!(listed.data.items.len(), 1);
-    assert_eq!(listed.data.items[0].text, "kept");
+    assert_eq!(listed.data.items[0].record().text, "kept");
     let doctor: SuccessEnvelope<DoctorData> =
         serde_json::from_slice(&run_file(&file, &["doctor"]).stdout).unwrap();
     assert!(doctor.data.healthy, "findings: {:?}", doctor.data.findings);
@@ -73,7 +73,7 @@ fn torn_tail_self_heals_on_add() {
     assert_eq!(bytes.split(|byte| *byte == b'\n').count(), 3);
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
     assert_eq!(listed.data.items.len(), 1);
-    assert_eq!(listed.data.items[0].text, "after tear");
+    assert_eq!(listed.data.items[0].record().text, "after tear");
     assert!(
         listed
             .meta

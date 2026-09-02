@@ -171,7 +171,13 @@ fn fold_deduplicates_tags_from_existing_cut_and_dogear_records() {
         &file,
         &["list", "--kind", "all", "--status", "all"],
     ));
-    assert!(listed.data.items.iter().all(|item| item.tags == ["a", "b"]));
+    assert!(
+        listed
+            .data
+            .items
+            .iter()
+            .all(|item| item.record().tags == ["a", "b"])
+    );
 }
 
 #[test]

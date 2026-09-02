@@ -326,7 +326,7 @@ fn resolve_amend_latest_event_supersedes_prior_amend() {
 
     let listed: SuccessEnvelope<ListData> =
         success(&run_file(&file, &["list", "--status", "resolved"]));
-    let resolution = listed.data.items[0].resolution.as_ref().unwrap();
+    let resolution = listed.data.items[0].record().resolution.as_ref().unwrap();
     assert_eq!(resolution.agent, "second");
     assert_eq!(resolution.note.as_deref(), Some("second correction"));
     assert!(resolution.amended);
@@ -616,7 +616,7 @@ fn orphan_resolve_amends_warn_in_the_fold_and_fail_doctor() {
     std::fs::write(&file, format!("{original}{orphan_amend}\n")).unwrap();
 
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
-    assert_eq!(listed.data.items[0].status, ItemStatus::Open);
+    assert_eq!(listed.data.items[0].record().status, ItemStatus::Open);
     assert_eq!(listed.meta.warnings, ["skipped 1 orphan resolve"]);
     let doctor = doctor_response(&run_file(&file, &["doctor"]), 1);
     assert!(!doctor.data.healthy);
@@ -661,7 +661,7 @@ fn resolve_reports_materialized_orphan_amend_after_base_append() {
     let listed: SuccessEnvelope<ListData> =
         success(&run_file(&file, &["list", "--status", "resolved"]));
 
-    assert_eq!(resolved.data.records, listed.data.items);
+    assert_eq!(list_records(&listed.data.items), resolved.data.records);
     let resolution = resolved.data.records[0].resolution.as_ref().unwrap();
     assert_eq!(resolution.agent, "stale-amend");
     assert_eq!(resolution.note.as_deref(), Some("stale correction"));
@@ -733,7 +733,7 @@ fn multiple_orphan_amends_for_one_record_count_once() {
     ));
     let listed: SuccessEnvelope<ListData> =
         success(&run_file(&file, &["list", "--status", "resolved"]));
-    assert_eq!(resolved.data.records, listed.data.items);
+    assert_eq!(list_records(&listed.data.items), resolved.data.records);
     let resolution = resolved.data.records[0].resolution.as_ref().unwrap();
     assert_eq!(resolution.note.as_deref(), Some("second orphan amend"));
     assert!(resolution.amended);
@@ -981,7 +981,7 @@ fn multi_resolve_is_atomic_deterministic_and_idempotent() {
         success(&run_file(&file, &["list", "--status", "resolved"]));
     assert_eq!(listed.data.items.len(), 2);
     assert!(listed.data.items.iter().all(|item| {
-        item.resolution.as_ref().is_some_and(|resolution| {
+        item.record().resolution.as_ref().is_some_and(|resolution| {
             resolution.agent == "fixer" && resolution.note.as_deref() == Some("batch")
         })
     }));
@@ -1199,7 +1199,8 @@ fn multi_resolve_heals_a_torn_tail_and_keeps_first_resolution() {
         success(&run_file(&file, &["list", "--status", "resolved"]));
     assert_eq!(listed.data.items.len(), 2);
     assert!(listed.data.items.iter().all(|item| {
-        item.resolution
+        item.record()
+            .resolution
             .as_ref()
             .is_some_and(|resolution| resolution.note.as_deref() == Some("first"))
     }));
@@ -1211,8 +1212,9 @@ fn multi_resolve_heals_a_torn_tail_and_keeps_first_resolution() {
         .data
         .items
         .iter()
-        .find(|item| item.id == first)
-        .unwrap();
+        .find(|item| item.record().id == first)
+        .unwrap()
+        .record();
     assert_eq!(
         first_item.resolution.as_ref().unwrap().note.as_deref(),
         Some("first")
@@ -1286,7 +1288,7 @@ fn resolve_amend_with_the_latest_timestamp_wins_over_file_order() {
     );
 
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
-    let resolution = listed.data.items[0].resolution.as_ref().unwrap();
+    let resolution = listed.data.items[0].record().resolution.as_ref().unwrap();
     assert_eq!(resolution.note.as_deref(), Some("later"));
     assert_eq!(resolution.ts, "2026-07-12T00:00:00.000Z");
     assert!(resolution.amended);
@@ -1310,7 +1312,7 @@ fn resolve_amends_sharing_a_timestamp_keep_the_last_in_file_order() {
     );
 
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
-    let resolution = listed.data.items[0].resolution.as_ref().unwrap();
+    let resolution = listed.data.items[0].record().resolution.as_ref().unwrap();
     assert_eq!(resolution.note.as_deref(), Some("second"));
 }
 
@@ -1371,7 +1373,7 @@ fn resolve_amend_response_reports_the_timestamp_winning_amend() {
     assert_eq!(applied.ts, "2026-05-01T00:00:00.000Z");
 
     let listed = success::<ListData>(&run_file(&file, &["list", "--status", "all"]));
-    let listed = listed.data.items[0].resolution.as_ref().unwrap();
+    let listed = listed.data.items[0].record().resolution.as_ref().unwrap();
     assert_eq!(listed.note.as_deref(), Some("may amend"));
     assert_eq!(listed.ts, "2026-05-01T00:00:00.000Z");
 
@@ -1410,6 +1412,7 @@ fn resolve_amend_response_reports_the_timestamp_winning_amend() {
     let listed = success::<ListData>(&run_file(&file, &["list", "--status", "all"]));
     assert_eq!(
         listed.data.items[0]
+            .record()
             .resolution
             .as_ref()
             .unwrap()
@@ -1636,6 +1639,7 @@ fn a_backdated_explicit_amend_appends_its_disposition_and_reports_the_winner() {
     assert_eq!(
         serde_json::to_value(
             listed.data.items[0]
+                .record()
                 .resolution
                 .as_ref()
                 .unwrap()
@@ -1665,7 +1669,7 @@ fn an_invalid_base_resolve_leaves_the_record_open_and_a_valid_base_repairs_it() 
     std::fs::write(&file, format!("{original}{invalid_base}\n")).unwrap();
 
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
-    assert_eq!(listed.data.items[0].status, ItemStatus::Open);
+    assert_eq!(listed.data.items[0].record().status, ItemStatus::Open);
     assert_eq!(listed.meta.warnings, ["skipped 1 invalid resolution"]);
 
     let refused = error(
@@ -1734,6 +1738,7 @@ fn duplicate_and_orphan_counts_run_over_valid_events_only() {
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
     assert_eq!(
         listed.data.items[0]
+            .record()
             .resolution
             .as_ref()
             .unwrap()
@@ -1749,4 +1754,299 @@ fn duplicate_and_orphan_counts_run_over_valid_events_only() {
             "skipped 1 invalid resolution",
         ]
     );
+}
+
+/// A cut, and a promotion that names it (r48). Returns `(cut id, promotion id)`.
+fn cut_and_promotion(file: &Path) -> (String, String) {
+    let cut = add_at(file, "2026-07-01T00:00:00Z", "friction", &[]);
+    let cut = cut.data.record.cut_id().to_owned();
+    let promotion: SuccessEnvelope<PromoteData> = success(&promote_at(
+        file,
+        "2026-07-02T00:00:00Z",
+        &[
+            "--source",
+            &cut,
+            "--artifact-type",
+            "skill",
+            "--artifact-ref",
+            "skills/x.md",
+        ],
+    ));
+    (cut, promotion_id(&promotion.data.record))
+}
+
+#[test]
+fn the_promotion_link_is_accepted_only_with_disposition_promoted() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let (cut, promotion) = cut_and_promotion(&file);
+    let before = std::fs::read(&file).unwrap();
+
+    for disposition in [None, Some("fixed"), Some("accepted"), Some("invalid")] {
+        let mut args = vec!["resolve", cut.as_str(), "--promotion", promotion.as_str()];
+        if let Some(disposition) = disposition {
+            args.extend_from_slice(&["--disposition", disposition]);
+        }
+        let envelope = error(&run_file(&file, &args), 2, "invalid_argument");
+        assert_eq!(
+            envelope.error.message,
+            "--promotion requires --disposition promoted"
+        );
+    }
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
+
+#[test]
+fn a_promotion_link_stores_and_materializes_the_link() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let (cut, promotion) = cut_and_promotion(&file);
+
+    let resolved: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &[
+            "resolve",
+            &cut,
+            "--disposition",
+            "promoted",
+            "--promotion",
+            &promotion,
+            "--agent",
+            "fixer",
+        ],
+    ));
+    let resolution = resolved.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(resolution.promotion.as_deref(), Some(promotion.as_str()));
+
+    let stored = std::fs::read_to_string(&file).unwrap();
+    let event: Value = serde_json::from_str(stored.lines().next_back().unwrap()).unwrap();
+    assert_eq!(event["kind"], "resolve");
+    assert_eq!(event["disposition"], "promoted");
+    assert_eq!(event["promotion"], promotion.as_str());
+
+    let listed: SuccessEnvelope<ListData> =
+        success(&run_file(&file, &["list", "--status", "resolved"]));
+    assert_eq!(
+        listed.data.items[0]
+            .record()
+            .resolution
+            .as_ref()
+            .unwrap()
+            .promotion
+            .as_deref(),
+        Some(promotion.as_str())
+    );
+}
+
+#[test]
+fn the_promotion_link_must_be_mutual_and_fails_the_whole_batch() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let (cut, promotion) = cut_and_promotion(&file);
+    let other = add_at(&file, "2026-07-03T00:00:00Z", "unnamed friction", &[]);
+    let other = other.data.record.cut_id().to_owned();
+    let before = std::fs::read(&file).unwrap();
+
+    // The promotion never cited `other`, so the whole batch is refused before
+    // any append — the cut it *did* cite is not resolved either.
+    let envelope = error(
+        &run_file(
+            &file,
+            &[
+                "resolve",
+                &cut,
+                &other,
+                "--disposition",
+                "promoted",
+                "--promotion",
+                &promotion,
+                "--agent",
+                "fixer",
+            ],
+        ),
+        2,
+        "invalid_argument",
+    );
+    assert!(envelope.error.message.contains(&promotion));
+    assert!(envelope.error.message.contains(&other));
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
+
+#[test]
+fn the_promotion_flag_answers_on_kind_through_the_single_rule() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let (cut, _) = cut_and_promotion(&file);
+
+    let envelope = error(
+        &run_file(
+            &file,
+            &[
+                "resolve",
+                &cut,
+                "--disposition",
+                "promoted",
+                "--promotion",
+                &cut,
+                "--agent",
+                "fixer",
+            ],
+        ),
+        2,
+        "invalid_argument",
+    );
+    assert!(envelope.error.message.contains(&cut));
+    assert!(envelope.error.message.contains("not a promotion"));
+
+    error(
+        &run_file(
+            &file,
+            &[
+                "resolve",
+                &cut,
+                "--disposition",
+                "promoted",
+                "--promotion",
+                "ffffffff",
+                "--agent",
+                "fixer",
+            ],
+        ),
+        66,
+        "not_found",
+    );
+}
+
+#[test]
+fn an_amend_keeps_the_link_under_promoted_and_clears_it_otherwise() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let (cut, promotion) = cut_and_promotion(&file);
+    success::<ResolveData>(&run_file(
+        &file,
+        &[
+            "resolve",
+            &cut,
+            "--disposition",
+            "promoted",
+            "--promotion",
+            &promotion,
+            "--agent",
+            "fixer",
+        ],
+    ));
+
+    // A note-only amend inherits disposition, disposition_ts and the link.
+    let amended: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-20T00:00:00Z",
+        &cut,
+        &["--amend", "--note", "reworded", "--agent", "fixer"],
+    );
+    let resolution = amended.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(resolution.promotion.as_deref(), Some(promotion.as_str()));
+    let stored = std::fs::read_to_string(&file).unwrap();
+    let event: Value = serde_json::from_str(stored.lines().next_back().unwrap()).unwrap();
+    assert_eq!(event["promotion"], promotion.as_str());
+
+    // Moving the disposition off `promoted` clears it.
+    let moved: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-21T00:00:00Z",
+        &cut,
+        &["--amend", "--disposition", "accepted", "--agent", "fixer"],
+    );
+    let resolution = moved.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(resolution.promotion, None);
+    let stored = std::fs::read_to_string(&file).unwrap();
+    let event: Value = serde_json::from_str(stored.lines().next_back().unwrap()).unwrap();
+    assert!(event.get("promotion").is_none());
+}
+
+#[test]
+fn the_fold_discards_resolve_events_breaking_the_promotion_rules() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let (cut, promotion) = cut_and_promotion(&file);
+    let other = add_at(&file, "2026-07-03T00:00:00Z", "unnamed friction", &[]);
+    let other = other.data.record.cut_id().to_owned();
+    let ts = "2026-07-10T00:00:00.000Z";
+    let event = |id: &str, disposition: &str, link: &str| {
+        json!({"v":2,"kind":"resolve","id":id,"ts":ts,"agent":"hand","note":null,
+               "disposition":disposition,"disposition_ts":ts,"promotion":link})
+        .to_string()
+    };
+    append_lines(
+        &file,
+        &[
+            // (4) a link under a disposition other than promoted
+            event(&cut, "fixed", &promotion),
+            // (5) a link naming a record that is not a promotion
+            event(&cut, "promoted", &cut),
+            // (6) a link whose sources[] does not name this cut
+            event(&other, "promoted", &promotion),
+        ],
+    );
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
+    assert!(
+        listed
+            .data
+            .items
+            .iter()
+            .all(|item| item.record().status == ItemStatus::Open)
+    );
+    assert_eq!(listed.meta.warnings, ["skipped 3 invalid resolutions"]);
+
+    let doctor: SuccessEnvelope<DoctorData> = doctor_response(&run_file(&file, &["doctor"]), 1);
+    let invalid: Vec<_> = doctor
+        .data
+        .findings
+        .iter()
+        .filter(|finding| finding.kind == "invalid_resolution")
+        .collect();
+    assert_eq!(invalid.len(), 3);
+    assert!(invalid.iter().all(|finding| !finding.fixable));
+    assert!(invalid[0].message.contains("disposition promoted"));
+    assert!(invalid[1].message.contains("names no promotion"));
+    assert!(invalid[2].message.contains("does not name this record"));
+}
+
+/// The mutual-link rule is decided over the **named** set (r48): it carries "the
+/// same all-or-nothing shape as the mixed-kind rejection", and that sibling rule
+/// fires on a named record that is already resolved and will append nothing.
+#[test]
+fn an_already_resolved_named_cut_still_trips_the_mutual_link_rule() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let (cut, promotion) = cut_and_promotion(&file);
+    let other = add_at(&file, "2026-07-03T00:00:00Z", "unnamed friction", &[]);
+    let other = other.data.record.cut_id().to_owned();
+    resolve_at(&file, "2026-07-05T00:00:00Z", &other, &["--agent", "fixer"]);
+    let before = std::fs::read(&file).unwrap();
+
+    // `other` is already resolved and would carry no event, but the promotion
+    // never cited it, so the whole batch is refused and the cut it did cite is
+    // not resolved either.
+    let envelope = error(
+        &run_file(
+            &file,
+            &[
+                "resolve",
+                &cut,
+                &other,
+                "--disposition",
+                "promoted",
+                "--promotion",
+                &promotion,
+                "--agent",
+                "fixer",
+            ],
+        ),
+        2,
+        "invalid_argument",
+    );
+    assert!(envelope.error.message.contains(&other));
+    assert!(envelope.error.message.contains(&promotion));
+    assert_eq!(std::fs::read(&file).unwrap(), before);
 }

@@ -71,7 +71,9 @@ struct OrderedCandidate {
 
 pub fn run(_args: RetrospectArgs, file: Option<PathBuf>, pretty: bool) -> AppResult<i32> {
     let resolved = store::discover(file)?;
-    let store::LoadedFold { items, warnings } = store::load_folded(&resolved)?;
+    let store::LoadedFold {
+        items, warnings, ..
+    } = store::load_folded(&resolved)?;
     let data = retrospect(items);
     let exit = i32::from(!data.candidates.is_empty());
     let mut meta = Meta::new();

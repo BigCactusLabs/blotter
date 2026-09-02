@@ -32,6 +32,7 @@ pub fn run(
         url,
         dropped,
         disposition,
+        promotion,
         amend,
         dry_run,
     } = args;
@@ -39,6 +40,21 @@ pub fn run(
         .iter()
         .map(|id| normalize_prefix(id))
         .collect::<AppResult<_>>()?;
+    // `--promotion` is accepted only alongside an explicit `--disposition
+    // promoted` (r48). An amend that omits the disposition inherits its link
+    // instead of naming one, so this is an argument rule and needs no fold.
+    let promotion_prefix = promotion
+        .as_deref()
+        .map(|value| {
+            if disposition != Some(Disposition::Promoted) {
+                return Err(AppError::invalid_argument(
+                    "--promotion requires --disposition promoted",
+                    "Pass --disposition promoted with --promotion ID, or drop --promotion.",
+                ));
+            }
+            normalize_prefix(value)
+        })
+        .transpose()?;
     let resolved = store::discover(file)?;
     for (flag, value) in [
         ("task", task.as_deref()),
@@ -77,12 +93,38 @@ pub fn run(
         let bytes = store::read_bytes(log, &resolved.path)?;
         store::check_version(&bytes, &resolved.path)?;
         let folded = store::fold_bytes(&bytes);
+        let candidates = candidates(&folded);
         let mut ids = prefixes
             .iter()
-            .map(|prefix| match_id(prefix, &folded.items))
+            .map(|prefix| {
+                let Candidate { id, kind } = match_id(prefix, &candidates)?;
+                // A promotion has no status and no resolution; it is never a
+                // resolve target (r48).
+                if kind == "promotion" {
+                    return Err(AppError::invalid_argument(
+                        format!("{id} is a promotion, which is never resolved"),
+                        "Resolve cut or dogear IDs; a promotion has no lifecycle.",
+                    ));
+                }
+                Ok(id)
+            })
             .collect::<AppResult<Vec<_>>>()?;
         ids.sort();
         ids.dedup();
+        // Resolved under the same lock, before any append.
+        let promotion = promotion_prefix
+            .as_ref()
+            .map(|prefix| {
+                let Candidate { id, kind } = match_id(prefix, &candidates)?;
+                if kind != "promotion" {
+                    return Err(AppError::invalid_argument(
+                        format!("--promotion {id} is a {kind}, not a promotion"),
+                        "Pass a promotion ID to --promotion; run `blotter list --kind promotion`.",
+                    ));
+                }
+                Ok(id)
+            })
+            .transpose()?;
         let mut items = ids
             .iter()
             .map(|id| {
@@ -129,6 +171,26 @@ pub fn run(
                 "Resolve each record without --amend first, then retry with --amend.",
             ));
         }
+        // The link must be mutual (r48): every cut resolved with `--promotion P`
+        // must already appear in `P.sources`. Checked here, under the same lock
+        // and before any append, so a failure fails the whole batch.
+        let link = |item: &ListItem| -> AppResult<Option<String>> {
+            let promotion = effective_promotion(item, disposition, promotion.as_deref());
+            if let Some(promotion_id) = promotion.as_deref()
+                && !folded.promotions.iter().any(|candidate| {
+                    candidate.id == promotion_id && candidate.sources.contains(&item.id)
+                })
+            {
+                return Err(AppError::invalid_argument(
+                    format!(
+                        "promotion {promotion_id} does not name {} as a source",
+                        item.id
+                    ),
+                    "Run `blotter promote --source <cut id>` first, then resolve the cut against that promotion.",
+                ));
+            }
+            Ok(promotion)
+        };
         let already_resolved_ids: Vec<_> = if amend {
             Vec::new()
         } else {
@@ -138,6 +200,14 @@ pub fn run(
                 .map(|(id, _)| id.clone())
                 .collect()
         };
+        // The **named** set, not the set that will carry an event. r48 gives
+        // this rule "the same all-or-nothing shape as the mixed-kind
+        // rejection", and both named precedents — the mixed cut/dogear batch
+        // and the missing `--disposition` — fire on a named record that is
+        // already resolved and will append nothing.
+        for item in &items {
+            link(item)?;
+        }
         let mut changed = false;
         if !dry_run {
             let mut events = Vec::new();
@@ -148,6 +218,7 @@ pub fn run(
                 }
                 let (disposition, disposition_ts) =
                     event_disposition(item, disposition, ts.as_str());
+                let promotion = link(item)?;
                 events.push(LogEvent::Resolve {
                     id: id.clone(),
                     ts: ts.clone(),
@@ -161,6 +232,7 @@ pub fn run(
                     amend,
                     disposition,
                     disposition_ts,
+                    promotion,
                 });
                 updated_item_indexes.push(item_index);
             }
@@ -181,6 +253,7 @@ pub fn run(
                 if amend || item.status == ItemStatus::Open {
                     let (disposition, disposition_ts) =
                         event_disposition(item, disposition, ts.as_str());
+                    let promotion = link(item)?;
                     let candidate = LogEvent::Resolve {
                         id: id.clone(),
                         ts: ts.clone(),
@@ -194,6 +267,7 @@ pub fn run(
                         amend,
                         disposition,
                         disposition_ts,
+                        promotion,
                     };
                     item.status = ItemStatus::Resolved;
                     item.resolution = Some(folded.materialized_appended_resolution(&candidate));
@@ -264,16 +338,69 @@ fn event_disposition(
     }
 }
 
+/// The promotion link an event carries. An explicit `--promotion` names it; an
+/// explicit `--disposition promoted` without one keeps the winner's link, and
+/// any other explicit disposition clears it; an amend that omits `--disposition`
+/// inherits the link along with the disposition it belongs to (r48).
+fn effective_promotion(
+    item: &ListItem,
+    requested_disposition: Option<Disposition>,
+    requested_promotion: Option<&str>,
+) -> Option<String> {
+    if item.kind != "cut" {
+        return None;
+    }
+    if let Some(promotion) = requested_promotion {
+        return Some(promotion.to_owned());
+    }
+    let inherited = || {
+        item.resolution
+            .as_ref()
+            .and_then(|resolution| resolution.promotion.clone())
+    };
+    match requested_disposition {
+        Some(Disposition::Promoted) | None => inherited(),
+        Some(_) => None,
+    }
+}
+
 /// An ID prefix: optional `bl_`, then at least 4 hex digits, matched
 /// case-insensitively against the one `bl2` namespace (r48). No exact-full-ID
 /// precedence: a complete ID that also prefixes a longer one is `ambiguous_id`
 /// (r50).
 #[derive(Debug)]
-struct IdPrefix {
+pub(crate) struct IdPrefix {
     hex: String,
 }
 
-fn normalize_prefix(input: &str) -> AppResult<IdPrefix> {
+/// One folded identity-bearing record, with the kind a flag may reject it for.
+/// Ambiguity is decided before kind, so every ID argument — a `resolve`
+/// positional, `--promotion`, and `promote --source` — matches against the
+/// folded distinct IDs of all three kinds and only then answers on the kind.
+pub(crate) struct Candidate {
+    pub id: String,
+    pub kind: &'static str,
+}
+
+/// The candidate set the single prefix-resolution rule matches against: every
+/// folded cut, dogear, and promotion. Orphan resolve events are never
+/// candidates, as in v1.
+pub(crate) fn candidates(folded: &store::FoldResult) -> Vec<Candidate> {
+    folded
+        .items
+        .iter()
+        .map(|item| Candidate {
+            id: item.id.clone(),
+            kind: if item.kind == "cut" { "cut" } else { "dogear" },
+        })
+        .chain(folded.promotions.iter().map(|promotion| Candidate {
+            id: promotion.id.clone(),
+            kind: "promotion",
+        }))
+        .collect()
+}
+
+pub(crate) fn normalize_prefix(input: &str) -> AppResult<IdPrefix> {
     let hex = if is_bl_id(input) { &input[3..] } else { input };
     if hex.len() < 4 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(AppError::invalid_argument(
@@ -286,24 +413,33 @@ fn normalize_prefix(input: &str) -> AppResult<IdPrefix> {
     })
 }
 
-fn match_id(prefix: &IdPrefix, items: &[ListItem]) -> AppResult<String> {
-    let mut candidates: Vec<_> = items
+pub(crate) fn match_id(prefix: &IdPrefix, candidates: &[Candidate]) -> AppResult<Candidate> {
+    let mut matched: Vec<_> = candidates
         .iter()
-        .map(|item| item.id.clone())
-        .filter(|id| {
-            is_bl_id(id)
-                && id
+        .filter(|candidate| {
+            is_bl_id(&candidate.id)
+                && candidate
+                    .id
                     .get(3..)
                     .is_some_and(|hex| hex.to_ascii_lowercase().starts_with(&prefix.hex))
         })
         .collect();
-    candidates.sort();
-    match candidates.as_slice() {
+    matched.sort_by(|left, right| left.id.cmp(&right.id));
+    match matched.as_slice() {
         [] => Err(AppError::not_found(
             format!("no record matches ID prefix '{}'", prefix.hex),
             "Run `blotter list --kind all --status all` and retry with a listed ID.",
         )),
-        [id] => Ok(id.clone()),
-        _ => Err(AppError::ambiguous_id(&prefix.hex, candidates)),
+        [candidate] => Ok(Candidate {
+            id: candidate.id.clone(),
+            kind: candidate.kind,
+        }),
+        _ => Err(AppError::ambiguous_id(
+            &prefix.hex,
+            matched
+                .iter()
+                .map(|candidate| candidate.id.clone())
+                .collect(),
+        )),
     }
 }

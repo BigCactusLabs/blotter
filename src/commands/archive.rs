@@ -173,8 +173,27 @@ fn plan_archive(bytes: &[u8], cutoff: Timestamp) -> ArchivePlan {
             .push((folded_line.line, folded_line.ts < cutoff));
     }
 
+    // A resolved cut named in any promotion's `sources[]` is pinned, however
+    // old the group and however old the promotion (r48): severing provenance
+    // would turn a durable artifact's justification into a dangling ID.
+    // Promotions themselves have no state to close, so they are never in
+    // `closed_ids` and never archive.
+    //
+    // The set is built from every source ID with no kind check. r48 scopes the
+    // pin to a resolved cut, and only a hand-written promotion can name a
+    // dogear — `doctor` already reports that as `dangling_source` — so the one
+    // divergence is over-retaining that dogear's group, which is the
+    // conservative direction and costs a rule the code would otherwise state
+    // twice.
+    let pinned = folded
+        .promotions
+        .iter()
+        .flat_map(|promotion| promotion.sources.iter().cloned())
+        .collect::<HashSet<_>>();
+
     let eligible_ids = closed_ids
         .iter()
+        .filter(|id| !pinned.contains(*id))
         .map(String::as_str)
         .filter(|id| {
             group_lines

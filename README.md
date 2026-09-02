@@ -1,11 +1,12 @@
 # blotter
 
-A tiny Rust CLI that gives AI agents a blotter — a desk pad for the things that don't fit in a commit. Agents jot two kinds of records into one append-only journal:
+A tiny Rust CLI that gives AI agents a blotter — a desk pad for the things that don't fit in a commit. Agents jot three kinds of records into one append-only journal:
 
 - **Cuts** — friction worth keeping. A dead-end tool call, a broken link, a misleading error, a footgun config. Filed at the moment it happens, with optional evidence (the failed command, its exit code, its stderr).
 - **Dogears** — ideas. A surprising measurement, a gap in prior art, a pattern worth writing up. The page-corner you fold to come back to later.
+- **Promotions** — durable learning. "These experiences became this artifact": a doc, a skill, a guard, a test, a tool, or a process change.
 
-Agents hit friction constantly and silently push through; the signal evaporates. They also have ideas mid-task and drop them for the same reason. `blotter` gives both a one-line home, and gives you (or another agent) the commands to review, cluster, and act on the backlog.
+Agents hit friction constantly and silently push through; the signal evaporates. They also have ideas mid-task and drop them for the same reason. `blotter` gives all three a one-line home, and gives you (or another agent) the commands to review, cluster, and act on the backlog.
 
 ```
 $ blotter add "yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web" --tag tooling
@@ -46,7 +47,7 @@ Two global flags apply to every subcommand: `--file PATH` overrides log discover
 
 ## The commands
 
-Thirteen subcommands, four jobs:
+Fourteen subcommands, four jobs:
 
 **Write** — append records to the log by hand:
 
@@ -55,6 +56,7 @@ blotter add "text"                # file a cut (also: blotter log, or pipe stdin
 blotter add "tool failed" --cmd 'tool --flag' --exit 1 --stderr-file /tmp/stderr
 blotter add "bad response" --evidence 'request_id=abc123'
 blotter dogear "idea worth keeping" --tag research   # file a dogear (also: blotter idea)
+blotter promote --source bl_9f2c --artifact-type skill --artifact-ref skills/testing.md  # record durable learning
 blotter resolve bl_9f2c --disposition fixed   # resolve one cut (unique ID prefix ok)
 blotter resolve bl_9f2c bl_a81e --disposition fixed   # resolve several atomically
 blotter resolve <id> --disposition promoted --pr <url>   # attach structured graduation provenance
@@ -67,6 +69,7 @@ blotter resolve <id> --amend --note "..."  # correct a resolution you got wrong
 blotter list                      # open cuts, impact-first then newest, JSON envelope
 blotter list --format md          # human review digest
 blotter list --kind dogear        # the idea backlog, newest first
+blotter list --kind promotion     # what friction has already become
 blotter triage                    # identify chronic clusters of similar open cuts
 blotter verify                    # check resolved cuts for later recurrences
 blotter retrospect                # mine chronic signal for typed promotion candidates
@@ -137,6 +140,22 @@ blotter resolve <id> --dropped    # dogear intentionally dropped
 ```
 
 Dogears use the same append-only journal, agent resolution, tags, dry-run, deterministic clock override, and resolve events as cuts. `resolve --task`, `--pr`, and `--commit` work for either kind. `--url` and `--dropped` are dogear-only, conflict with each other, and reject a mixed cut/dogear batch before anything is appended. Dogears have no impact or failure-command fields; `list --impact` is therefore accepted only with the default `--kind cut`.
+
+## Promotions
+
+A promotion is the third record kind: durable learning, recorded as "these experiences became this artifact". It names one or more source **cuts**, an artifact type from the closed vocabulary `doc|skill|guard|test|tool|process`, and a reference to where the artifact lives.
+
+```bash
+blotter promote --source bl_9f2c --source bl_a81e \
+  --artifact-type skill --artifact-ref skills/testing.md \
+  --note "Repeated fixture failures promoted into reusable test-authoring guidance."
+blotter list --kind promotion             # every promotion, newest first
+blotter resolve bl_9f2c --disposition promoted --promotion <promotion id>
+```
+
+Sources are cuts only, open or resolved — a promotion records where learning came from, not whether the friction is closed. A dogear or another promotion as a `--source` is rejected. `--artifact-ref` and `--note` are redacted before hashing and before the append, so the hashed bytes are the stored bytes; the note is deliberately outside the ID hash, so rewording it does not make a different promotion.
+
+`promote` never writes a resolve event, and a promotion is never resolved. Naming a cut's fate stays a separate act: `resolve --disposition promoted --promotion <id>`, whose link must be mutual — the promotion must already list that cut in its `sources`, or the whole resolve batch is refused before anything is appended.
 
 ## Triage
 
@@ -221,7 +240,8 @@ Output is deterministic: records sort by timestamp, then by id, and an empty sel
 |---|---|---|
 | `torn_line`, `malformed`, `conflict_marker` | yes | Run `blotter doctor --fix`. Removed lines are quarantined verbatim. |
 | `id_conflict` | no | A record's ID does not recompute from its payload, usually because it was written before an ID-format change. Leave it — see below. |
-| `duplicate_cut`, `duplicate_dogear` | no | First-wins fold warnings. Harmless — compaction is not worth a rewrite. |
+| `duplicate_cut`, `duplicate_dogear`, `duplicate_promotion` | no | First-wins fold warnings. Harmless — compaction is not worth a rewrite. |
+| `dangling_source` | no | A promotion names a source that resolves to nothing, or to a dogear or a promotion, in this log. Only a human knows whether the cut was wrongly archived or the promotion wrongly written. |
 | `orphan_resolve` | no | Either a resolve event whose ID matches no record — often merge ordering, harmless to the fold — or an amend for a known record that has no base resolve anywhere in the log. The second cannot come from merge ordering, so it points at a truncated or hand-edited log; append the missing base resolve. One finding per orphan line. |
 | `unknown_kind` | no | A record kind this build does not know. Left alone for forward compatibility. |
 | `gitignored` | no | Fix `.gitignore`, not the log. |
@@ -234,7 +254,7 @@ An unhealthy report is therefore not always something to repair. `id_conflict` i
 
 ## Archive
 
-`archive` is the retention command: it retires history that is finished and old, and leaves everything else alone. A record group is removed only when **both** conditions hold — its materialized state is resolved or dropped, and every event in the group (the record and its resolves) is older than `--before`. An open cut, or a closed cut whose resolve landed after the cutoff, stays. So do orphan resolves, malformed lines, unknown record kinds, and any record whose ID does not start with `bl_`: only `bl_` groups are eligible.
+`archive` is the retention command: it retires history that is finished and old, and leaves everything else alone. A record group is removed only when **both** conditions hold — its materialized state is resolved or dropped, and every event in the group (the record and its resolves) is older than `--before`. An open cut, or a closed cut whose resolve landed after the cutoff, stays. So do orphan resolves, malformed lines, unknown record kinds, and any record whose ID does not start with `bl_`: only `bl_` groups are eligible. A resolved cut named in any promotion's `sources` is pinned and never archived, however old the group or the promotion — severing that link would turn a durable artifact's justification into a dangling ID. Promotions have no state to close and never archive.
 
 ```bash
 blotter archive --before 180d --dry-run   # plan only, writes nothing

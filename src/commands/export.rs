@@ -42,7 +42,7 @@ pub fn run(
         .transpose()?;
 
     let resolved = store::discover(file)?;
-    let store::LoadedFold { items, warnings: _ } = store::load_folded(&resolved)?;
+    let store::LoadedFold { items, .. } = store::load_folded(&resolved)?;
 
     let data = LogsData::from_items(items, since)?;
     write_otlp_json(&data)?;

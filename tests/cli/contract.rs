@@ -423,7 +423,7 @@ fn auto_is_a_plain_tag_for_every_read_command() {
         .data
         .items
         .iter()
-        .map(|item| item.id.as_str())
+        .map(|item| item.record().id.as_str())
         .collect::<Vec<_>>();
     assert!(list_ids.contains(&auto_id.as_str()));
     assert!(list_ids.contains(&manual_id.as_str()));
@@ -432,7 +432,7 @@ fn auto_is_a_plain_tag_for_every_read_command() {
     let tagged: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--tag", "auto"]));
     assert_eq!(tagged.data.count, 1);
     assert_eq!(tagged.data.total, 1);
-    assert_eq!(tagged.data.items[0].id, auto_id);
+    assert_eq!(tagged.data.items[0].record().id, auto_id);
     assert_no_auto_guidance(&tagged.meta.warnings);
 
     let clustered_auto_cut = add_at(
@@ -983,6 +983,7 @@ fn tagged_event_serialization_preserves_record_field_order() {
     );
 
     let resolve = LogEvent::Resolve {
+        promotion: None,
         id: "bl_123456789abcdef01234".into(),
         ts: "2026-08-03T00:00:00.000Z".into(),
         agent: "fixture".into(),
@@ -1369,6 +1370,15 @@ fn every_mutating_path_leaves_a_refused_log_byte_identical_with_no_sidecars() {
         &["add", "new cut", "--agent", "tester"][..],
         &["dogear", "new idea", "--agent", "tester"][..],
         &["resolve", "--disposition", "fixed", "a1b2c3d4e5f6"][..],
+        &[
+            "promote",
+            "--source",
+            "a1b2",
+            "--artifact-type",
+            "doc",
+            "--artifact-ref",
+            "docs/x.md",
+        ][..],
         &["doctor", "--fix"][..],
         &["doctor", "--fix", "--dry-run"][..],
         &["archive", "--before", "1d"][..],
@@ -1476,5 +1486,40 @@ fn every_v2_identity_is_twenty_hex() {
     assert_eq!(
         schema.data["id"]["dogear"]["hash"],
         "SHA-256 first 10 bytes"
+    );
+}
+
+/// The promotion arm of the stored-line rule (r50): the envelope record plus
+/// `"v":2` as the first member, and no `v` anywhere in the envelope.
+#[test]
+fn a_stored_promotion_line_is_its_envelope_record_plus_the_version_marker() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add_at(&file, "2026-07-01T00:00:00Z", "friction", &[]);
+    let cut = cut.data.record.cut_id().to_owned();
+    let envelope: SuccessEnvelope<PromoteData> = success(&promote_at(
+        &file,
+        "2026-07-02T00:00:00Z",
+        &[
+            "--source",
+            &cut,
+            "--artifact-type",
+            "test",
+            "--artifact-ref",
+            "tests/cli/promote.rs",
+        ],
+    ));
+    let record = serde_json::to_value(&envelope.data.record).unwrap();
+    assert!(record.get("v").is_none());
+    let stored = std::fs::read_to_string(&file).unwrap();
+    let line = stored.lines().next_back().unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(line).unwrap(),
+        stored_line(&record)
+    );
+    assert_eq!(
+        line.as_bytes()[..7],
+        *br#"{"v":2,"#,
+        "v is the first member of every stored line"
     );
 }

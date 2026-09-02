@@ -439,7 +439,9 @@ pub fn run(args: TriageArgs, file: Option<PathBuf>, pretty: bool) -> AppResult<i
     }
 
     let resolved = store::discover(file)?;
-    let store::LoadedFold { items, warnings } = store::load_folded(&resolved)?;
+    let store::LoadedFold {
+        items, warnings, ..
+    } = store::load_folded(&resolved)?;
 
     let data = triage(items, args.min_count);
     let exit = i32::from(!data.clusters.is_empty());
