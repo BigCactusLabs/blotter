@@ -24,7 +24,8 @@ fn retrospect_types_shared_program_clusters_as_wrapper_aliases() {
         retrospect.data,
         json!({
             "candidates": [{
-                "type": "wrapper_alias",
+                "pattern": "recurrent_friction",
+                "suggested": ["tool", "guard"],
                 "title": "Build cache compiler fails",
                 "program": "cargo",
                 "record_ids": [first.data.record.cut_id(), second.data.record.cut_id()],
@@ -63,7 +64,8 @@ fn retrospect_types_docs_clusters_and_gives_wrapper_precedence() {
     assert_eq!(
         docs.data["candidates"],
         json!([{
-            "type": "doc_repair",
+            "pattern": "recurrent_friction",
+            "suggested": ["doc"],
             "title": "Deployment documentation is unclear",
             "record_ids": [first.data.record.cut_id(), second.data.record.cut_id()],
             "occurrences": 2,
@@ -96,7 +98,11 @@ fn retrospect_types_docs_clusters_and_gives_wrapper_precedence() {
     );
     let both = retrospect_success(&run_file(&both_file, &["retrospect"]), 1);
     assert_eq!(both.data["count"], 1);
-    assert_eq!(both.data["candidates"][0]["type"], "wrapper_alias");
+    assert_eq!(both.data["candidates"][0]["pattern"], "recurrent_friction");
+    assert_eq!(
+        both.data["candidates"][0]["suggested"],
+        json!(["tool", "guard"])
+    );
     assert_eq!(both.data["candidates"][0]["program"], "cargo");
 }
 
@@ -160,11 +166,11 @@ fn retrospect_promotes_repeated_resolved_recurrences_without_deduping_open_candi
     let candidates = retrospect.data["candidates"].as_array().unwrap();
     let wrapper = candidates
         .iter()
-        .find(|candidate| candidate["type"] == "wrapper_alias")
+        .find(|candidate| candidate["pattern"] == "recurrent_friction")
         .unwrap();
     let skill = candidates
         .iter()
-        .find(|candidate| candidate["type"] == "skill_candidate")
+        .find(|candidate| candidate["pattern"] == "failed_intervention")
         .unwrap();
     assert_eq!(
         wrapper["record_ids"],
@@ -173,7 +179,8 @@ fn retrospect_promotes_repeated_resolved_recurrences_without_deduping_open_candi
     assert_eq!(
         skill,
         &json!({
-            "type": "skill_candidate",
+            "pattern": "failed_intervention",
+            "suggested": ["skill"],
             "title": "Cache recovery guide failed",
             "record_ids": [first.data.record.cut_id(), second.data.record.cut_id()],
             "resolved_anchor_ids": [anchor.data.record.cut_id()],
@@ -189,6 +196,59 @@ fn retrospect_promotes_repeated_resolved_recurrences_without_deduping_open_candi
             },
         })
     );
+}
+
+#[test]
+fn retrospect_does_not_promote_an_accepted_disposition_recurrence() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let anchor = add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "Cache recovery guide failed",
+        &["ops"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:31:00Z",
+        anchor.data.record.cut_id(),
+        &[
+            "--agent",
+            "fixer",
+            "--note",
+            "Tolerating this for now",
+            "--disposition",
+            "accepted",
+        ],
+    );
+    add_with_cmd_at(
+        &file,
+        "2026-07-09T18:32:00Z",
+        "cache recovery guide failed again",
+        &["ops"],
+        "cargo recover-cache",
+    );
+    add_with_cmd_at(
+        &file,
+        "2026-07-09T18:33:00Z",
+        "cache recovery guide failed twice",
+        &["ops"],
+        "cargo recover-cache --retry",
+    );
+
+    // An accepted disposition is never a verify anchor (r48), so its
+    // recurrences never become a failed_intervention candidate — only the
+    // shared-command wrapper_alias-shaped recurrent_friction one, from the
+    // open cuts alone, can emit here.
+    let retrospect = retrospect_success(&run_file(&file, &["retrospect"]), 1);
+    assert_eq!(retrospect.data["count"], 1);
+    let candidates = retrospect.data["candidates"].as_array().unwrap();
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate["pattern"] != "failed_intervention")
+    );
+    assert_eq!(candidates[0]["pattern"], "recurrent_friction");
 }
 
 #[test]
@@ -265,7 +325,14 @@ fn retrospect_reads_auto_tagged_records_like_any_other() {
     assert_eq!(retrospect.meta.warnings, Vec::<String>::new());
     assert_eq!(retrospect.data["scanned"], 2);
     assert_eq!(retrospect.data["count"], 1);
-    assert_eq!(retrospect.data["candidates"][0]["type"], "wrapper_alias");
+    assert_eq!(
+        retrospect.data["candidates"][0]["pattern"],
+        "recurrent_friction"
+    );
+    assert_eq!(
+        retrospect.data["candidates"][0]["suggested"],
+        json!(["tool", "guard"])
+    );
     assert_eq!(retrospect.data["candidates"][0]["program"], "cargo");
     assert_eq!(
         retrospect.data["candidates"][0]["record_ids"],
@@ -291,7 +358,8 @@ fn retrospect_bounds_evidence_without_losing_cluster_occurrences() {
 
     let retrospect = retrospect_success(&run_file(&file, &["retrospect"]), 1);
     let candidate = &retrospect.data["candidates"][0];
-    assert_eq!(candidate["type"], "wrapper_alias");
+    assert_eq!(candidate["pattern"], "recurrent_friction");
+    assert_eq!(candidate["suggested"], json!(["tool", "guard"]));
     assert_eq!(candidate["record_ids"].as_array().unwrap().len(), 12);
     assert_eq!(candidate["occurrences"], 12);
     assert_eq!(candidate["evidence"]["texts"].as_array().unwrap().len(), 10);
@@ -319,7 +387,8 @@ fn retrospect_counts_each_repeated_title_once_in_cluster_occurrences() {
 
     let retrospect = retrospect_success(&run_file(&file, &["retrospect"]), 1);
     let candidate = &retrospect.data["candidates"][0];
-    assert_eq!(candidate["type"], "wrapper_alias");
+    assert_eq!(candidate["pattern"], "recurrent_friction");
+    assert_eq!(candidate["suggested"], json!(["tool", "guard"]));
     assert_eq!(candidate["record_ids"].as_array().unwrap().len(), 3);
     // One distinct normalized title with a global count of 3, not 3 x 3.
     assert_eq!(candidate["occurrences"], 3);
@@ -421,11 +490,15 @@ fn schema_documents_retrospect_and_its_no_window_posture() {
     assert_eq!(retrospect["flags"], json!({}));
     assert_eq!(
         retrospect["output"],
-        "{candidates:[{type,title,program?,record_ids,resolved_anchor_ids?,occurrences,first_ts,last_ts,evidence:{texts:[...],resolution_notes:[...]}}],count,scanned}"
+        "{candidates:[{pattern,suggested,title,program?,record_ids,resolved_anchor_ids?,occurrences,first_ts,last_ts,evidence:{texts:[...],resolution_notes:[...]}}],count,scanned}"
     );
     assert_eq!(
-        retrospect["candidate_types"],
-        json!(["wrapper_alias", "doc_repair", "skill_candidate"])
+        retrospect["patterns"],
+        json!(["recurrent_friction", "failed_intervention"])
+    );
+    assert_eq!(
+        retrospect["suggested_values"],
+        json!(["doc", "skill", "guard", "test", "tool", "process"])
     );
     assert!(
         retrospect["semantics"]

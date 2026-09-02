@@ -1062,7 +1062,7 @@ Why. The field carried one constant, `graduate`, from the era when the only imag
 
 #### The linkage ceiling is a Phase 5 gate
 
-r44's local-rarity ceiling, `max(2, ceil(N / 4))`, stands as normative text. Before contract 6 ships, its precision is **measured, not assumed**: linked pairs over several representative logs, after the admission floor, with the count of pairs that share no friction recorded beside the count that do. If unrelated clusters are still produced materially, the ceiling is reshaped by a further amendment in the same release and this clause records the numbers that justified it; if not, the numbers are recorded in TASK-71 and the ceiling stays. The gate exists because `retrospect` consumes the same clustering at a threshold of two linked records, so a false rare-token link is no longer a cosmetic triage defect but an input to the promotion layer. Fixture-scale behaviour is a constraint on any reshaping: the N=2 reworded-repeat case must still link.
+r44's local-rarity ceiling, `max(2, ceil(N / 4))`, stands as normative text (reshaped by r53). Before contract 6 ships, its precision is **measured, not assumed**: linked pairs over several representative logs, after the admission floor, with the count of pairs that share no friction recorded beside the count that do. If unrelated clusters are still produced materially, the ceiling is reshaped by a further amendment in the same release and this clause records the numbers that justified it; if not, the numbers are recorded in TASK-71 and the ceiling stays. The gate exists because `retrospect` consumes the same clustering at a threshold of two linked records, so a false rare-token link is no longer a cosmetic triage defect but an input to the promotion layer. Fixture-scale behaviour is a constraint on any reshaping: the N=2 reworded-repeat case must still link.
 
 ### r52 (2026-09-02, design language: promotion is a trust boundary, recurrence is correlated evidence, `verify` reports a negative result)
 
@@ -1089,3 +1089,31 @@ Why. Xiong et al. (ACL 2026, `2026.acl-long.27`) find that "future task evaluati
 #### What this amendment does not change
 
 The admission floor (r48) stands on its policy direction, not on an effect size, and this amendment adds no evidence for its magnitude. The strongest dissent found in the same pass, Databricks' 2026-04-10 memory-scaling result (raw conversation logs filtered by an LLM judge rising past an expert-curated instruction set), still selects — the judge is the admission step — and shows automated admission beating hand curation for a retrieval memory, not unfiltered retention beating either; blotter refuses the automated judge on policy grounds recorded in r48 and Non-goals, and its cuts are claims about a repository, not retrievable task memory. The dissent is recorded so the next reader does not mistake the floor for a settled empirical result.
+
+### r53 (2026-09-02, corrective: the local-rarity ceiling is `max(2, ceil(N / 16))`)
+
+Corrective: envelope `meta.contract` stays 6, and no record shape, envelope member, exit code or command changes. It supersedes the ceiling value in r19 and r44's local-rarity rule and discharges r51's Phase 5 gate. Every other rule of r19, r44 and r48–r52 stands as written. Prompted by the gate measurement recorded in `docs/research/2026-09-02-task71-linkage-precision.md` (TASK-71, TASK-77).
+
+#### The rule
+
+A token is locally rare when it occurs in no more than **`max(2, ceil(N / 16))`** candidates, counted as r19 counts them. Three shared locally rare tokens still link two candidates whose tags match; the overlap-coefficient path, the stopword list, the token filter, the exact-title rule and the tag precondition are unchanged. The floor of 2 stands: a token shared by the two candidates under test always has document frequency at least 2, and below N = 32 the ceiling is the floor, so on a small log a shared token counts only when it occurs in no other open cut.
+
+#### The numbers that justified it
+
+Measured with the contract-5 binary over five v1 logs (the v2 binary refuses them; the linkage rules are identical), every linked pair hand-judged as the same friction or not:
+
+| divisor | linked pairs | related | unrelated | unrelated share | related clusters (of 11): intact / reduced / lost |
+|---|---:|---:|---:|---:|---|
+| 4 (r44) | 71 | 23 | 48 | 67.6% | 11 / 0 / 0 |
+| 8 | 50 | 21 | 29 | 58.0% | 10 / 1 / 0 |
+| **16** | 29 | 19 | 10 | 34.5% | 6 / 2 / 3 |
+| 32 | 15 | 10 | 5 | 33.3% | 3 / 2 / 6 |
+| constant ceiling 2 | 7 | 4 | 3 | 42.9% | 2 / 2 / 7 |
+| constant ceiling 3 | 11 | 6 | 5 | 45.5% | 3 / 3 / 5 |
+| idf-weighted sum, best threshold | 39 | 21 | 18 | 46.2% | 8 / 2 / 1 |
+
+The worst clusters under r44 were same-tag cuts sharing three generic domain tokens (`backlog`/`task`, `clippy`/`gate`/`test`, `test`/`fixture`) that described different defects. Two thirds of what the rule linked was not the same friction, and under r52 a false link at `retrospect`'s two-record threshold is an input to the trust boundary, so the share was material and the ceiling is reshaped rather than kept. Divisor 16 removes 79% of the unrelated pairs for 17% of the related ones. Divisor 32 and the constant ceilings lose half or more of the related clusters for no useful gain in precision. The weighted sum reaches worse precision than divisor 16, needs the candidate index reworked to match it, and is complexity the simplicity bar does not buy for that result. The residual third is same-tag cuts sharing specific domain vocabulary; it is the limit of a lexical rule on logs written before the r48 admission floor, and a v2 log is expected to be cleaner without being clean.
+
+Fixture-scale behaviour is unchanged by construction: the N=2 reworded-repeat case still links under the floor, and no existing test in the tree depends on a ceiling above the floor, which is why a new test pins the value — a corpus where a token occurring in one further open cut was rare under divisor 4 and is not under divisor 16.
+
+`schema`'s `triage` semantics keep stating the rule as "3 shared locally rare tokens"; the README states the ceiling with the new divisor. The gate clause in r51 is discharged and TASK-71 closes with this amendment.

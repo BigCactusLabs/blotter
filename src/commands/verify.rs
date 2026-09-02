@@ -74,7 +74,16 @@ fn is_verify_eligible(item: &ListItem) -> bool {
                 .resolution
                 .as_ref()
                 .expect("resolved folded items have a resolution");
-            !resolution.dropped && !triage::normalized_title(&item.text).is_empty()
+            // r48/r52: anchors are resolved cuts whose winning disposition is
+            // fixed or promoted. accepted and invalid resolved cuts are never
+            // anchors — accepted tolerates the friction on purpose, and
+            // invalid says it was never friction at all.
+            !resolution.dropped
+                && !triage::normalized_title(&item.text).is_empty()
+                && matches!(
+                    resolution.disposition,
+                    Some(crate::Disposition::Fixed) | Some(crate::Disposition::Promoted)
+                )
         }
     }
 }

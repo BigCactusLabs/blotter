@@ -48,6 +48,16 @@ pub enum Disposition {
     Invalid,
 }
 
+/// The two `retrospect` candidate patterns (r48/r51). Pattern detection and
+/// suggested intervention are separate axes: a pattern names what was
+/// observed, `suggested` names what kind of artifact might answer it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Pattern {
+    RecurrentFriction,
+    FailedIntervention,
+}
+
 /// The closed promotion artifact vocabulary (r48). An unrecognized
 /// `--artifact-type` is rejected by clap as `invalid_argument`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]

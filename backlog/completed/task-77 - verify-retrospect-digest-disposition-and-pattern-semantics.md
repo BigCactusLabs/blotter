@@ -1,10 +1,10 @@
 ---
 id: TASK-77
 title: verify/retrospect/digest disposition and pattern semantics
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-02 20:38'
+updated_date: '2026-09-02 21:23'
 labels:
   - v2
 dependencies:
@@ -35,4 +35,6 @@ r49 review correction: accepted_cuts is shaped {count}, like new_cuts and open_d
 - r52 (2026-09-02): verify's documentation, schema description and --format md text state an empty recurrence set as 'no recurrence observed after disposition_ts' — evidence the intervention held, never 'fixed', 'confirmed' or 'proven'. No envelope change. Land the schema wording in this PR with the disposition_ts boundary. README's retrospect paragraph (line ~182) still uses r27 vocabulary (wrapper_alias/doc_repair/skill_candidate); update it with the pattern/suggested change.
 
 2026-09-02: TASK-79 landed on its own as PR #25 rather than inside this PR. Already done there: disposition_ts boundary, resolution{disposition,disposition_ts}, schema/README verify wording per r52. Still in scope here: anchor eligibility (fixed|promoted only), retrospect pattern/suggested[], digest accepted_cuts, suggested_action removal, TASK-71 gate, README retrospect paragraph.
+
+2026-09-02: landed as the TASK-77 PR into v2 together with the r53 ceiling fix (TASK-71). Anchor eligibility fixed|promoted, retrospect pattern/suggested[], digest accepted_cuts, suggested_action removed, README/CHANGELOG/schema updated.
 <!-- SECTION:NOTES:END -->

@@ -24,7 +24,6 @@ pub struct TriageCluster {
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<crate::Origin>,
-    pub suggested_action: String,
 }
 
 #[derive(Clone)]
@@ -597,12 +596,12 @@ pub(crate) fn normalized_title(text: &str) -> String {
 /// dropped as dead weight — a two-character token never reaches this check.
 ///
 /// Frequency cannot do this job at fixture scale. `is_rare` accepts
-/// `df <= max(2, ceil(N/4))`, a token shared by the two candidates under test
+/// `df <= max(2, ceil(N/16))`, a token shared by the two candidates under test
 /// always has `df >= 2`, and the floor of 2 exists because a lower floor would
 /// make no shared token rare and retire the path. In a four-candidate analysis
 /// every shared token is rare, so no ratio separates filler from content there.
 /// A common English word is removable as a word at every scale, and as a
-/// frequency only at some. See design doc r44.
+/// frequency only at some. See design doc r44, superseded on the divisor by r53.
 ///
 /// Sorted and unique; `scoring_tokens` binary-searches it.
 const STOPWORDS: &[&str] = &[
@@ -790,7 +789,7 @@ impl CorpusFrequencies {
     }
 
     fn is_rare(&self, token: &str) -> bool {
-        let rare_limit = self.candidate_count.div_ceil(4).max(2);
+        let rare_limit = self.candidate_count.div_ceil(16).max(2);
         self.token_counts
             .get(token)
             .copied()
@@ -899,7 +898,6 @@ fn materialize_cluster(cluster: &ChronicCluster) -> TriageCluster {
         tags: tags.into_iter().collect(),
         text: latest.item.text.clone(),
         origin: latest.item.origin.clone(),
-        suggested_action: "graduate".into(),
     }
 }
 
