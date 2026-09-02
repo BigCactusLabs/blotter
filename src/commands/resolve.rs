@@ -191,9 +191,6 @@ pub fn run(
             }
             Ok(promotion)
         };
-        for item in &items {
-            link(item)?;
-        }
         let already_resolved_ids: Vec<_> = if amend {
             Vec::new()
         } else {
@@ -203,6 +200,15 @@ pub fn run(
                 .map(|(id, _)| id.clone())
                 .collect()
         };
+        // Only the records that will actually carry an event: a non-amend
+        // resolve of an already-resolved cut is an idempotent no-op, and r48
+        // scopes the rule to "every cut being resolved".
+        for item in items
+            .iter()
+            .filter(|item| amend || item.status == ItemStatus::Open)
+        {
+            link(item)?;
+        }
         let mut changed = false;
         if !dry_run {
             let mut events = Vec::new();
