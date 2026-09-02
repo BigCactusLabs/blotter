@@ -485,7 +485,7 @@ pub(crate) fn chronic_clusters(items: Vec<ListItem>, min_count: usize) -> Chroni
     let scanned = candidates.len();
     let frequencies = corpus_frequencies(candidates.iter());
     // Count every folded open cut by title. This is a recurrence signal, not
-    // an ID deduplication pass, so independently materialized pc_/bl_ records
+    // an ID deduplication pass, so two independently materialized records
     // both contribute when their normalized titles match.
     let mut title_occurrences = BTreeMap::new();
     for candidate in &candidates {
