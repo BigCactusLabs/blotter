@@ -510,7 +510,9 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
                     } else {
                         records.insert(id.clone(), scanned.raw.to_vec());
                     }
-                    record_kinds.insert(id, "cut");
+                    // The fold keeps the first record for an ID, so the kind a
+                    // later resolve is judged against is the first one too.
+                    record_kinds.entry(id).or_insert("cut");
                 }
                 LogEvent::Dogear {
                     id,
@@ -553,7 +555,9 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
                     } else {
                         records.insert(id.clone(), scanned.raw.to_vec());
                     }
-                    record_kinds.insert(id, "dogear");
+                    // The fold keeps the first record for an ID, so the kind a
+                    // later resolve is judged against is the first one too.
+                    record_kinds.entry(id).or_insert("dogear");
                 }
                 LogEvent::Resolve { .. } => resolves.push((line, event)),
                 LogEvent::Unknown => unreachable!("scanner classifies unknown events"),

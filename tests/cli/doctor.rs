@@ -43,6 +43,38 @@ fn doctor_accepts_amend_for_existing_resolved_record() {
     assert!(doctor.data.healthy);
 }
 
+/// A resolve is judged against the kind of the **first** record carrying its
+/// ID, because that is the record the fold materializes. A later same-ID
+/// record of the other kind is an `id_conflict`, never a reason to call a
+/// valid resolution invalid.
+#[test]
+fn doctor_judges_a_resolve_against_the_first_record_kind() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "first record wins");
+    let id = cut.data.record.cut_id().to_owned();
+    let dogear = format!(
+        "{{\"v\":2,\"kind\":\"dogear\",\"id\":\"{id}\",\"ts\":\"2026-09-02T00:00:00.000Z\",\"agent\":\"tester\",\"text\":\"same id, other kind\",\"tags\":[],\"cwd\":\".\"}}"
+    );
+    append_lines(&file, &[dogear]);
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &["resolve", "--disposition", "fixed", &id],
+    ));
+
+    let output = run_file(&file, &["doctor"]);
+    assert_eq!(output.status.code(), Some(1));
+    let doctor: SuccessEnvelope<DoctorData> = serde_json::from_slice(&output.stdout).unwrap();
+    let kinds: Vec<&str> = doctor
+        .data
+        .findings
+        .iter()
+        .map(|f| f.kind.as_str())
+        .collect();
+    assert!(kinds.contains(&"id_conflict"), "{kinds:?}");
+    assert!(!kinds.contains(&"invalid_resolution"), "{kinds:?}");
+}
+
 /// The two halves of design doc r36: an amend with no base resolve anywhere in
 /// the log is a diagnose-only `orphan_resolve`, and a base resolve appearing
 /// after the amend clears both the finding and the fold's orphan warning.
