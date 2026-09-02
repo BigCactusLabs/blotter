@@ -448,3 +448,70 @@ fn schema_documents_promote() {
     assert_eq!(identity["hash"], "SHA-256 first 10 bytes");
     assert!(identity["excluded"].as_str().unwrap().contains("note"));
 }
+
+#[test]
+fn a_dry_run_over_a_duplicate_reports_both_warnings() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let cut = add_at(&file, "2026-07-01T00:00:00Z", "friction", &[]);
+    let cut = cut.data.record.cut_id().to_owned();
+    let args = [
+        "--source",
+        cut.as_str(),
+        "--artifact-type",
+        "doc",
+        "--artifact-ref",
+        "docs/x.md",
+    ];
+    let applied: SuccessEnvelope<PromoteData> = success(&promote(&file, &args));
+    assert!(applied.data.changed);
+    let before = std::fs::read(&file).unwrap();
+
+    // The dry run folds, finds the duplicate, and returns the existing record.
+    // Reporting only "dry run" would say `changed:false` with no reason and
+    // promise something the apply would not produce.
+    let dry: SuccessEnvelope<PromoteData> =
+        success(&promote(&file, &[&args[..], &["--dry-run"]].concat()));
+    assert!(!dry.data.changed);
+    assert_eq!(dry.data.record, applied.data.record);
+    assert_eq!(
+        dry.meta.warnings,
+        [
+            "duplicate promotion; existing record returned",
+            "dry run; no record appended"
+        ]
+    );
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+
+    // The apply reports the duplicate alone.
+    let again: SuccessEnvelope<PromoteData> = success(&promote(&file, &args));
+    assert_eq!(
+        again.meta.warnings,
+        ["duplicate promotion; existing record returned"]
+    );
+}
+
+#[test]
+fn an_apply_against_a_missing_log_is_not_found_and_creates_nothing() {
+    let temp = TempDir::new().unwrap();
+    let missing = temp.path().join("missing.jsonl");
+    // A promotion cannot be the first record in a log — it needs a cut to cite —
+    // so `promote` never creates one, on either lane.
+    error(
+        &promote(
+            &missing,
+            &[
+                "--source",
+                "abcd",
+                "--artifact-type",
+                "doc",
+                "--artifact-ref",
+                "docs/x.md",
+            ],
+        ),
+        66,
+        "not_found",
+    );
+    assert!(!missing.exists());
+    assert!(directory_entries(temp.path()).is_empty());
+}

@@ -501,3 +501,44 @@ fn markdown_renders_promotions_after_dogears() {
     );
     assert_eq!(lines.len(), promotions + 4);
 }
+
+/// The union is untagged, so serde picks its arm structurally rather than from
+/// the `kind` string. Disjointness is what makes that safe, and it is pinned
+/// here rather than assumed: only a lifecycle record carries `status`, and only
+/// a promotion carries `sources`.
+#[test]
+fn the_items_union_arms_are_structurally_disjoint() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    mixed_log(&file);
+
+    let raw: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &["list", "--kind", "all", "--status", "all"],
+    ));
+    let items = raw.data["items"].as_array().unwrap();
+    let cut = items
+        .iter()
+        .find(|item| item["kind"] == "cut")
+        .unwrap()
+        .clone();
+    let promotion = items
+        .iter()
+        .find(|item| item["kind"] == "promotion")
+        .unwrap()
+        .clone();
+
+    // Each arm deserializes only as itself.
+    assert!(serde_json::from_value::<ListItem>(cut.clone()).is_ok());
+    assert!(serde_json::from_value::<PromotionItem>(cut.clone()).is_err());
+    assert!(serde_json::from_value::<PromotionItem>(promotion.clone()).is_ok());
+    assert!(serde_json::from_value::<ListItem>(promotion.clone()).is_err());
+
+    // And the union routes each to the arm its shape names, with `Record` tried
+    // first, so a promotion that fell through to it would be caught here.
+    let entries: Vec<ListEntry> = serde_json::from_value(json!([cut, promotion])).unwrap();
+    assert!(entries[0].as_record().is_some());
+    assert!(entries[0].as_promotion().is_none());
+    assert!(entries[1].as_promotion().is_some());
+    assert!(entries[1].as_record().is_none());
+}

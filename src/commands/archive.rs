@@ -178,6 +178,13 @@ fn plan_archive(bytes: &[u8], cutoff: Timestamp) -> ArchivePlan {
     // would turn a durable artifact's justification into a dangling ID.
     // Promotions themselves have no state to close, so they are never in
     // `closed_ids` and never archive.
+    //
+    // The set is built from every source ID with no kind check. r48 scopes the
+    // pin to a resolved cut, and only a hand-written promotion can name a
+    // dogear — `doctor` already reports that as `dangling_source` — so the one
+    // divergence is over-retaining that dogear's group, which is the
+    // conservative direction and costs a rule the code would otherwise state
+    // twice.
     let pinned = folded
         .promotions
         .iter()

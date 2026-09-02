@@ -2012,40 +2012,41 @@ fn the_fold_discards_resolve_events_breaking_the_promotion_rules() {
     assert!(invalid[2].message.contains("does not name this record"));
 }
 
-/// The mutual-link rule is scoped to the cuts that actually carry an event
-/// (r48): a non-amend resolve of an already-resolved cut is an idempotent no-op,
-/// so it is warned about, not refused.
+/// The mutual-link rule is decided over the **named** set (r48): it carries "the
+/// same all-or-nothing shape as the mixed-kind rejection", and that sibling rule
+/// fires on a named record that is already resolved and will append nothing.
 #[test]
-fn an_already_resolved_cut_does_not_trip_the_mutual_link_rule() {
+fn an_already_resolved_named_cut_still_trips_the_mutual_link_rule() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("log.jsonl");
     let (cut, promotion) = cut_and_promotion(&file);
     let other = add_at(&file, "2026-07-03T00:00:00Z", "unnamed friction", &[]);
     let other = other.data.record.cut_id().to_owned();
     resolve_at(&file, "2026-07-05T00:00:00Z", &other, &["--agent", "fixer"]);
+    let before = std::fs::read(&file).unwrap();
 
-    let resolved: SuccessEnvelope<ResolveData> = success(&run_file(
-        &file,
-        &[
-            "resolve",
-            &cut,
-            &other,
-            "--disposition",
-            "promoted",
-            "--promotion",
-            &promotion,
-            "--agent",
-            "fixer",
-        ],
-    ));
-    assert!(resolved.data.changed);
-    assert!(
-        resolved.meta.warnings[0].starts_with("already resolved:"),
-        "{:?}",
-        resolved.meta.warnings
+    // `other` is already resolved and would carry no event, but the promotion
+    // never cited it, so the whole batch is refused and the cut it did cite is
+    // not resolved either.
+    let envelope = error(
+        &run_file(
+            &file,
+            &[
+                "resolve",
+                &cut,
+                &other,
+                "--disposition",
+                "promoted",
+                "--promotion",
+                &promotion,
+                "--agent",
+                "fixer",
+            ],
+        ),
+        2,
+        "invalid_argument",
     );
-    let stored = std::fs::read_to_string(&file).unwrap();
-    let event: Value = serde_json::from_str(stored.lines().next_back().unwrap()).unwrap();
-    assert_eq!(event["id"], cut.as_str());
-    assert_eq!(event["promotion"], promotion.as_str());
+    assert!(envelope.error.message.contains(&other));
+    assert!(envelope.error.message.contains(&promotion));
+    assert_eq!(std::fs::read(&file).unwrap(), before);
 }

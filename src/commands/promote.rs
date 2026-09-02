@@ -56,7 +56,11 @@ pub fn run(
     // Read → fold → validate → append inside one critical section, after the
     // version probe. Unlike `add --dry-run`, a dry run opens the log: validating
     // every `--source` requires the fold (r48).
-    let action = |log: &mut std::fs::File| -> AppResult<(bool, LogEvent)> {
+    // `(changed, duplicate, record)`. The two facts are independent: a dry run
+    // that folds onto an existing ID has found a duplicate and must say so, or
+    // the plan would report `changed:false` with no reason and promise
+    // something the apply would not produce (r31).
+    let action = |log: &mut std::fs::File| -> AppResult<(bool, bool, LogEvent)> {
         let bytes = store::read_bytes(log, &resolved.path)?;
         store::check_version(&bytes, &resolved.path)?;
         let folded = store::fold_bytes(&bytes);
@@ -99,19 +103,22 @@ pub fn run(
         // existing record returned, nothing appended.
         if let Some(existing) = folded.record(id) {
             return match existing {
-                LogEvent::Promotion { .. } => Ok((false, existing.clone())),
+                LogEvent::Promotion { .. } => Ok((false, true, existing.clone())),
+                // `store::append_unique` answers a cut/dogear ID colliding with
+                // another kind exactly this way; the wording follows its
+                // `{kind} ID collides with an existing non-{kind} record`.
                 _ => Err(AppError::internal(
                     "promotion ID collides with an existing non-promotion record",
                 )),
             };
         }
         if dry_run {
-            return Ok((false, record));
+            return Ok((false, false, record));
         }
         store::append_json(log, &resolved.path, &bytes, &record)?;
-        Ok((true, record))
+        Ok((true, false, record))
     };
-    let (changed, record) = if dry_run {
+    let (changed, duplicate, record) = if dry_run {
         store::with_shared(&resolved.path, action)
     } else {
         store::with_exclusive(&resolved.path, false, action)
@@ -121,11 +128,14 @@ pub fn run(
     meta.file = Some(resolved.path.to_string_lossy().into_owned());
     meta.agent_source = Some(agent_source.into());
     meta.warnings = resolved.warnings.clone();
-    if dry_run {
-        meta.warnings.push("dry run; no record appended".into());
-    } else if !changed {
+    // Both, in this order, on a dry run over a duplicate — the shape
+    // `resolve --dry-run` already uses for an already-resolved ID.
+    if duplicate {
         meta.warnings
             .push("duplicate promotion; existing record returned".into());
+    }
+    if dry_run {
+        meta.warnings.push("dry run; no record appended".into());
     }
     output::write_success(PromoteData { changed, record }, pretty, meta)
         .map_err(|error| AppError::from_io(error, Path::new("stdout")))?;

@@ -200,13 +200,12 @@ pub fn run(
                 .map(|(id, _)| id.clone())
                 .collect()
         };
-        // Only the records that will actually carry an event: a non-amend
-        // resolve of an already-resolved cut is an idempotent no-op, and r48
-        // scopes the rule to "every cut being resolved".
-        for item in items
-            .iter()
-            .filter(|item| amend || item.status == ItemStatus::Open)
-        {
+        // The **named** set, not the set that will carry an event. r48 gives
+        // this rule "the same all-or-nothing shape as the mixed-kind
+        // rejection", and both named precedents — the mixed cut/dogear batch
+        // and the missing `--disposition` — fire on a named record that is
+        // already resolved and will append nothing.
+        for item in &items {
             link(item)?;
         }
         let mut changed = false;
