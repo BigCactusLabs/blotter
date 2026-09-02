@@ -80,4 +80,5 @@ This is distinct from the backlog (`backlog/` — real tracked work) and from do
 - Deterministic: same input + `BLOTTER_NOW` → byte-identical output.
 - Empty results are exit 0. Not-found IDs are 66. Lock timeout is 75 + `retryable:true`.
 - Cut-only list output stays cut-only unless `--kind dogear`, `--kind promotion`, or `--kind all` is explicit; dogear and promotion records have no impact, and a promotion has no status, no resolution, and is never a resolve target.
+- Promotion is an explicit trust boundary: `retrospect` and `triage` are read-only and never append a `promotion`; `promote` is the only writer of one, and no command, hook or default calls it. Recurrence is evidence a reader judges, never a threshold that promotes (design doc r52).
 - Every stored line carries `"v":2` as its first member and no envelope ever materializes it. Every path that opens a log runs the version probe under the lock it already holds, before the fold and before any byte is written; a log holding a known-kind record without `"v":2` is refused whole and left byte-identical.
