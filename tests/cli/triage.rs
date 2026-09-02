@@ -443,12 +443,7 @@ fn schema_documents_triage() {
         triage["flags"]["--min-count"],
         "N; default 3; must be at least 2"
     );
-    assert!(
-        triage["flags"]["--include-auto"]
-            .as_str()
-            .unwrap()
-            .contains("include records tagged auto")
-    );
+    assert!(triage["flags"].get("--include-auto").is_none());
     assert_eq!(
         triage["output"],
         "{clusters:[{count,occurrences,ids,tags,text,source?,suggested_action}],count,scanned}"

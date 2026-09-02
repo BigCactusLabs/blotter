@@ -218,7 +218,7 @@ fn normalize_prefix(input: &str) -> AppResult<IdPrefix> {
     if hex.len() < 4 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(AppError::invalid_argument(
             format!("invalid cut ID prefix '{input}'"),
-            "Use `blotter list --status all --include-auto` and pass at least 4 hexadecimal digits, with optional bl_ or pc_ prefix.",
+            "Use `blotter list --status all` and pass at least 4 hexadecimal digits, with optional bl_ or pc_ prefix.",
         ));
     }
     Ok(IdPrefix {
@@ -246,7 +246,7 @@ fn match_id(prefix: &IdPrefix, items: &[ListItem]) -> AppResult<String> {
     match candidates.as_slice() {
         [] => Err(AppError::not_found(
             format!("no cut matches ID prefix '{}'", prefix.hex),
-            "Run `blotter list --status all --include-auto` and retry with a listed ID.",
+            "Run `blotter list --status all` and retry with a listed ID.",
         )),
         [id] => Ok(id.clone()),
         _ => Err(AppError::ambiguous_id(&prefix.hex, candidates)),

@@ -274,7 +274,7 @@ fn every_command_success_envelope_deserializes() {
     assert_eq!(doctor.data.checked_lines, 2);
 
     let schema: SuccessEnvelope<Value> = success(&run(&["schema"]));
-    assert_eq!(schema.data["contract"], 5);
+    assert_eq!(schema.data["contract"], 6);
     assert_eq!(schema.data["exit_codes"]["74"], "I/O error");
     assert_eq!(schema.data["commands"]["doctor"]["read_only"], true);
     assert!(
@@ -434,7 +434,6 @@ fn stdout_write_failures_are_structured_for_all_output_paths() {
             .env("BLOTTER_NOW", NOW)
             .env_remove("BLOTTER_FILE")
             .env_remove("BLOTTER_AGENT")
-            .env_remove("BLOTTER_HOOK_EXPLAIN")
             .env_remove("PAPERCUTS_FILE")
             .env_remove("PAPERCUTS_AGENT")
             .env_remove("PAPERCUTS_NOW")
@@ -526,7 +525,7 @@ fn structured_error_exit_matrix_and_help_exceptions() {
             .output()
             .unwrap(),
     );
-    assert_eq!(schema.data["contract"], 5);
+    assert_eq!(schema.data["contract"], 6);
     error(
         &command()
             .env("BLOTTER_NOW", "not-a-time")
@@ -986,7 +985,7 @@ fn invalid_since_is_reported_before_the_log_file_for_every_command() {
 
 #[cfg(unix)]
 #[test]
-fn non_utf8_blotter_agent_is_a_config_error_and_never_files_a_detected_agent() {
+fn non_utf8_blotter_agent_and_removed_hook_are_rejected_before_filing() {
     use std::os::unix::ffi::OsStrExt;
 
     let temp = TempDir::new().unwrap();
@@ -1004,8 +1003,6 @@ fn non_utf8_blotter_agent_is_a_config_error_and_never_files_a_detected_agent() {
     assert!(envelope.error.message.contains("BLOTTER_AGENT"));
     assert!(!file.exists());
 
-    // The retired hook receiver still fails open: it resolves no agent at all (r32).
-    std::fs::write(&file, "").unwrap();
     let hook = command()
         .env("BLOTTER_AGENT", agent)
         .arg("--file")
@@ -1014,8 +1011,11 @@ fn non_utf8_blotter_agent_is_a_config_error_and_never_files_a_detected_agent() {
         .write_stdin("{}")
         .output()
         .unwrap();
-    assert_eq!(hook.status.code(), Some(0));
-    assert!(hook.stdout.is_empty());
-    assert!(hook.stderr.is_empty());
-    assert!(std::fs::read_to_string(&file).unwrap().is_empty());
+    let stderr = String::from_utf8_lossy(&hook.stderr);
+    assert!(
+        stderr.contains("unrecognized subcommand 'hook'"),
+        "{stderr}"
+    );
+    error(&hook, 2, "invalid_argument");
+    assert!(!file.exists());
 }

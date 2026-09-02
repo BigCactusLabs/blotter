@@ -1,14 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.0] - Unreleased
 
 ### Removed
 
-- The Claude Code auto-capture lane is retired (design doc r32). `blotter hook install claude-code` is removed and `blotter hook exec claude-code` no longer files cuts. Over roughly ten days of dogfooding the lane filed 27 captures and nothing ever read them: r17 hid them from `list`, `triage`, `digest`, `verify`, `sweep`, and `export` by default, and `retrospect` — the one command that opts in — mined nothing from them, because r29's own measurement already showed the captures were one-shot novelty rather than repetition. What the lane stored was a failed command line with no statement of why the failure mattered, and no gate can turn a non-zero exit into that claim. Retiring it also closes the write path most likely to store an unredacted local path or secret, the full fold taken inside the exclusive lock on every failed Bash call in a host session, and the settings entry naming an absolute executable path that drifts when the binary moves.
-
-  Read-side `auto` filtering is unchanged: the log is append-only, so `is_auto_capture`, the default exclusion on those six commands, `--include-auto`, `--tag auto` implying `--include-auto` on `list`, and `retrospect`'s inverted default all stay exactly as written and now describe stored history. `source` is still readable and opaque; no command writes it.
-
-  `blotter hook exec claude-code` survives as a no-op receiver, because a settings file installed against an older binary keeps firing that exact command line and a clap rejection there would put a usage error and a non-zero exit into a host session's hook channel — which the lane's fail-open rule forbids. It reads and discards stdin under the same 1 MiB bound, resolves no clock, opens no log, takes no lock, resolves no agent, writes nothing, and always exits 0 with empty stdout; `BLOTTER_HOOK_EXPLAIN=1` writes one stderr line naming the retirement. `hook install` is the opposite case — a deliberate operator invocation whose purpose was to create the installation being retired — so it is removed outright and exits 2. Delete the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from your Claude Code settings; blotter no longer writes another program's configuration at all.
+- **Breaking:** `meta.contract` is now 6. `--include-auto` is removed from `list`, `triage`, `digest`, `verify`, `sweep`, and `export`; `auto` is a plain tag, so default reads now include those records.
+- The `hook` subcommand is removed.
+- **Mandatory upgrade:** Before upgrading, remove the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from Claude Code settings. Otherwise every failed tool call surfaces a Clap usage error (exit 2) in the host session.
 
 ### Added
 

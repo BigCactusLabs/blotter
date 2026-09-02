@@ -734,7 +734,7 @@ fn resolve_prefix_errors_and_idempotence_are_structured() {
     assert_eq!(unknown.error.message, "no cut matches ID prefix 'deadbeef'");
     assert_eq!(
         unknown.error.suggested_fix,
-        "Run `blotter list --status all --include-auto` and retry with a listed ID."
+        "Run `blotter list --status all` and retry with a listed ID."
     );
 
     let missing = temp.path().join("missing.jsonl");

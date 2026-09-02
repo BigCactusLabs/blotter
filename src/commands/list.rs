@@ -33,15 +33,6 @@ pub fn run(args: ListArgs, file: Option<PathBuf>, pretty: bool, now: Timestamp) 
         items,
         mut warnings,
     } = store::load_folded(&resolved)?;
-    let include_auto = args.include_auto || args.tag.as_deref() == Some("auto");
-    let (items, auto_captures) = crate::partition_auto_captures(items, include_auto);
-    let hidden = auto_captures
-        .iter()
-        .filter(|item| matches_filters(item, &args, since.as_ref()))
-        .count();
-    if hidden > 0 {
-        warnings.push(crate::auto_capture_warning(hidden));
-    }
     let mut items: Vec<_> = items
         .into_iter()
         .filter(|item| matches_filters(item, &args, since.as_ref()))

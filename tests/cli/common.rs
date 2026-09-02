@@ -88,7 +88,6 @@ pub fn spawn_command() -> std::process::Command {
         .env("BLOTTER_NOW", NOW)
         .env_remove("BLOTTER_FILE")
         .env_remove("BLOTTER_AGENT")
-        .env_remove("BLOTTER_HOOK_EXPLAIN")
         .env_remove("PAPERCUTS_FILE")
         .env_remove("PAPERCUTS_AGENT")
         .env_remove("PAPERCUTS_NOW")
@@ -150,7 +149,7 @@ pub fn error(output: &std::process::Output, exit: i32, code: &str) -> ErrorEnvel
     assert!(!envelope.ok);
     assert_eq!(envelope.error.code, code);
     assert!(!envelope.error.suggested_fix.is_empty());
-    assert_eq!(envelope.meta.contract, 5);
+    assert_eq!(envelope.meta.contract, 6);
     envelope
 }
 

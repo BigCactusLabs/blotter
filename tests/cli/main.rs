@@ -7,14 +7,12 @@ mod common;
 
 mod add;
 mod archive;
-mod auto_capture;
 mod contract;
 mod digest;
 mod docs;
 mod doctor;
 mod dogear;
 mod export;
-mod hook;
 mod legacy;
 mod list;
 mod redaction;
