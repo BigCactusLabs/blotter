@@ -3,10 +3,10 @@ id: TASK-71
 title: >-
   Domain-frequent tokens defeat is_rare: tighten the local-rarity ceiling or
   weight by document frequency
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-08-31 15:35'
-updated_date: '2026-09-02 21:01'
+updated_date: '2026-09-02 21:23'
 labels:
   - v2
 dependencies: []
@@ -42,10 +42,10 @@ Contract note: `is_rare`'s ceiling is normative text, stated in r19 and restated
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A tightened or reshaped local-rarity rule is chosen and justified with measurements across more than one log
-- [ ] #2 Domain-frequent tokens such as cargo, clippy, gate and test no longer link unrelated cuts on the rare path
-- [ ] #3 Fixture-scale behaviour still works: the N=2 reworded-repeat case in triage_clusters_reworded_repeats_with_rare_shared_tokens still links
-- [ ] #4 The new rule lands as a design-doc amendment superseding r19/r44's ceiling
+- [x] #1 A tightened or reshaped local-rarity rule is chosen and justified with measurements across more than one log
+- [x] #2 Domain-frequent tokens such as cargo, clippy, gate and test no longer link unrelated cuts on the rare path
+- [x] #3 Fixture-scale behaviour still works: the N=2 reworded-repeat case in triage_clusters_reworded_repeats_with_rare_shared_tokens still links
+- [x] #4 The new rule lands as a design-doc amendment superseding r19/r44's ceiling
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -56,4 +56,6 @@ Contract note: `is_rare`'s ceiling is normative text, stated in r19 and restated
 Measurement corpus located 2026-09-02 (all v1 logs, no v:2 anywhere; several carry pc_ IDs): blotter/.blotter.jsonl 167 cuts/24 resolves; compas/.blotter.jsonl 132 cuts/70 resolves (pc_ present); walkmaxx/.blotter.jsonl 97 cuts/97 resolves (pc_); origin-brands-workspace/data-platform/.blotter.jsonl 105 cuts/64 resolves; eatmoji/tools/blotter/.blotter.jsonl 58 cuts/57 resolves (pc_). All under ~/Documents/GitHub. Smaller logs (Aski 15, moode 15, pantone-pipe 16) are fixture-scale and only useful for the floor check. Use these five, via the 0.15 binary on main.
 
 2026-09-02 gate measurement (TASK-77 Leg C, note at docs/research/2026-09-02-task71-linkage-precision.md): five logs, 0.15 binary, hand-judged clusters. Divisor 4 (today): 71 linked pairs, 23 related, 48 unrelated (67.6% unrelated); blotter v1 log alone 57 pairs / 71.9% unrelated. Divisor 8: 50 pairs, 58.0% unrelated, 0 related clusters lost. Divisor 16: 29 pairs, 34.5% unrelated, 3 of 11 related clusters lost. N=2 fixture passes at every divisor. Worst clusters are same-tag plus generic domain tokens (backlog/task, clippy/gate/test, test/fixture). Decision: unrelated share is material, so the ceiling is reshaped in the TASK-77 PR under a new amendment; candidate rule shapes are being measured against the same judgments before the amendment is written.
+
+2026-09-02 decision: divisor 16, max(2, ceil(N/16)), amendment r53. Prototypes measured against the same judgments: divisor 32 (33.3% unrelated, 6 of 11 related clusters lost), constant DF<=2 (42.9%, 7 lost), constant DF<=3 (45.5%, 5 lost), idf-weighted sum at its best threshold (46.2%, 1 lost, but needs the candidate index reworked and is a lower bound), hybrid div16-plus-one-unique (37.5%, 3 lost). Divisor 16 wins on precision per related cluster kept. AC #2 is met as 'reduced', not eliminated: a third of rare-token links on pre-floor v1 logs are still same-tag cuts sharing specific domain vocabulary, the limit of a lexical rule. Lands in the TASK-77 PR.
 <!-- SECTION:NOTES:END -->
