@@ -54,10 +54,25 @@ fn archive_dogear(ts: &str, text: &str) -> (String, Vec<u8>) {
 
 /// A resolve line for the archive fixtures. A resolve targeting a cut must
 /// carry `disposition` and `disposition_ts` or the fold discards it as invalid
-/// and the group never closes, so the helper supplies them for cut IDs. The
-/// three `bl2` digest widths are what tell the kinds apart by ID, and a
-/// non-`bl_` ID is only ever an orphan here, where validity is never evaluated.
+/// and the group never closes; a resolve targeting a dogear must carry neither.
+/// Every v2 identity is one width (r51), so the kind cannot be read off the ID
+/// and the caller states it. A non-`bl_` ID is only ever an orphan here, where
+/// validity is never evaluated.
 fn archive_resolution(id: &str, ts: &str, dropped: bool, amend: bool) -> Vec<u8> {
+    archive_resolution_of(id, ts, dropped, amend, true)
+}
+
+fn archive_dogear_resolution(id: &str, ts: &str, dropped: bool, amend: bool) -> Vec<u8> {
+    archive_resolution_of(id, ts, dropped, amend, false)
+}
+
+fn archive_resolution_of(
+    id: &str,
+    ts: &str,
+    dropped: bool,
+    amend: bool,
+    disposition: bool,
+) -> Vec<u8> {
     let mut value = json!({
         "v": 2,
         "kind": "resolve",
@@ -68,7 +83,7 @@ fn archive_resolution(id: &str, ts: &str, dropped: bool, amend: bool) -> Vec<u8>
         "dropped": dropped,
         "amend": amend
     });
-    if id.len() != "bl_".len() + 20 {
+    if disposition {
         value["disposition"] = json!("fixed");
         value["disposition_ts"] = json!(ts);
     }
@@ -106,7 +121,7 @@ fn archive_removes_only_closed_wholly_old_current_groups() {
     let (_, old_open_cut) = archive_cut("2026-07-01T00:00:00Z", "old open cut");
 
     let (old_dogear_id, old_dogear) = archive_dogear("2026-07-01T00:00:00Z", "old resolved dogear");
-    let old_drop = archive_resolution(&old_dogear_id, "2026-07-02T00:00:00Z", false, false);
+    let old_drop = archive_dogear_resolution(&old_dogear_id, "2026-07-02T00:00:00Z", false, false);
 
     let (_, cutoff_cut) = archive_cut("2026-07-01T00:00:00Z", "cutoff is exclusive");
     let cutoff_id = compute_id(
@@ -118,7 +133,12 @@ fn archive_removes_only_closed_wholly_old_current_groups() {
     );
     let cutoff_resolve = archive_resolution(&cutoff_id, cutoff, false, false);
 
-    let orphan = archive_resolution("bl_deadbeef0000", "2026-07-01T00:00:00Z", false, false);
+    let orphan = archive_resolution(
+        "bl_deadbeef000000000000",
+        "2026-07-01T00:00:00Z",
+        false,
+        false,
+    );
     let malformed = b"not json\n".to_vec();
     let unknown = archive_jsonl(json!({"v":2,"kind":"future","ts":"2026-07-01T00:00:00Z"}));
     let foreign = archive_jsonl(json!({

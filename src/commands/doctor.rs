@@ -864,7 +864,7 @@ mod tests {
             b"\n".to_vec(),
             b"not-json\n".to_vec(),
             b"not-json".to_vec(),
-            format!("\n{}\nnot-json\n", cut("bl_aaaaaaaaaaaa")).into_bytes(),
+            format!("\n{}\nnot-json\n", cut("bl_aaaaaaaaaaaaaaaaaaaa")).into_bytes(),
             format!("not-json\n{}\n{}\n", cut("bl_a"), cut("bl_a")).into_bytes(),
             format!("{}\nnot-json\n{}\n", cut("bl_a"), cut("bl_a")).into_bytes(),
             format!("{}\n{}\nnot-json", cut("bl_a"), resolve("bl_b")).into_bytes(),

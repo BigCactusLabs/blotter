@@ -232,18 +232,16 @@ pub fn resolve_at(file: &Path, now: &str, id: &str, args: &[&str]) -> SuccessEnv
     success(&cmd.output().unwrap())
 }
 
-/// A hand-written resolve line. A resolve targeting a cut must carry
-/// `disposition` and `disposition_ts` or the fold discards it as invalid, so the
-/// helper supplies them for cut-width IDs; a dogear-width ID must not carry one.
+/// A resolve line for a **cut**: it carries `disposition` and `disposition_ts`,
+/// without which the fold discards it as invalid. Every v2 identity is one
+/// width (r51), so the kind cannot be read off the ID.
 pub fn resolve_line(id: &str, ts: &str, note: &str, amend: bool) -> String {
     let mut value = json!({"v":2,"kind":"resolve","id":id,"ts":ts,"agent":"fixer","note":note});
     if amend {
         value["amend"] = json!(true);
     }
-    if id.len() != "bl_".len() + 20 {
-        value["disposition"] = json!("fixed");
-        value["disposition_ts"] = json!(ts);
-    }
+    value["disposition"] = json!("fixed");
+    value["disposition_ts"] = json!(ts);
     value.to_string()
 }
 

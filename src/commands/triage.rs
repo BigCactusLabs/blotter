@@ -951,7 +951,7 @@ mod tests {
         let normalized_title = normalized_title(text);
         let item = ListItem {
             kind: "cut".into(),
-            id: format!("bl_{index:012x}"),
+            id: format!("bl_{index:020x}"),
             ts: timestamp.clone(),
             agent: "test".into(),
             text: text.into(),

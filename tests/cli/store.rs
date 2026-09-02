@@ -358,7 +358,7 @@ fn hash_length_prefix_and_tag_sort_are_pinned() {
         Impact::Material,
         &["z".into(), "a".into()],
     );
-    assert_eq!(a, "bl_edc887c6923d");
+    assert_eq!(a, "bl_edc887c6923de81fabd7");
     assert_eq!(a, unsorted);
     assert_ne!(a, b);
 }
@@ -676,7 +676,7 @@ fn a_log_without_a_known_kind_passes_the_probe() {
     let file = temp.path().join("cuts.jsonl");
     std::fs::write(
         &file,
-        "not json\n{\"kind\":\"future\"}\n{\"id\":\"bl_aaaaaaaaaaaa\"}\n{\"kind\":",
+        "not json\n{\"kind\":\"future\"}\n{\"id\":\"bl_aaaaaaaaaaaaaaaaaaaa\"}\n{\"kind\":",
     )
     .unwrap();
 

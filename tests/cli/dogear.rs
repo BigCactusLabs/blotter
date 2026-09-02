@@ -200,9 +200,10 @@ fn dogear_and_cut_ids_are_collision_safe_across_tag_boundaries_and_namespaces() 
     let cut_one_comma_tag = compute_id(ts, "x", "t", Impact::Low, &["a,b".into()]);
     assert_ne!(cut_two_tags, cut_one_comma_tag);
 
-    // Dogear ids are 80-bit (bl_ + 20 hex) and, being a different length from
-    // the 48-bit cut id, can never collide with the cut namespace.
+    // Every v2 identity is 80-bit (bl_ + 20 hex, r51). The kinds are kept apart
+    // by the `bl2` literal and the kind field inside the hash, not by width, so
+    // a cut and a dogear over the same fields still differ.
     assert_eq!(two_tags.len(), 3 + 20);
-    assert_eq!(cut_two_tags.len(), 3 + 12);
+    assert_eq!(cut_two_tags.len(), 3 + 20);
     assert_ne!(two_tags, cut_two_tags);
 }

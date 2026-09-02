@@ -860,7 +860,7 @@ fn resolve_prefix_errors_and_idempotence_are_structured() {
     );
 
     let ambiguous = temp.path().join("ambiguous.jsonl");
-    let lines = ["bl_abcd00000000", "bl_abcd11111111"]
+    let lines = ["bl_abcd0000000000000000", "bl_abcd1111111111111111"]
         .map(|id| {
             json!({"v":2,"kind":"cut","id":id,"ts":"2026-07-09T00:00:00.000Z","agent":"a","text":id,"tags":[],"impact":"low","cwd":"/tmp","repo":null}).to_string()
         })
@@ -874,7 +874,7 @@ fn resolve_prefix_errors_and_idempotence_are_structured() {
     );
     assert_eq!(
         envelope.error.details["candidates"],
-        json!(["bl_abcd00000000", "bl_abcd11111111"])
+        json!(["bl_abcd0000000000000000", "bl_abcd1111111111111111"])
     );
 }
 
@@ -1137,7 +1137,7 @@ fn multi_resolve_with_ambiguous_prefix_is_atomic_and_returns_sorted_candidates()
         .record
         .cut_id()
         .to_owned();
-    let ambiguous = ["bl_abcd11111111", "bl_abcd00000000"]
+    let ambiguous = ["bl_abcd1111111111111111", "bl_abcd0000000000000000"]
         .map(|id| {
             json!({"v":2,"kind":"cut","id":id,"ts":"2026-07-09T00:00:00.000Z","agent":"a","text":id,"tags":[],"impact":"low","cwd":"/tmp","repo":null}).to_string()
         })
@@ -1157,7 +1157,7 @@ fn multi_resolve_with_ambiguous_prefix_is_atomic_and_returns_sorted_candidates()
     );
     assert_eq!(
         envelope.error.details["candidates"],
-        json!(["bl_abcd00000000", "bl_abcd11111111"])
+        json!(["bl_abcd0000000000000000", "bl_abcd1111111111111111"])
     );
     assert_eq!(std::fs::read(&file).unwrap(), before);
 }
@@ -1721,7 +1721,7 @@ fn duplicate_and_orphan_counts_run_over_valid_events_only() {
     // An orphan carrying a disposition with no disposition_ts joins to no
     // record, so it is an orphan and never invalid.
     let orphan = json!({
-        "v": 2, "kind": "resolve", "id": "bl_deadbeef0000",
+        "v": 2, "kind": "resolve", "id": "bl_deadbeef000000000000",
         "ts": "2026-07-09T18:20:00.000Z", "agent": "fixture", "note": null,
         "disposition": "fixed"
     });

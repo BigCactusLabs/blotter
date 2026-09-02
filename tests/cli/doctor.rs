@@ -7,7 +7,7 @@ fn doctor_reports_orphan_amend_for_unknown_record() {
     let orphan_amend = json!({
         "v": 2,
         "kind": "resolve",
-        "id": "bl_deadbeef0000",
+        "id": "bl_deadbeef000000000000",
         "ts": "2026-07-09T18:30:00.123Z",
         "agent": "fixture",
         "note": "unknown record amend",
@@ -161,11 +161,11 @@ fn doctor_reports_all_core_findings_and_recomputed_ids() {
     let file = temp.path().join("cuts.jsonl");
     let good = add(&file, "valid").data.record;
     let good_line = std::fs::read_to_string(&file).unwrap();
-    let bad_id = json!({"v":2,"kind":"cut","id":"bl_000000000000","ts":good.cut_ts(),"agent":"tester","text":"bad","tags":[],"impact":"low","cwd":"/tmp","repo":null});
+    let bad_id = json!({"v":2,"kind":"cut","id":"bl_00000000000000000000","ts":good.cut_ts(),"agent":"tester","text":"bad","tags":[],"impact":"low","cwd":"/tmp","repo":null});
     let mut writer = OpenOptions::new().append(true).open(&file).unwrap();
     writeln!(writer, "{good_line}{}", bad_id).unwrap();
     writeln!(writer, "{{\"kind\":\"future\"}}").unwrap();
-    writeln!(writer, "{{\"v\":2,\"kind\":\"resolve\",\"id\":\"bl_deadbeef0000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
+    writeln!(writer, "{{\"v\":2,\"kind\":\"resolve\",\"id\":\"bl_deadbeef000000000000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
     writeln!(writer, "<<<<<<< HEAD").unwrap();
     write!(writer, "{{\"kind\":").unwrap();
     drop(writer);
@@ -311,7 +311,7 @@ fn doctor_fix_leaves_diagnose_only_findings_unchanged() {
     let bad_id = json!({
         "v": 2,
         "kind": "cut",
-        "id": "bl_000000000000",
+        "id": "bl_00000000000000000000",
         "ts": good.cut_ts(),
         "agent": "tester",
         "text": "bad",
@@ -323,7 +323,7 @@ fn doctor_fix_leaves_diagnose_only_findings_unchanged() {
     let mut writer = OpenOptions::new().append(true).open(&file).unwrap();
     writer.write_all(good_line.as_bytes()).unwrap();
     writeln!(writer, "{{\"kind\":\"future\"}}").unwrap();
-    writeln!(writer, "{{\"v\":2,\"kind\":\"resolve\",\"id\":\"bl_deadbeef0000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
+    writeln!(writer, "{{\"v\":2,\"kind\":\"resolve\",\"id\":\"bl_deadbeef000000000000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
     writeln!(writer, "{bad_id}").unwrap();
     drop(writer);
     let before = std::fs::read(&file).unwrap();
@@ -582,7 +582,7 @@ fn doctor_finding_counts_match_fold_bytes_warning_counts() {
     let malformed = json!({
         "v": 2,
         "kind": "cut",
-        "id": "bl_000000000000",
+        "id": "bl_00000000000000000000",
         "ts": "not-a-time",
         "agent": "a",
         "text": "malformed",
@@ -608,7 +608,7 @@ fn doctor_finding_counts_match_fold_bytes_warning_counts() {
     let orphan = json!({
         "v": 2,
         "kind": "resolve",
-        "id": "bl_deadbeef0000",
+        "id": "bl_deadbeef000000000000",
         "ts": "2026-07-09T00:00:00.000Z",
         "agent": "a",
         "note": null

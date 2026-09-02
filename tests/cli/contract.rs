@@ -947,7 +947,7 @@ fn shared_empty_state_preserves_warnings_suggested_fixes_and_doctor_file_state()
 #[test]
 fn tagged_event_serialization_preserves_record_field_order() {
     let cut = LogEvent::Cut {
-        id: "bl_123456789abc".into(),
+        id: "bl_123456789abcdef01234".into(),
         ts: "2026-08-01T00:00:00.000Z".into(),
         agent: "fixture".into(),
         text: "cut".into(),
@@ -964,7 +964,7 @@ fn tagged_event_serialization_preserves_record_field_order() {
     };
     assert_eq!(
         serde_json::to_string(&cut).unwrap(),
-        r#"{"kind":"cut","id":"bl_123456789abc","ts":"2026-08-01T00:00:00.000Z","agent":"fixture","text":"cut","tags":["a"],"impact":"material","cwd":".","origin":{"type":"agent"},"evidence":{"cmd":"cmd","exit":7,"stderr":"stderr","note":"note"}}"#,
+        r#"{"kind":"cut","id":"bl_123456789abcdef01234","ts":"2026-08-01T00:00:00.000Z","agent":"fixture","text":"cut","tags":["a"],"impact":"material","cwd":".","origin":{"type":"agent"},"evidence":{"cmd":"cmd","exit":7,"stderr":"stderr","note":"note"}}"#,
     );
 
     let dogear = LogEvent::Dogear {
@@ -983,7 +983,7 @@ fn tagged_event_serialization_preserves_record_field_order() {
     );
 
     let resolve = LogEvent::Resolve {
-        id: "bl_123456789abc".into(),
+        id: "bl_123456789abcdef01234".into(),
         ts: "2026-08-03T00:00:00.000Z".into(),
         agent: "fixture".into(),
         note: None,
@@ -998,7 +998,7 @@ fn tagged_event_serialization_preserves_record_field_order() {
     };
     assert_eq!(
         serde_json::to_string(&resolve).unwrap(),
-        r##"{"kind":"resolve","id":"bl_123456789abc","ts":"2026-08-03T00:00:00.000Z","agent":"fixture","note":null,"task":"TASK-16","pr":"#16","commit":"deadbeef","url":"https://example.test","dropped":true,"disposition":"fixed","disposition_ts":"2026-08-03T00:00:00.000Z"}"##,
+        r##"{"kind":"resolve","id":"bl_123456789abcdef01234","ts":"2026-08-03T00:00:00.000Z","agent":"fixture","note":null,"task":"TASK-16","pr":"#16","commit":"deadbeef","url":"https://example.test","dropped":true,"disposition":"fixed","disposition_ts":"2026-08-03T00:00:00.000Z"}"##,
     );
     assert_eq!(
         serde_json::from_str::<LogEvent>(r#"{"kind":"future","extra":true}"#).unwrap(),
@@ -1147,7 +1147,7 @@ fn error_envelope_matrix() {
     std::fs::create_dir_all(&outside).unwrap();
 
     let ambiguous = temp.path().join("ambiguous.jsonl");
-    let lines = ["bl_abcd00000000", "bl_abcd11111111"]
+    let lines = ["bl_abcd0000000000000000", "bl_abcd1111111111111111"]
         .map(|id| {
             json!({"v":2,"kind":"cut","id":id,"ts":"2026-07-09T00:00:00.000Z","agent":"a","text":id,"tags":[],"impact":"low","cwd":"/tmp","repo":null}).to_string()
         })
@@ -1438,4 +1438,43 @@ fn schema_publishes_the_authored_exit_65_description() {
     let codes: SuccessEnvelope<Value> = success(&run(&["schema", "error"]));
     let codes = codes.data["errors"]["codes"].as_array().unwrap();
     assert!(codes.contains(&json!("unsupported_log_version")));
+}
+
+/// r51: every v2 identity is the first 10 bytes of its `bl2` digest, rendered
+/// as `bl_` plus 20 lowercase hex. One width for every kind, so no full ID is
+/// ever a proper prefix of another, and `schema` publishes no narrower one.
+#[test]
+fn every_v2_identity_is_twenty_hex() {
+    fn assert_twenty_hex(id: &str) {
+        let hex = id
+            .strip_prefix("bl_")
+            .unwrap_or_else(|| panic!("id {id} does not start with bl_"));
+        assert_eq!(hex.len(), 20, "id {id} is not 20 hex digits");
+        assert!(
+            hex.chars()
+                .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)),
+            "id {id} is not lowercase hex"
+        );
+    }
+
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add_at(&file, "2026-07-09T18:30:00.123Z", "a cut", &["tooling"]);
+    assert_twenty_hex(cut.data.record.cut_id());
+    let dogear = dogear_at(&file, "2026-07-09T18:30:01.123Z", "an idea", &["tooling"]);
+    assert_twenty_hex(dogear.data["record"]["id"].as_str().unwrap());
+
+    let schema: SuccessEnvelope<Value> = success(&run(&["schema"]));
+    let published = serde_json::to_string(&schema.data).unwrap();
+    assert!(
+        !published.contains("12 lowercase hex"),
+        "schema still publishes a 12-hex identity width"
+    );
+    assert_eq!(schema.data["id"]["cut"]["hex_digits"], 20);
+    assert_eq!(schema.data["id"]["cut"]["hash"], "SHA-256 first 10 bytes");
+    assert_eq!(schema.data["id"]["dogear"]["hex_digits"], 20);
+    assert_eq!(
+        schema.data["id"]["dogear"]["hash"],
+        "SHA-256 first 10 bytes"
+    );
 }

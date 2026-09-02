@@ -9,7 +9,7 @@ Agents hit friction constantly and silently push through; the signal evaporates.
 
 ```
 $ blotter add "yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web" --tag tooling
-{"ok":true,"data":{"changed":true,"record":{"kind":"cut","id":"bl_9f2c41d0a8b3","ts":"2026-07-09T21:14:03.412Z","agent":"claude-code","text":"yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web","tags":["tooling"],"impact":"low","cwd":"apps/web","origin":{"type":"agent"}}},"meta":{"contract":6,"file":"/repo/.blotter.jsonl","agent_source":"detected"}}
+{"ok":true,"data":{"changed":true,"record":{"kind":"cut","id":"bl_9f2c41d0a8b39f2c41d0","ts":"2026-07-09T21:14:03.412Z","agent":"claude-code","text":"yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web","tags":["tooling"],"impact":"low","cwd":"apps/web","origin":{"type":"agent"}}},"meta":{"contract":6,"file":"/repo/.blotter.jsonl","agent_source":"detected"}}
 
 $ blotter dogear "The retry-backoff pattern in our fetch helper would make a good standalone write-up" --tag research
 ```
@@ -114,7 +114,7 @@ The base resolve is still in the log, as always. It is the materialized view tha
 
 `resolve` always returns a `data.records` array, including when only one ID is resolved. New records omit `repo`; their `cwd` is relative to the discovered repository root when possible, and otherwise goes through the same home-path rewrite as evidence — the exact `$HOME`, a generic `/Users/<user>` or `/home/<user>`, and the dash-encoded slug harness scratchpad paths embed all become `~`, so a stored `cwd` does not trip `doctor --leaks`. A resolution `--note` goes through that rewrite too, as does a dogear's `--evidence`, so no field blotter invites you to fill can trip its own gate.
 
-Every record carries a `bl_`-prefixed ID under the one `bl2` namespace, and an ID argument is an optional `bl_` plus at least four hexadecimal digits, matched case-insensitively. A prefix that matches nothing is `not_found`; one that matches several records is `ambiguous_id` listing every match, with no exact-full-ID precedence.
+Every record carries a `bl_`-prefixed ID under the one `bl2` namespace — `bl_` plus 20 lowercase hex, one width for every record kind — and an ID argument is an optional `bl_` plus at least four hexadecimal digits, matched case-insensitively. A prefix that matches nothing is `not_found`; one that matches several records is `ambiguous_id` listing every match, with no exact-full-ID precedence.
 
 Every resolution of a cut also names its fate: `--disposition fixed|promoted|accepted|invalid` is required for a cut and rejected for a dogear, so a batch naming both is rejected before anything is appended. `fixed` and `promoted` are recurrence anchors; `accepted` is friction deliberately tolerated and `invalid` says the cut was never friction. An `--amend` may change the disposition and otherwise inherits it, along with `disposition_ts` — the moment the classification was made, which a note-only correction does not move.
 

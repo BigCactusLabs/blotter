@@ -60,7 +60,7 @@ def content_id(fields, digest_bytes):
 def cut_id(ts, agent, text, impact, tags):
     tags = normalized_tags(tags)
     return content_id(
-        ["bl2", "cut", ts, agent, text, impact, str(len(tags)), *tags], 6
+        ["bl2", "cut", ts, agent, text, impact, str(len(tags)), *tags], 10
     )
 
 
