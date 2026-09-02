@@ -3,10 +3,10 @@ id: TASK-75
 title: >-
   Record model break: severity to impact, structured origin, resolution
   disposition, v: 2
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-02 03:29'
+updated_date: '2026-09-02 05:33'
 labels:
   - v2
   - breaking
