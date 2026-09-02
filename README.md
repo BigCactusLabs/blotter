@@ -159,7 +159,7 @@ Sources are cuts only, open or resolved — a promotion records where learning c
 
 ## Triage
 
-`triage` is a read-only scan of open cuts. Cuts whose normalized titles are identical always link, regardless of tags. Otherwise, cuts must share a tag (or both be untagged), then link from filtered tokens: 80% overlap with the shorter token set, or at least three shared tokens that appear in no more than `max(2, ceil(scanned / 4))` open cuts. Filtering removes tokens of two characters or fewer, the Snowball English stopword list normalized the same way tokens are, and four retained filler words the Snowball list omits: `need`, `one`, `use`, `uses`. Only clusters that meet the threshold are reported; resolved cuts and dogears are excluded. Each cluster carries `occurrences` — how many open cuts share the normalized title of the cluster's displayed `text`. The JSON output suggests `graduate` for each chronic cluster, and exit 1 means at least one was found.
+`triage` is a read-only scan of open cuts. Cuts whose normalized titles are identical always link, regardless of tags. Otherwise, cuts must share a tag (or both be untagged), then link from filtered tokens: 80% overlap with the shorter token set, or at least three shared tokens that appear in no more than `max(2, ceil(scanned / 4))` open cuts. Filtering removes tokens of two characters or fewer, the Snowball English stopword list normalized the same way tokens are, and four retained filler words the Snowball list omits: `need`, `one`, `use`, `uses`. Only clusters that meet the threshold are reported; resolved cuts and dogears are excluded. Each cluster carries `occurrences` — how many open cuts share the normalized title of the cluster's displayed `text`. Exit 1 means at least one was found.
 
 ```bash
 blotter triage --min-count 3
@@ -169,7 +169,7 @@ blotter triage --min-count 3
 
 ## Verify
 
-`verify` is a read-only check for cuts that reappear after they were resolved. Each eligible resolved cut is an anchor. A later open cut recurs when it matches under the same exact-title, tag, and filtered-token linkage rules as `triage`. Dogears, dropped resolutions, and blank normalized resolved titles are ignored. One open cut can be reported against more than one resolved anchor.
+`verify` is a read-only check for cuts that reappear after they were resolved. An anchor is a resolved cut whose winning disposition is `fixed` or `promoted`: `accepted` is excluded because tolerating the friction was the deliberate decision, not a claimed fix, and `invalid` is excluded because it says the anchor was never friction at all. A later open cut recurs when it matches under the same exact-title, tag, and filtered-token linkage rules as `triage`. Dogears, dropped resolutions, and blank normalized resolved titles are ignored. One open cut can be reported against more than one resolved anchor.
 
 ```bash
 blotter verify
@@ -181,7 +181,7 @@ The "later" boundary is the winning resolution's `disposition_ts` — the moment
 
 ## Retrospect
 
-`retrospect` is a read-only mining pass over one log. It asks a different question than `triage`: not "what keeps hurting" but "what has hurt often enough to be worth building something for". It reuses triage's clustering and verify's recurrence rules unchanged, then types the result by evidence shape. A chronic cluster becomes a `wrapper_alias` candidate when half or more of its members share one failing leading program, or a `doc_repair` candidate when half or more are tagged `docs` or `documentation`; the wrapper type wins when both match. Every recurrence group of two or more members becomes a `skill_candidate`, because a cut that was resolved and came back is a recovery worth capturing. A cluster that matches no rule emits nothing and stays an ordinary cut.
+`retrospect` is a read-only mining pass over one log. It asks a different question than `triage`: not "what keeps hurting" but "what has hurt often enough to be worth building something for". It reuses triage's clustering and verify's recurrence rules unchanged, then judges each result on two separate axes: what `pattern` the evidence shows, and what kind of artifact is `suggested` to answer it. A chronic cluster is a `recurrent_friction` pattern; within it, a cluster where half or more of its members share one failing leading program suggests `["tool","guard"]`, and one where half or more are tagged `docs` or `documentation` suggests `["doc"]` — the program rule wins when both match, deciding what is suggested, not the pattern. Every recurrence group of two or more members under verify's anchor rules is a `failed_intervention` pattern, suggesting `["skill"]`, because a cut that was resolved and came back is a recovery worth capturing. Only these two patterns ship. A cluster that matches no rule emits nothing and stays an ordinary cut.
 
 ```bash
 blotter retrospect
@@ -195,7 +195,7 @@ Retrospect never writes anything — no doc, no skill, no alias, and no record i
 
 ## Digest
 
-`digest` is the periodic read-only report: what keeps recurring, what is new, and what ideas are waiting. It combines three views — chronic clusters (the triage analysis at a threshold of 2), open cuts filed inside the window grouped by tag, and all open dogears.
+`digest` is the periodic read-only report: what keeps recurring, what is new, and what ideas are waiting. It combines three views — chronic clusters (the triage analysis at a threshold of 2), open cuts filed inside the window grouped by tag, and all open dogears. The JSON envelope also carries `accepted_cuts: {count}` — cuts whose winning disposition is `accepted` and whose `disposition_ts` falls inside the window. `--format md` renders nothing for it; `accepted` is the one disposition that hides friction on purpose, and a bare count keeps that hide rate visible.
 
 ```bash
 blotter digest --since 7d              # JSON envelope, default window
