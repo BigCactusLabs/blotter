@@ -24,7 +24,6 @@ pub struct TriageCluster {
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub origin: Option<crate::Origin>,
-    pub suggested_action: String,
 }
 
 #[derive(Clone)]
@@ -899,7 +898,6 @@ fn materialize_cluster(cluster: &ChronicCluster) -> TriageCluster {
         tags: tags.into_iter().collect(),
         text: latest.item.text.clone(),
         origin: latest.item.origin.clone(),
-        suggested_action: "graduate".into(),
     }
 }
 

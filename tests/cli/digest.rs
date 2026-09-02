@@ -72,7 +72,6 @@ fn digest_json_reports_chronic_windowed_cuts_and_open_dogears() {
                 "tags": ["api", "common"],
                 "text": "Cache config missing",
                 "origin": {"type":"agent"},
-                "suggested_action": "graduate",
             }],
             "new_cuts": {
                 "count": 3,
@@ -91,6 +90,7 @@ fn digest_json_reports_chronic_windowed_cuts_and_open_dogears() {
                     "tags": ["ideas"],
                 }],
             },
+            "accepted_cuts": {"count": 0},
             "window": {
                 "since": "2026-07-02T18:30:00.123Z",
                 "until": "2026-07-09T18:30:00.123Z",
@@ -127,7 +127,6 @@ fn digest_since_excludes_old_cuts_but_keeps_them_chronic() {
             "tags": ["build"],
             "text": "Workspace cache missing",
             "origin": {"type":"agent"},
-            "suggested_action": "graduate",
         }])
     );
     assert_eq!(
@@ -141,6 +140,107 @@ fn digest_since_excludes_old_cuts_but_keeps_them_chronic() {
         digest.data["window"],
         json!({"since":"2026-07-08T18:30:00.123Z","until":"2026-07-09T18:30:00.123Z"})
     );
+}
+
+#[test]
+fn digest_accepted_cuts_counts_by_disposition_ts_window() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+
+    let inside = add_at(&file, "2026-07-03T00:00:00Z", "Accepted inside window", &[]);
+    resolve_at(
+        &file,
+        "2026-07-05T00:00:00Z",
+        inside.data.record.cut_id(),
+        &["--disposition", "accepted", "--note", "tolerated"],
+    );
+
+    let outside = add_at(
+        &file,
+        "2026-06-01T00:00:00Z",
+        "Accepted outside window",
+        &[],
+    );
+    resolve_at(
+        &file,
+        "2026-06-02T00:00:00Z",
+        outside.data.record.cut_id(),
+        &["--disposition", "accepted", "--note", "tolerated"],
+    );
+
+    let fixed = add_at(&file, "2026-07-04T00:00:00Z", "Fixed inside window", &[]);
+    resolve_at(
+        &file,
+        "2026-07-06T00:00:00Z",
+        fixed.data.record.cut_id(),
+        &["--disposition", "fixed", "--note", "done"],
+    );
+
+    let digest: SuccessEnvelope<Value> = success(&run_file(&file, &["digest"]));
+    assert_eq!(digest.data["accepted_cuts"], json!({"count": 1}));
+}
+
+#[test]
+fn digest_accepted_cuts_reads_disposition_ts_not_amend_ts() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+
+    // Accepted before the window opens; disposition_ts stays there.
+    let cut = add_at(&file, "2026-06-01T00:00:00Z", "Accepted long ago", &[]);
+    resolve_at(
+        &file,
+        "2026-06-02T00:00:00Z",
+        cut.data.record.cut_id(),
+        &["--disposition", "accepted", "--note", "tolerated"],
+    );
+
+    // A note-only amend inside the window moves ts but not disposition_ts,
+    // so it must not pull the cut into this digest.
+    resolve_at(
+        &file,
+        "2026-07-05T00:00:00Z",
+        cut.data.record.cut_id(),
+        &["--amend", "--note", "still tolerated"],
+    );
+
+    let digest: SuccessEnvelope<Value> = success(&run_file(&file, &["digest"]));
+    assert_eq!(digest.data["accepted_cuts"], json!({"count": 0}));
+
+    // Re-deciding the disposition inside the window moves disposition_ts and
+    // does count.
+    resolve_at(
+        &file,
+        "2026-07-06T00:00:00Z",
+        cut.data.record.cut_id(),
+        &[
+            "--amend",
+            "--disposition",
+            "accepted",
+            "--note",
+            "re-decided",
+        ],
+    );
+
+    let digest: SuccessEnvelope<Value> = success(&run_file(&file, &["digest"]));
+    assert_eq!(digest.data["accepted_cuts"], json!({"count": 1}));
+}
+
+#[test]
+fn digest_markdown_unchanged_for_accepted_only_log() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add_at(&file, "2026-07-03T00:00:00Z", "Accepted friction", &[]);
+    resolve_at(
+        &file,
+        "2026-07-05T00:00:00Z",
+        cut.data.record.cut_id(),
+        &["--disposition", "accepted", "--note", "tolerated"],
+    );
+
+    let output = run_file(&file, &["digest", "--format", "md"]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    assert_eq!(output.stdout, b"No friction in window.\n");
 }
 
 #[test]
@@ -254,10 +354,22 @@ fn schema_documents_digest() {
     assert!(digest["output"].as_str().unwrap().contains("new_cuts"));
     assert!(digest["output"].as_str().unwrap().contains("open_dogears"));
     assert!(
+        digest["output"]
+            .as_str()
+            .unwrap()
+            .contains("accepted_cuts:{count}")
+    );
+    assert!(
         digest["semantics"]
             .as_str()
             .unwrap()
             .contains("min_count 2")
+    );
+    assert!(
+        digest["semantics"]
+            .as_str()
+            .unwrap()
+            .contains("disposition_ts is inside the inclusive since/until window")
     );
     assert!(digest["format"]["md"].as_str().unwrap().contains("raw"));
     assert_eq!(digest["read_only"], true);
