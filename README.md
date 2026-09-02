@@ -2,7 +2,7 @@
 
 A tiny Rust CLI that gives AI agents a blotter — a desk pad for the things that don't fit in a commit. Agents jot two kinds of records into one append-only journal:
 
-- **Cuts** — friction. A dead-end tool call, a broken link, a misleading error, a footgun config. Filed at the moment it happens, with optional evidence (the failed command, its exit code, its stderr).
+- **Cuts** — friction worth keeping. A dead-end tool call, a broken link, a misleading error, a footgun config. Filed at the moment it happens, with optional evidence (the failed command, its exit code, its stderr).
 - **Dogears** — ideas. A surprising measurement, a gap in prior art, a pattern worth writing up. The page-corner you fold to come back to later.
 
 Agents hit friction constantly and silently push through; the signal evaporates. They also have ideas mid-task and drop them for the same reason. `blotter` gives both a one-line home, and gives you (or another agent) the commands to review, cluster, and act on the backlog.
@@ -92,7 +92,11 @@ Six read commands — `list`, `triage`, `verify`, `digest`, `sweep`, and `export
 
 ## Cuts
 
-A cut is one or two sentences of friction: what you were doing, what got in the way. Default severity is `minor`; `major` means it cost real time, `blocker` means it stopped the task. Tags group cuts by area; evidence flags capture the failing command without pasting it into the text.
+A cut is one or two sentences of friction: what you were doing, what got in the way. Not every stumble is a cut. Blotter is a selective ledger, not a transcript, and a cut is a claim that the friction has future value: it is **transferable** (another competent agent or user would plausibly hit it), **consequential** (it cost real time, produced incorrect work, forced retries, or stopped the task), **recurring** (small, but it has happened before, in which case one cut naming the recurrence beats three saying the same thing), **misleading** (the error pointed at the wrong cause or discouraged the correct fix), or **systemic** (a missing affordance, a documentation gap, a brittle interface, a reusable footgun). A cut must be consequential once, or meaningful because it is transferable or recurring.
+
+Skip typos, shell quoting mistakes, a bad first guess, using the wrong command or API once, a patch that missed because context was stale, a linter or compiler correctly rejecting code you just wrote, a malformed fixture authored during the task, one broad query that returned too much, and any transient mistake specific to the current run. These are execution events, not knowledge, unless recurrence or system behaviour makes them one.
+
+Severity describes consequence after that decision, not whether to file: `minor` (default) is a qualified cut with limited immediate cost, `major` cost real time or caused incorrect work, `blocker` stopped the task. A minor cut is still a cut. Tags group cuts by area; evidence flags capture the failing command without pasting it into the text.
 
 A resolution you got wrong is corrected, not rewritten: `resolve <id> --amend` appends a second resolve event carrying the corrected fields. The first non-amend resolve stays the base event, the latest amend wins the materialized view (`resolution.amended: true`), and every original byte stays in the log. `--amend` needs at least one resolution field and every named record must already be resolved.
 
@@ -256,8 +260,13 @@ Paste this into your `CLAUDE.md` / `AGENTS.md` / system prompt:
 Run `blotter list` first to see what is already known. Do not add global,
 system, or internal friction.
 
-When you hit friction during work — a dead-end tool call, a broken link, a
-misleading doc, a footgun config, a missing helper — file it before moving on:
+Blotter is a selective ledger, not a transcript. File a cut when friction
+clears the floor: another agent would plausibly hit it (transferable), it
+cost real time or produced wrong work (consequential), it has happened
+before (recurring), the error pointed at the wrong cause (misleading), or
+it reveals a doc gap, a brittle interface, or a footgun (systemic). Skip
+typos, quoting slips, a bad first guess, a linter or compiler correctly
+rejecting code you just wrote, and one-off mistakes specific to this run.
 
     blotter add "<what you hit and what would have prevented it>" --tag <area>
 
@@ -266,8 +275,9 @@ it the same way:
 
     blotter dogear "<the idea>" --tag <area>
 
-Don't stop working; file it and push through. Severity: blocker if you could
-not proceed, major if you lost real time, minor (default) for a papercut. Run
+Don't stop working; file it and push through. Severity is consequence, not
+admission: blocker if you could not proceed, major if you lost real time or
+did wrong work, minor (default) for a qualified cut with limited cost. Run
 `blotter schema` once if you need the full contract. Attach `--cmd`, `--exit`,
 or `--stderr-file` when filing tool failures; never feed raw environment dumps.
 ```

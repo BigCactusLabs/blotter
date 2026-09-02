@@ -85,7 +85,7 @@ pub struct AddArgs {
         long,
         value_enum,
         default_value_t = Severity::Minor,
-        help = "How much did it hurt? blocker: could not proceed; major: lost real time; minor: a papercut"
+        help = "Consequence, not admission. blocker: could not proceed; major: lost real time or produced wrong work; minor: limited cost, still worth filing"
     )]
     pub severity: Severity,
     #[arg(

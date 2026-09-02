@@ -49,17 +49,29 @@ When a task runs through the multi-agent flow (design workers, implementer, revi
 
 ## Dogfood
 
-Important: when you hit a small friction while working here — a tool call that missed and had to be retried, a confusing or undocumented setup step, a flaky command, a stale cache, a misleading error, a non-obvious gotcha — log it in the moment:
+Important: when you hit friction while working here, log it in the moment — if it clears the admission floor. Blotter is a selective ledger, not a transcript. A cut is a claim that something in this repo got in the way and that knowing about it has future value.
 
 ```bash
 cargo run -- add "what you were doing → what got in the way" --tag <area>
 ```
 
-Some signals don't feel like friction from the inside; they still count: an error that doesn't point at the fix or blames the wrong file, a stack trace landing somewhere benign instead of the root cause, falling back to memory because the docs didn't answer, the user correcting something you got wrong. And two rules: build failures are friction, not stopping points — log and keep going; don't ask mid-run questions — log the uncertainty instead.
+**Admission.** File a cut when at least one of these is true:
 
-One or two sentences: what you were doing → what got in the way (a guess at the cause/fix is a bonus; put it in `--evidence`). Default severity is `minor` — use `--severity major` only if it cost real time, `blocker` only if it stopped the task. Do this proactively even though none of these are blocking — logged together they show where the repo needs sanding down.
+- **Transferable** — another competent agent or user would plausibly hit the same thing.
+- **Consequential** — it cost meaningful time, produced incorrect work, forced several retries or a context switch, or stopped the task.
+- **Recurring** — the same underlying friction has happened before. Small friction becomes a cut the second time, and one cut naming the recurrence beats three saying the same thing.
+- **Misleading** — an error pointed at the wrong cause, hid the real one, blamed the wrong file, or discouraged the correct fix.
+- **Systemic** — it reveals a missing affordance, a documentation gap, a brittle interface, a flaky command, or a reusable footgun.
 
-This is distinct from the backlog (`backlog/` — real tracked work) and from dogears (`cargo run -- dogear "..."` — ideas and "we should someday" thoughts, not friction). If it's a genuine bug you're going to fix now, it's a backlog task; if it merely slowed you down, it's a cut.
+In one line: a cut must be consequential once, or meaningful because it is transferable or recurring.
+
+**Skip**, unless recurrence or system behaviour makes it meaningful: typos, shell quoting mistakes, a bad first guess, using the wrong command or API once, a patch that missed because your context was stale, a linter or compiler correctly rejecting code you just wrote, a malformed fixture you authored during the task, one broad query that returned too much, and any transient tactical mistake specific to this run. These are execution events, not knowledge.
+
+Some signals that do qualify don't feel like friction from the inside: an error that doesn't point at the fix, a stack trace landing somewhere benign instead of the root cause, falling back to memory because the docs didn't answer, the user correcting something the docs or tooling let you get wrong. And two rules: build failures are friction, not stopping points — log the ones that qualify and keep going; don't ask mid-run questions — log the uncertainty instead.
+
+One or two sentences: what you were doing → what got in the way (a guess at the cause/fix is a bonus; put it in `--evidence`). Severity describes consequence, not admission: `minor` (default) is a qualified cut with limited immediate cost, `major` cost real time or produced incorrect work, `blocker` stopped the task. A minor cut is still a cut; friction that does not clear the floor is not a minor cut, it is nothing. Logged together, qualified cuts show where the repo needs sanding down.
+
+This is distinct from the backlog (`backlog/` — real tracked work) and from dogears (`cargo run -- dogear "..."` — ideas and "we should someday" thoughts, not friction). If it's a genuine bug you're going to fix now, it's a backlog task; if it merely slowed you down and clears the floor, it's a cut.
 
 ## Invariants (do not break)
 
