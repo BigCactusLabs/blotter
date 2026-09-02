@@ -465,3 +465,21 @@ fn stdin_text_at_the_read_limit_followed_by_a_newline_and_more_input_is_rejected
     );
     assert!(!file.exists());
 }
+
+#[test]
+fn add_help_states_the_admission_floor_and_skip_list() {
+    let output = command().args(["add", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    for test in [
+        "transferable",
+        "consequential",
+        "recurring",
+        "misleading",
+        "systemic",
+    ] {
+        assert!(help.contains(test), "add --help must name the {test} test");
+    }
+    assert!(help.contains("Skip one-off execution slips"));
+    assert!(help.contains("Severity records consequence, not admission"));
+}

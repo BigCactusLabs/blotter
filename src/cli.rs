@@ -43,9 +43,20 @@ impl Cli {
     }
 }
 
+const ADD_AFTER_HELP: &str = "\
+Admission: file a cut only when at least one of these holds.
+  transferable   another agent or user would plausibly hit the same thing
+  consequential  cost real time, produced wrong work, forced retries, or stopped the task
+  recurring      the same underlying friction has happened before
+  misleading     the error pointed at the wrong cause, hid it, or blamed the wrong file
+  systemic       a missing affordance, a doc gap, a brittle interface, a reusable footgun
+Skip one-off execution slips unless they recur: typos, shell quoting, a bad first guess,
+a patch that missed on stale context, a linter correctly rejecting code you just wrote,
+a malformed fixture you authored. Severity records consequence, not admission.";
+
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    #[command(alias = "log")]
+    #[command(alias = "log", after_help = ADD_AFTER_HELP)]
     Add(AddArgs),
     #[command(alias = "idea")]
     Dogear(DogearArgs),
@@ -85,7 +96,7 @@ pub struct AddArgs {
         long,
         value_enum,
         default_value_t = Severity::Minor,
-        help = "How much did it hurt? blocker: could not proceed; major: lost real time; minor: a papercut"
+        help = "Consequence, not admission. blocker: could not proceed; major: lost real time or produced wrong work; minor: limited cost, still worth filing"
     )]
     pub severity: Severity,
     #[arg(
