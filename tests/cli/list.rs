@@ -119,6 +119,43 @@ fn list_md_renders_warnings_as_trailing_note_lines() {
 }
 
 #[test]
+fn list_md_renders_multiple_warnings_in_envelope_order() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let added = add(&file, "valid markdown row");
+    let mut log = std::fs::read(&file).unwrap();
+    // A malformed physical line (complete, but not parseable JSON), followed by
+    // a torn final line (an incomplete record with no trailing newline). The
+    // fold counts these separately (`counts.malformed`, `counts.torn`), and
+    // `store::fold` emits warnings in a fixed order — torn before malformed —
+    // so this pins md-follows-envelope rather than an incidental ordering.
+    log.extend_from_slice(b"{ malformed physical line\n");
+    log.extend_from_slice(b"{\"kind\":\"cut\"");
+    std::fs::write(&file, log).unwrap();
+
+    let json_output: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
+    assert_eq!(
+        json_output.meta.warnings,
+        ["skipped 1 torn final line", "skipped 1 malformed line"]
+    );
+
+    let output = run_file(&file, &["list", "--format", "md"]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let markdown = String::from_utf8(output.stdout).unwrap();
+    let row = format!("- [{}] valid markdown row", added.data.record.cut_id());
+    let torn_note = "> note: skipped 1 torn final line\n";
+    let malformed_note = "> note: skipped 1 malformed line\n";
+    assert!(markdown.contains(&row));
+    assert!(markdown.ends_with(malformed_note), "{markdown}");
+    assert!(
+        markdown.find(torn_note).unwrap() < markdown.find(malformed_note).unwrap(),
+        "{markdown}"
+    );
+    assert!(markdown.find(torn_note).unwrap() > markdown.find(&row).unwrap());
+}
+
+#[test]
 fn list_markdown_collapses_multiline_text_into_one_bullet() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
