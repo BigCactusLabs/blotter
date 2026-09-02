@@ -6,10 +6,11 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-08-31 15:35'
-updated_date: '2026-08-31 15:36'
-labels: []
+updated_date: '2026-09-02 15:11'
+labels:
+  - v2
 dependencies: []
-ordinal: 80000
+ordinal: 86200
 ---
 
 ## Description
@@ -46,3 +47,11 @@ Contract note: `is_rare`'s ceiling is normative text, stated in r19 and restated
 - [ ] #3 Fixture-scale behaviour still works: the N=2 reworded-repeat case in triage_clusters_reworded_repeats_with_rare_shared_tokens still links
 - [ ] #4 The new rule lands as a design-doc amendment superseding r19/r44's ceiling
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-09-02 progress-review ruling: promoted from optional follow-up to a Phase 5 precision gate (dependency of TASK-77). Retrospect consumes the same clustering at a threshold of two linked records, so a bad rare-token linkage is no longer a wonky triage cluster; it becomes input to the promotion layer. Gate procedure: measure linked pairs on several representative logs, not one. Caveat: the v2 binary refuses v1 logs, and the existing dogfood logs are v1, so measure with the last 0.15 binary (main) or a throwaway copy converted to v2 for measurement only; the r44 linkage rules are identical on both. Decide fix-or-close on the numbers, and write them into this task either way.
+
+Measurement corpus located 2026-09-02 (all v1 logs, no v:2 anywhere; several carry pc_ IDs): blotter/.blotter.jsonl 167 cuts/24 resolves; compas/.blotter.jsonl 132 cuts/70 resolves (pc_ present); walkmaxx/.blotter.jsonl 97 cuts/97 resolves (pc_); origin-brands-workspace/data-platform/.blotter.jsonl 105 cuts/64 resolves; eatmoji/tools/blotter/.blotter.jsonl 58 cuts/57 resolves (pc_). All under ~/Documents/GitHub. Smaller logs (Aski 15, moode 15, pantone-pipe 16) are fixture-scale and only useful for the floor check. Use these five, via the 0.15 binary on main.
+<!-- SECTION:NOTES:END -->
