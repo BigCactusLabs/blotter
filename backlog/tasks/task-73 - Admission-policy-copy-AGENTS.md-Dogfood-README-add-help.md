@@ -1,10 +1,10 @@
 ---
 id: TASK-73
 title: 'Admission policy copy: AGENTS.md Dogfood, README, add --help'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-01 22:27'
+updated_date: '2026-09-02 00:26'
 labels:
   - v2
   - docs
