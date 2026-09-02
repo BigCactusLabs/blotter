@@ -955,3 +955,34 @@ What an operator does, once, per log: rename the old file out of the discovery p
 Why a break rather than an upcaster: event-store practice is unanimous that history is transformed on read and stored bytes stay immutable, and that is right where history is an asset. Blotter's v1 history is the exhaust this amendment exists to stop collecting — 166 cuts filed under instructions that encouraged trivial filing. An upcaster would keep the `bl1` hash, the severity map, the `pc_` namespace, and the `source` fold alive permanently to preserve it: dead code carrying noise. **The dogfood history is accepted as lost to the new binary**, and that is the point rather than the cost.
 
 Also breaking, restated for a consumer's checklist: `meta.contract` 5 → 6; `severity` gone, `impact` in its place with new values; `--severity` removed; `source` gone, `origin` in its place; `--include-auto` removed from six commands and `auto` demoted to a plain tag, so their default reads change for any log holding `auto` records; the `hook` subcommand removed, requiring the settings cleanup above; `disposition` required on every cut resolve; `pc_` IDs no longer accepted anywhere; every record ID changes, because every record hashes under `bl2`.
+
+### r49 (2026-09-01, corrective: `origin` trimmed to a seam, `digest.accepted` renamed, the upgrade refusal named as product surface)
+
+Corrective: envelope `meta.contract` stays 6. r48 is unreleased and no binary carries contract 6 yet, so this amends r48 in place before Phase 3 implements the record model. It supersedes r48's `origin` section and r48's `digest` field name; every other r48 rule stands as written. Prompted by the 2026-09-01 progress review (`docs/plans/blotter-v2-progress-review-feedback-2026-09-01.md`, §14–§16).
+
+#### `origin`, restated
+
+`origin` is an optional structured provenance object on `cut`, `dogear`, and `promotion` records. `add`, `dogear`, and `promote` write `{"type":"agent"}`. No command in 1.0.0 writes any other member or any other type.
+
+```json
+{"origin":{"type":"agent"}}
+{"origin":{"type":"<string>","provider":"<string>","ref":"<string>"}}
+```
+
+- `type` is required when `origin` is present and is a string. `agent` is the only value 1.0.0 writes; an unrecognized `type` on a stored record folds and lists unchanged, carried through as the string it is.
+- `provider` and `ref` are optional opaque strings, omitted when absent. They carry **no format, width, or cross-field rule**. Nothing in 1.0.0 writes them, validates their content, or joins on them. A later release that adds a writer states that writer's validation, redaction, and bound rules in its own amendment, as r48 does for `artifact.ref`.
+- The published-members-only promise is unchanged: only `type`, `provider`, and `ref` are materialized into any envelope. An unknown member inside a stored `origin` survives in the log's bytes and is carried into no output.
+- On read, a stored `origin` that does not deserialize to this shape — `type` absent, or a published member that is not a string — is a malformed line under the existing rule, exactly as any record that fails to parse. That is deserialization, not validation: no rule beyond the shape above exists.
+- Unchanged from r48: `origin` is never required for admission, is excluded from every hash, is carried wherever `source` was carried (`ListItem`, `triage` clusters, `digest` chronic entries, `verify` recurrences), is not emitted by `export`, and applies to dogears under the same shape.
+
+**What r49 removes, and why.** r48 reserved `trace_id`, `span_id`, and `trace_flags` under W3C Trace Context widths, with a write-side `invalid_input`, a read-side malformed-line rule for wrong widths, and a `span_id`-requires-`trace_id` rejection, on the reasoning that reserving them now avoids "another record break" later. That reasoning does not hold: `origin` is an optional object whose unknown members already survive by contract, so adding optional members in a later release is additive and breaks no record and no consumer. The reservation therefore bought nothing and cost a fold rule, a `doctor` finding class, write validation, schema text, and tests, for a field no producer writes. It was also half a specification — W3C Trace Context declares all-zero IDs invalid and r48 did not — which is what a shape reserved ahead of its producer looks like. The seam stays: `origin` exists, `type` discriminates, and `provider`/`ref` give an external source somewhere to put its identity. Trace context lands when a producer does, in the shape that producer needs.
+
+`schema` publishes `origin`'s shape as restated here and the published-members-only promise; the width, hex, and `span_id` clauses r48 listed under `schema` are withdrawn.
+
+#### `digest.accepted` → `accepted_cuts`
+
+The field r48 added to the `digest` envelope is named **`accepted_cuts`**, not `accepted`. Its definition is unchanged: an integer count of cuts whose winning resolution's disposition is `accepted` and whose `disposition_ts` falls inside the inclusive `since`/`until` window, judged by `disposition_ts` and nothing else. The name parallels `new_cuts` — both are counts of cuts, both windowed by an event timestamp — and says which of the two readings a consumer gets: cuts accepted in the period, not accepted cuts that occurred in the period. `schema` publishes `accepted_cuts` and its `disposition_ts` window rule.
+
+#### The upgrade refusal is product surface
+
+r48's `unsupported_log_version` rule is the whole of the 0.15 → 1.0.0 migration experience, so its observable surface is contract, tested as contract and not left to README prose: the error code and exit; `details.file` as the resolved path and `details.line` as the 1-based physical line; `details.found_version` present verbatim for a wrong `v` and **absent** for a missing one; `suggested_fix` naming the resolved path, instructing a rename to a path that does not yet exist followed by `blotter add`, and carrying no literal `mv`; the file byte-identical after refusal on every mutating path (`add`, `dogear`, `resolve`, `promote`, `doctor --fix`, `archive`); `doctor`'s single `unsupported_version` finding; and `sweep`'s deterministic per-log skip warning. The upgrade's second half — an installed `hook exec claude-code` — is a clap rejection (exit 2, empty stdout, stderr naming the unrecognized `hook` subcommand) and is pinned by a test in the same way, so r48's supersession of r32 stays a tested promise rather than an incidental fact. The refusal does not mention hooks: it cannot know whether one is installed, and the one error whose job is to be clear must not carry advice that is noise for most operators. The hook step lives in CHANGELOG and README, where r48 put it.

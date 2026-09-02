@@ -1,7 +1,7 @@
 # Blotter v2 — implementation plan
 
 **Date:** 2026-09-01
-**Status:** Reworked 2026-09-01 after a Codex sol review (§9). Not contract. The normative spec lands as design-doc amendment r48 in Phase 0.
+**Status:** Reworked 2026-09-01 after a Codex sol review (§9); amended the same day by r49 after the progress review (§10). Not contract. The normative spec is design-doc amendment r48 as corrected by r49.
 **Input:** `blotter-v2-signal-floor-checkpoint-2026-09-01.md` (the checkpoint). This plan turns its 18 decisions into ordered, reviewable batches.
 
 ## 1. Where the tree is today
@@ -36,7 +36,7 @@ The checkpoint's research pass validated the architecture. This pass targeted th
 
 **Migration.** Event-store practice (Marten docs, martendb.io/events/versioning) is unanimous: transform on read ("upcasting ... performed on the fly each time the event is read"), keep stored bytes immutable, and no documented one-time rewrite. That is the right answer for a store whose history is an asset. Blotter's v1 history is the exhaust the checkpoint exists to stop collecting, and an upcaster keeps the v1 hash alive forever, which is dead code by another name. The literature informs the shape of the break (immutable old file, explicit boundary), not whether to make it. Recommendation in §3. *T1/T4 consensus on mechanics; the choice is blotter's.*
 
-**Origin seam.** The right anchor is not the GenAI conventions (still provisional, with agent fields already moved or deprecated in the registry) but the Stable OTel Logs Data Model, which defines optional `TraceId`, `SpanId`, and `TraceFlags` on a log record and states "If SpanId is present TraceId SHOULD be also present." W3C Trace Context fixes the widths (32 and 16 hex characters). The `origin` shape should reserve exactly `trace_id`, `span_id`, and `trace_flags` under a provider discriminator, validate the widths when present, and never require them for admission. *T1, consensus.*
+**Origin seam.** The right anchor is not the GenAI conventions (still provisional, with agent fields already moved or deprecated in the registry) but the Stable OTel Logs Data Model, which defines optional `TraceId`, `SpanId`, and `TraceFlags` on a log record and states "If SpanId is present TraceId SHOULD be also present." W3C Trace Context fixes the widths (32 and 16 hex characters). The `origin` shape should reserve exactly `trace_id`, `span_id`, and `trace_flags` under a provider discriminator, validate the widths when present, and never require them for admission. *T1, consensus.* **Withdrawn by r49 (§10):** the widths and names are stable, but reserving them bought nothing, because optional members added to an optional object later are additive; `origin` keeps `type`, `provider?`, and `ref?` only.
 
 **Record versioning.** The sweep's one recommendation this plan had not made: put an in-band version on each record (`v: 2`). JSON Lines has no file header, so a per-record marker is the only version information a file can carry. Adopted: v2 writes it on every record and refuses records without it, so the next break has a boundary to key on. *T1 for the format constraint; the local-file design is an inference both tracks reached independently.*
 
@@ -57,7 +57,7 @@ The checkpoint leaves seven open questions for the spec. The plan pre-answers fi
 Decided 2026-09-01:
 
 - **Crate version: 1.0.0**, `meta.contract` 6. Quinn's call: the v2 model is the first stable contract.
-- **Accepted friction in triage and digest.** `accepted` cuts are resolved, so they leave open-cut views as any resolved cut does, and `verify` never anchors on them. `digest` gains no section and no listing, only one count field, `accepted`, for cuts accepted in the period. Reason: `accepted` is the one disposition that hides friction on purpose, and a count keeps the hide rate visible for near-zero code. Left to my judgment by Quinn. The period is judged by the winning resolution's timestamp, since that is when the acceptance happened; cut time and base-event time are not used.
+- **Accepted friction in triage and digest.** `accepted` cuts are resolved, so they leave open-cut views as any resolved cut does, and `verify` never anchors on them. `digest` gains no section and no listing, only one count field, `accepted_cuts` (named `accepted` until r49), for cuts accepted in the period. Reason: `accepted` is the one disposition that hides friction on purpose, and a count keeps the hide rate visible for near-zero code. Left to my judgment by Quinn. The period is judged by the winning resolution's timestamp, since that is when the acceptance happened; cut time and base-event time are not used.
 
 Decided in the 2026-09-01 review rework (§9), each a rule r48 must state:
 
@@ -104,9 +104,9 @@ Depends on: Phase 0 (r48), Phase 2 (so `auto` is gone before the fold changes). 
 Change, in one PR because they share the fold and the ID hash:
 - `severity` → `impact` with `low|material|blocking`: enum, `--impact` flag (`--severity` removed, not aliased), envelope field, list sort, export's OTLP severity map, digest/triage rendering, README/schema copy.
 - Every record carries `v: 2`; the pre-fold in-lock probe from §3 refuses a log holding records without it, on every open path (`add`, `dogear`, `resolve`, every read command, `doctor`, `archive`, `sweep` per log); `compute_id` hashes `impact` under the `bl2` framing r48 states; the v1 hash path, the `pc_` namespace, and `IdNamespace` go, including their uses in `src/commands/archive.rs`.
-- `origin` replaces `source`: `{type: "agent"}` written by `add`; optional `provider`, `trace_id`, `span_id`, `trace_flags` accepted, width-validated, and stored, but never set by any command. `origin` is carried wherever `source` is carried today: list items, triage, digest and verify output.
+- `origin` replaces `source`: `{type: "agent"}` written by `add`; optional opaque strings `provider` and `ref` are accepted and stored but never set by any command, with no validation beyond the shape (r49). `origin` is carried wherever `source` is carried today: list items, triage, digest and verify output.
 - Resolution gains `disposition: fixed|promoted|accepted|invalid` via `resolve --disposition`, required for cuts, rejected for dogears; `--amend` may change it.
-- `tests/cli/legacy.rs` is deleted. Its three `source` provenance tests are ported to a new `tests/cli/origin.rs` (declared in `main.rs`) against the structured field; only the `pc_` tests die. The v1-file-refused case and the mixed-file case go to `contract.rs`; the `doctor --fix` and `archive` refusals go to `doctor.rs` and `archive.rs`.
+- `tests/cli/legacy.rs` is deleted. Its three `source` provenance tests are ported to a new `tests/cli/origin.rs` (declared in `main.rs`) against the structured field; only the `pc_` tests die. The v1-file-refused case and the mixed-file case go to `contract.rs`; the `doctor --fix` and `archive` refusals go to `doctor.rs` and `archive.rs`. The refusal surface r49 names as product surface — code and exit, `details.file`/`line`, `found_version` present for a wrong `v` and absent for a missing one, `suggested_fix` naming the path with no literal `mv`, byte-identity after every mutating path, `doctor`'s single finding, `sweep`'s deterministic warning — is each a test, not README prose.
 - Repo tooling moves with the model: `scripts/dev/generate-scale-fixtures.py` (emits `bl1`, `severity`, no `v`), `scripts/dev/bench-baseline.sh` (`--severity`, disposition-less resolve), and `tests/fixtures/export-otlp-json-golden.jsonl` (0.15.0, severity attributes).
 Routing: full chain. implementer-opus-med in a worktree (silent-failure domain: persistence, identity); pr-reviewer-xhigh on the diff plus `codex review` for the cross-model axis. `gate-5x.sh` required. A pre-implementation critique of the r48 identity rules happens in Phase 0, not here.
 Tests: `contract.rs` for the exit matrix, envelope shape, and the v1-file refusal with a byte-identical file afterwards; `doctor.rs` for the non-fixable `unsupported_version` finding and the `--fix` refusal; `store.rs` for no tear-heal on a refused file.
@@ -124,7 +124,7 @@ Depends on: Phase 3 and 4. Last PR into `v2`.
 Change:
 - `verify`: anchors are resolved cuts with disposition `fixed` or `promoted` only; `accepted` and `invalid` are excluded and named in `schema`. Envelope adds `disposition` to `resolution{}`.
 - `retrospect`: candidate `type` becomes `pattern` from `recurrent_friction|failed_intervention`, plus `suggested: [doc|skill|guard|tool|test|process]`. Same clustering and recurrence rules; `wrapper_alias` and `doc_repair` become suggestions on a `recurrent_friction` pattern; `skill_candidate` becomes `failed_intervention` with suggestion `skill`. Deterministic, no window, same exit codes.
-- `triage`: vocabulary only (impact). `digest`: vocabulary plus one `accepted` count field (cuts whose winning resolution is `accepted` and falls in the period); no section, no listing. This is the first place digest walks resolved items, so the window rule is stated in r48.
+- `triage`: vocabulary only (impact). `digest`: vocabulary plus one `accepted_cuts` count field (cuts whose winning resolution is `accepted` and falls in the period; named by r49); no section, no listing. This is the first place digest walks resolved items, so the window rule is stated in r48.
 Routing: implementer-opus-med (retrospect's typing is judgment-adjacent). One pr-reviewer-high pass. No store.rs touch, so single gate run.
 
 ### Phase 6 — Release 1.0.0
@@ -190,3 +190,13 @@ Codex gpt-5.6-sol at reasoning high reviewed the plan read-only on 2026-09-01 an
 - Adopted with a different resolution: the hook receiver. The review offered keeping it or superseding r32 with an upgrade step; this plan supersedes r32.
 - Adopted by subtraction: retrospect's four patterns become two.
 - Not a finding of fact: `src/commands/schema.rs` is 56 lines, not a monolith, but the file overlap it was cited for is real.
+
+## 10. Progress review, 2026-09-01
+
+`docs/plans/blotter-v2-progress-review-feedback-2026-09-01.md` reviewed the tree after TASK-72 and TASK-73 merged. Its overall read — keep deleting, keep promotion passive, keep the pattern vocabulary evidence-driven, keep admission qualitative — matches r48's Non-goals and needs no change. Its four concerns were checked against r48 and the specs it cites (W3C Trace Context, the OTel Logs Data Model, the Claude Code hooks reference), and land as amendment r49:
+
+- **`origin` overdesigned (§14): adopted.** r48's trace-field reservation was withdrawn for a sharper reason than the review gave: adding optional members to `origin` later is additive, so the reservation prevented no break and only cost rules. `origin` is `{type, provider?, ref?}`.
+- **Upgrade experience (§15): adopted in half.** The `unsupported_log_version` surface is named as product surface and enumerated as contract tests in Phase 3. The suggestion that the refusal also tell the operator to remove the hook was rejected: the refusal cannot know whether a hook is installed, and the hook's actual failure mode on `PostToolUseFailure` is stderr shown to the agent, not a blocked session. The hook rejection (exit 2, clap error) is pinned by a test in Phase 2 instead.
+- **`digest.accepted` naming (§16): adopted.** Renamed `accepted_cuts`, parallel to `new_cuts`.
+- **`list` and promotions (§17): agreed, no action.** Watched in the Phase 4 review.
+
