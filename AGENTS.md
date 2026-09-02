@@ -63,7 +63,7 @@ cargo run -- add "what you were doing → what got in the way" --tag <area>
 - **Misleading** — an error pointed at the wrong cause, hid the real one, blamed the wrong file, or discouraged the correct fix.
 - **Systemic** — it reveals a missing affordance, a documentation gap, a brittle interface, a flaky command, or a reusable footgun.
 
-In one line: a cut must be consequential once, or meaningful because it is transferable or recurring.
+In one line: a cut must be consequential once, or carry knowledge beyond this run — transferable, recurring, misleading, or systemic.
 
 **Skip**, unless recurrence or system behaviour makes it meaningful: typos, shell quoting mistakes, a bad first guess, using the wrong command or API once, a patch that missed because your context was stale, a linter or compiler correctly rejecting code you just wrote, a malformed fixture you authored during the task, one broad query that returned too much, and any transient tactical mistake specific to this run. These are execution events, not knowledge.
 
