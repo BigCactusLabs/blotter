@@ -1,9 +1,10 @@
 ---
 id: TASK-81
 title: 'Unify every v2 identity at 80 bits: bl_ + 20 hex for cut, dogear and promotion'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-02 15:10'
+updated_date: '2026-09-02 15:36'
 labels:
   - v2
 dependencies: []
@@ -23,3 +24,9 @@ Progress-review feedback (2026-09-02, recorded in docs/plans/2026-09-01-blotter-
 - [ ] #3 no fixture, golden file or doc example carries a 12-hex bl_ ID; a contract test pins the width for both existing kinds
 - [ ] #4 cargo test/clippy/fmt gate green; CHANGELOG names the width change under 1.0.0
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+PR #20 into v2 opened 2026-09-02 after one pr-reviewer-high pass (REWORK, all findings applied). Awaiting Quinn's review.
+<!-- SECTION:NOTES:END -->
