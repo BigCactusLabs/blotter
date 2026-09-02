@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-02 02:21'
+updated_date: '2026-09-02 03:29'
 labels:
   - v2
   - breaking
@@ -26,4 +26,5 @@ Phase 3 of docs/plans/2026-09-01-blotter-v2-plan.md. PR into v2 after TASK-72 an
 
 <!-- SECTION:NOTES:BEGIN -->
 r49 (2026-09-01): origin is {type, provider?, ref?} — opaque strings, no width/hex/span rules; the unsupported_log_version surface (code/exit, details.file/line, found_version present-or-absent, suggested_fix with no literal mv, byte-identity on every mutating path, doctor single finding, sweep deterministic warning) is each a contract test.
+r50 (2026-09-01, after the pre-implementation critique): v in no envelope, stored first on each line; probe keys on raw kind with its own four-name list, accepts only JSON integer 2, found_version verbatim for any other present value; fold discards invalid resolve events before winner selection; Phase 3 implements disposition/disposition_ts, the fold discard + warning, doctor invalid_resolution rules (1)-(3) only — promotion field, --promotion, rules (4)-(6) are Phase 4; amend inherits from the pre-append folded winner; doctor keeps gitignored and --leaks findings on a v1 log; refusal message names the line, details.file the path; origin is a typed struct, not flattened, not a Value. See design doc r50 and plan section 11.
 <!-- SECTION:NOTES:END -->
