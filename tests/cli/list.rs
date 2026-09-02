@@ -276,3 +276,43 @@ fn markdown_format_is_byte_deterministic() {
     assert!(second.status.success());
     assert_eq!(first.stdout, second.stdout);
 }
+
+/// r48: `--severity` is removed rather than aliased, so clap rejects it as an
+/// unknown argument on both the commands that carried it, and `--impact` takes
+/// its place with the new vocabulary.
+#[test]
+fn severity_is_removed_and_impact_replaces_it() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    for args in [
+        &["add", "x", "--severity", "minor"][..],
+        &["list", "--severity", "minor"][..],
+    ] {
+        error(&run_file(&file, args), 2, "invalid_argument");
+    }
+    for value in ["minor", "major", "blocker"] {
+        error(
+            &run_file(&file, &["add", "x", "--impact", value]),
+            2,
+            "invalid_argument",
+        );
+    }
+
+    // The default is `low`, and the sort ranks blocking > material > low.
+    add_at(&file, "2026-07-09T18:00:00Z", "default impact", &[]);
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
+    assert_eq!(
+        serde_json::to_value(listed.data.items[0].impact).unwrap(),
+        json!("low")
+    );
+
+    let blocking = run_file(
+        &file,
+        &[
+            "add", "stopped", "--agent", "tester", "--impact", "blocking",
+        ],
+    );
+    success::<AddData>(&blocking);
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
+    assert_eq!(listed.data.items[0].text, "stopped");
+}

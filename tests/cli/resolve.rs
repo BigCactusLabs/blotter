@@ -1418,3 +1418,335 @@ fn resolve_amend_response_reports_the_timestamp_winning_amend() {
         Some("tie amend")
     );
 }
+
+/// r48: `--disposition` is required when any named record is a cut, rejected
+/// for a dogear, and a batch naming both cannot satisfy either rule. All three
+/// are decided inside the exclusive-lock critical section, after ID matching and
+/// before any append, so a rejected batch appends nothing at all.
+#[test]
+fn disposition_is_required_for_cuts_rejected_for_dogears_and_bars_a_mixed_batch() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "disposition rules fixture");
+    let cut_id = cut.data.record.cut_id().to_owned();
+    let dogear: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &["dogear", "disposition rules idea", "--agent", "tester"],
+    ));
+    let dogear_id = dogear.data["record"]["id"].as_str().unwrap().to_owned();
+    let original = std::fs::read_to_string(&file).unwrap();
+
+    let missing = error(
+        &run_file(&file, &["resolve", &cut_id]),
+        2,
+        "invalid_argument",
+    );
+    assert_eq!(
+        missing.error.message,
+        "--disposition is required when resolving a cut"
+    );
+
+    let rejected = error(
+        &run_file(&file, &["resolve", "--disposition", "fixed", &dogear_id]),
+        2,
+        "invalid_argument",
+    );
+    assert_eq!(
+        rejected.error.message,
+        "--disposition may only resolve cut records"
+    );
+
+    let mixed = error(
+        &run_file(
+            &file,
+            &["resolve", "--disposition", "fixed", &cut_id, &dogear_id],
+        ),
+        2,
+        "invalid_argument",
+    );
+    assert_eq!(
+        mixed.error.message,
+        "a resolve batch cannot name both cut and dogear records"
+    );
+
+    // No partial resolution: nothing was appended by any of the three.
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+
+    // Every disposition value is accepted, and both fields land on the stored
+    // event and in the materialized resolution.
+    for (index, disposition) in ["fixed", "promoted", "accepted", "invalid"]
+        .into_iter()
+        .enumerate()
+    {
+        let each = temp.path().join(format!("each-{index}.jsonl"));
+        let cut = add(&each, "each disposition");
+        let resolved: SuccessEnvelope<ResolveData> = success(&run_file(
+            &each,
+            &[
+                "resolve",
+                "--disposition",
+                disposition,
+                cut.data.record.cut_id(),
+            ],
+        ));
+        let resolution = resolved.data.records[0]
+            .resolution
+            .as_ref()
+            .expect("a resolved cut carries a resolution");
+        assert_eq!(
+            serde_json::to_value(resolution.disposition).unwrap(),
+            json!(disposition)
+        );
+        assert_eq!(
+            resolution.disposition_ts.as_deref(),
+            Some("2026-07-09T18:30:00.123Z")
+        );
+        let stored: Value = serde_json::from_str(
+            std::fs::read_to_string(&each)
+                .unwrap()
+                .lines()
+                .nth(1)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(stored["disposition"], disposition);
+        assert_eq!(stored["disposition_ts"], "2026-07-09T18:30:00.123Z");
+    }
+}
+
+/// r48/r50: an amend that omits `--disposition` inherits both fields from the
+/// **pre-append folded winner** and copies them into the stored event, so a
+/// note-only correction moves the resolution's `ts` without moving the moment
+/// the cut was classified. An amend that passes one wins with its own `ts`.
+#[test]
+fn amend_inherits_disposition_and_disposition_ts_or_restamps_an_explicit_one() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add_at(&file, "2026-07-09T18:00:00Z", "amend inheritance", &[]);
+    let id = cut.data.record.cut_id().to_owned();
+    resolve_at(
+        &file,
+        "2026-07-09T18:10:00Z",
+        &id,
+        &["--disposition", "accepted", "--note", "tolerated"],
+    );
+
+    let amended = resolve_at(
+        &file,
+        "2026-07-09T18:20:00Z",
+        &id,
+        &["--amend", "--note", "typo fixed"],
+    );
+    let resolution = amended.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(resolution.ts, "2026-07-09T18:20:00.000Z");
+    assert_eq!(resolution.note.as_deref(), Some("typo fixed"));
+    assert_eq!(
+        serde_json::to_value(resolution.disposition).unwrap(),
+        json!("accepted")
+    );
+    assert_eq!(
+        resolution.disposition_ts.as_deref(),
+        Some("2026-07-09T18:10:00.000Z")
+    );
+    // Inheritance is a write-time snapshot: it is visible in the stored bytes
+    // and needs no fold rule to reconstruct.
+    let stored: Value = serde_json::from_str(
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .lines()
+            .nth(2)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stored["disposition"], "accepted");
+    assert_eq!(stored["disposition_ts"], "2026-07-09T18:10:00.000Z");
+
+    let reclassified = resolve_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        &id,
+        &["--amend", "--disposition", "fixed"],
+    );
+    let resolution = reclassified.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_value(resolution.disposition).unwrap(),
+        json!("fixed")
+    );
+    assert_eq!(
+        resolution.disposition_ts.as_deref(),
+        Some("2026-07-09T18:30:00.000Z")
+    );
+    // `--disposition` counts as the one resolution field `--amend` requires.
+    assert!(reclassified.data.changed);
+}
+
+/// r50's stated and accepted divergence: an amend that passes `--disposition`
+/// explicitly under a backdated clock, with a later-`ts` amend already stored,
+/// appends its own disposition but **reports** the stored later amend's, because
+/// r31 requires the envelope to agree with what a later fold shows. The log then
+/// holds a disposition no read command materializes.
+#[test]
+fn a_backdated_explicit_amend_appends_its_disposition_and_reports_the_winner() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add_at(&file, "2026-07-09T18:00:00Z", "backdated amend", &[]);
+    let id = cut.data.record.cut_id().to_owned();
+    resolve_at(
+        &file,
+        "2026-07-09T18:10:00Z",
+        &id,
+        &["--disposition", "fixed"],
+    );
+    resolve_at(
+        &file,
+        "2026-07-09T18:40:00Z",
+        &id,
+        &["--amend", "--disposition", "promoted"],
+    );
+
+    let backdated = resolve_at(
+        &file,
+        "2026-07-09T18:20:00Z",
+        &id,
+        &["--amend", "--disposition", "invalid"],
+    );
+    let reported = backdated.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_value(reported.disposition).unwrap(),
+        json!("promoted")
+    );
+    assert_eq!(
+        reported.disposition_ts.as_deref(),
+        Some("2026-07-09T18:40:00.000Z")
+    );
+
+    // The appended event carries what was asked for; no read command shows it.
+    let stored: Value = serde_json::from_str(
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .lines()
+            .nth(3)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stored["disposition"], "invalid");
+    assert_eq!(stored["disposition_ts"], "2026-07-09T18:20:00.000Z");
+    let listed: SuccessEnvelope<ListData> =
+        success(&run_file(&file, &["list", "--status", "resolved"]));
+    assert_eq!(
+        serde_json::to_value(
+            listed.data.items[0]
+                .resolution
+                .as_ref()
+                .unwrap()
+                .disposition
+        )
+        .unwrap(),
+        json!("promoted")
+    );
+}
+
+/// r50's corollary: the fold discards invalid resolve events **before** winners
+/// are chosen, so an invalid base resolve cannot occupy the base slot. A record
+/// whose only base resolve is invalid reads open, `--amend` on it fails with the
+/// existing not-resolved error, and a plain base resolve repairs it by becoming
+/// the first valid base.
+#[test]
+fn an_invalid_base_resolve_leaves_the_record_open_and_a_valid_base_repairs_it() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add_at(&file, "2026-07-09T18:00:00Z", "invalid base resolve", &[]);
+    let id = cut.data.record.cut_id().to_owned();
+    let original = std::fs::read_to_string(&file).unwrap();
+    let invalid_base = json!({
+        "v": 2, "kind": "resolve", "id": id,
+        "ts": "2026-07-09T18:10:00.000Z", "agent": "fixture", "note": "no disposition"
+    });
+    std::fs::write(&file, format!("{original}{invalid_base}\n")).unwrap();
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
+    assert_eq!(listed.data.items[0].status, ItemStatus::Open);
+    assert_eq!(listed.meta.warnings, ["skipped 1 invalid resolution"]);
+
+    let refused = error(
+        &run_file(&file, &["resolve", &id, "--amend", "--note", "x"]),
+        65,
+        "invalid_input",
+    );
+    assert_eq!(
+        refused.error.message,
+        "--amend requires every requested record to be resolved"
+    );
+
+    let repaired = resolve_at(
+        &file,
+        "2026-07-09T18:20:00Z",
+        &id,
+        &["--disposition", "fixed", "--note", "repaired"],
+    );
+    let resolution = repaired.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(resolution.note.as_deref(), Some("repaired"));
+    assert_eq!(
+        serde_json::to_value(resolution.disposition).unwrap(),
+        json!("fixed")
+    );
+}
+
+/// r50: `duplicate resolve` and `orphan resolve` are counted over the **valid**
+/// events only, and an orphan — a resolve joining to no record — is never
+/// evaluated for validity, so rule (3) is not applied to one.
+#[test]
+fn duplicate_and_orphan_counts_run_over_valid_events_only() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add_at(&file, "2026-07-09T18:00:00Z", "valid-only counts", &[]);
+    let id = cut.data.record.cut_id().to_owned();
+    let original = std::fs::read_to_string(&file).unwrap();
+    // An invalid base, then two valid bases: the invalid one is not the
+    // duplicate, so exactly one duplicate is counted.
+    let invalid = json!({
+        "v": 2, "kind": "resolve", "id": id,
+        "ts": "2026-07-09T18:05:00.000Z", "agent": "fixture", "note": null
+    });
+    let first = json!({
+        "v": 2, "kind": "resolve", "id": id,
+        "ts": "2026-07-09T18:10:00.000Z", "agent": "fixture", "note": "first",
+        "disposition": "fixed", "disposition_ts": "2026-07-09T18:10:00.000Z"
+    });
+    let second = json!({
+        "v": 2, "kind": "resolve", "id": id,
+        "ts": "2026-07-09T18:15:00.000Z", "agent": "fixture", "note": "second",
+        "disposition": "fixed", "disposition_ts": "2026-07-09T18:15:00.000Z"
+    });
+    // An orphan carrying a disposition with no disposition_ts joins to no
+    // record, so it is an orphan and never invalid.
+    let orphan = json!({
+        "v": 2, "kind": "resolve", "id": "bl_deadbeef0000",
+        "ts": "2026-07-09T18:20:00.000Z", "agent": "fixture", "note": null,
+        "disposition": "fixed"
+    });
+    std::fs::write(
+        &file,
+        format!("{original}{invalid}\n{first}\n{second}\n{orphan}\n"),
+    )
+    .unwrap();
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
+    assert_eq!(
+        listed.data.items[0]
+            .resolution
+            .as_ref()
+            .unwrap()
+            .note
+            .as_deref(),
+        Some("first")
+    );
+    assert_eq!(
+        listed.meta.warnings,
+        [
+            "skipped 1 duplicate resolve",
+            "skipped 1 orphan resolve",
+            "skipped 1 invalid resolution",
+        ]
+    );
+}

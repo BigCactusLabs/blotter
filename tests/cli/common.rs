@@ -247,6 +247,60 @@ pub fn resolve_line(id: &str, ts: &str, note: &str, amend: bool) -> String {
     value.to_string()
 }
 
+/// A 0.15 (v1) cut line: an object whose raw `kind` is one the probe knows,
+/// carrying no `v`. Any log holding one is refused whole.
+pub fn v1_cut_line() -> String {
+    json!({
+        "kind": "cut",
+        "id": "bl_a1b2c3d4e5f6",
+        "ts": "2026-07-09T00:00:00.000Z",
+        "agent": "legacy",
+        "text": "v1 cut",
+        "tags": [],
+        "severity": "minor",
+        "cwd": "/tmp"
+    })
+    .to_string()
+}
+
+/// A v2 cut line, for the mixed-log case.
+pub fn v2_cut_line(text: &str) -> String {
+    let id = compute_id("2026-07-09T00:00:00.000Z", "tester", text, Impact::Low, &[]);
+    json!({
+        "v": 2,
+        "kind": "cut",
+        "id": id,
+        "ts": "2026-07-09T00:00:00.000Z",
+        "agent": "tester",
+        "text": text,
+        "tags": [],
+        "impact": "low",
+        "cwd": "/tmp"
+    })
+    .to_string()
+}
+
+/// The exact `suggested_fix` the upgrade refusal carries. It names the resolved
+/// path, instructs a rename to a path that does not yet exist followed by
+/// `blotter add`, and carries no literal `mv` (r48, r49).
+pub fn unsupported_version_fix(file: &Path) -> String {
+    format!(
+        "Rename {} to a path that does not yet exist, then run `blotter add` to create a fresh v2 log.",
+        file.display()
+    )
+}
+
+/// Every path in a directory, sorted — used to prove a refusal created no
+/// backup, quarantine, or archive sidecar beside the log.
+pub fn directory_entries(directory: &Path) -> Vec<String> {
+    let mut names = std::fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
 /// The stored line for an envelope record: `v` first, then the record's own
 /// members. `v` is a storage marker and appears in no envelope (r50).
 pub fn stored_line(record: &Value) -> Value {

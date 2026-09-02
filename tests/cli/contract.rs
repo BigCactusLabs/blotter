@@ -1233,3 +1233,198 @@ fn non_utf8_blotter_agent_is_a_config_error_and_never_files_a_detected_agent() {
     assert!(envelope.error.message.contains("BLOTTER_AGENT"));
     assert!(!file.exists());
 }
+
+/// r48/r49/r50: the upgrade refusal is product surface, so every observable
+/// clause of the probe is a contract test rather than README prose. This one
+/// pins the error's own shape.
+#[test]
+fn a_v1_log_is_refused_with_the_full_unsupported_version_shape() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, format!("{}\n", v1_cut_line())).unwrap();
+
+    let output = run_file(&file, &["list"]);
+    let envelope = error(&output, 65, "unsupported_log_version");
+    assert!(!envelope.error.retryable);
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        envelope.error.message,
+        "unsupported log version on line 1: record has no v field"
+    );
+    // The message names the line and what was found, never the path: `sweep`
+    // prefixes its warning with the path and would otherwise name it twice.
+    assert!(!envelope.error.message.contains(file.to_str().unwrap()));
+    assert_eq!(
+        envelope.error.details,
+        json!({"file": file.to_string_lossy(), "line": 1})
+    );
+    assert!(envelope.error.details.get("found_version").is_none());
+    assert_eq!(envelope.error.suggested_fix, unsupported_version_fix(&file));
+    assert!(!envelope.error.suggested_fix.contains("mv "));
+}
+
+/// `found_version` is present verbatim for any `v` other than the JSON integer
+/// 2 — `null` included — and omitted only when the key is absent. Absent and
+/// wrong are told apart by key presence, never by null-ness (r50).
+#[test]
+fn found_version_carries_every_wrong_value_verbatim_and_is_absent_when_v_is() {
+    let temp = TempDir::new().unwrap();
+    let cases = [
+        (json!(1), json!(1)),
+        (json!(null), json!(null)),
+        (json!("2"), json!("2")),
+        (json!(2.0), json!(2.0)),
+        (json!(3), json!(3)),
+    ];
+    for (index, (stored, expected)) in cases.into_iter().enumerate() {
+        let file = temp.path().join(format!("v-{index}.jsonl"));
+        let mut line: Value = serde_json::from_str(&v1_cut_line()).unwrap();
+        line["v"] = stored.clone();
+        std::fs::write(&file, format!("{line}\n")).unwrap();
+
+        let envelope = error(&run_file(&file, &["list"]), 65, "unsupported_log_version");
+        assert_eq!(
+            envelope.error.details["found_version"], expected,
+            "stored {stored}"
+        );
+        assert_eq!(
+            envelope.error.message,
+            format!("unsupported log version on line 1: found v {expected}")
+        );
+    }
+
+    // `2e0` is the same value written as an exponent, and it is refused too:
+    // only an integer literal passes.
+    let file = temp.path().join("exponent.jsonl");
+    let line = v1_cut_line().replacen("{", "{\"v\":2e0,", 1);
+    std::fs::write(&file, format!("{line}\n")).unwrap();
+    let envelope = error(&run_file(&file, &["list"]), 65, "unsupported_log_version");
+    assert_eq!(envelope.error.details["found_version"], json!(2.0));
+}
+
+/// A mixed log refuses on the **first** offending physical line, whatever the
+/// v2 records around it.
+#[test]
+fn a_mixed_log_refuses_on_the_first_v1_line() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(
+        &file,
+        format!(
+            "{}\n{}\n{}\n",
+            v2_cut_line("first"),
+            v1_cut_line(),
+            v2_cut_line("third")
+        ),
+    )
+    .unwrap();
+
+    let envelope = error(&run_file(&file, &["list"]), 65, "unsupported_log_version");
+    assert_eq!(envelope.error.details["line"], 2);
+}
+
+/// Every read command refuses. There is no empty-state fallback: the file exists
+/// and is unreadable rather than absent.
+#[test]
+fn every_read_command_refuses_a_v1_log_with_no_empty_state_fallback() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, format!("{}\n", v1_cut_line())).unwrap();
+
+    for args in [
+        &["list"][..],
+        &["triage"][..],
+        &["digest"][..],
+        &["verify"][..],
+        &["retrospect"][..],
+        &["export", "--format", "otlp-json"][..],
+    ] {
+        let output = run_file(&file, args);
+        error(&output, 65, "unsupported_log_version");
+        assert!(output.stdout.is_empty(), "{args:?} wrote stdout");
+    }
+}
+
+/// Every mutating path refuses, appends nothing, and leaves the file
+/// byte-identical with no backup, quarantine, or archive sidecar beside it.
+#[test]
+fn every_mutating_path_leaves_a_refused_log_byte_identical_with_no_sidecars() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let original = format!("{}\n", v1_cut_line());
+    std::fs::write(&file, &original).unwrap();
+
+    for args in [
+        &["add", "new cut", "--agent", "tester"][..],
+        &["dogear", "new idea", "--agent", "tester"][..],
+        &["resolve", "--disposition", "fixed", "a1b2c3d4e5f6"][..],
+        &["doctor", "--fix"][..],
+        &["doctor", "--fix", "--dry-run"][..],
+        &["archive", "--before", "1d"][..],
+    ] {
+        let output = run_file(&file, args);
+        if args[0] == "doctor" {
+            // doctor answers with findings, not an error envelope: naming what
+            // is wrong with a log is its job.
+            assert_eq!(output.status.code(), Some(1), "{args:?}");
+        } else {
+            error(&output, 65, "unsupported_log_version");
+        }
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            original,
+            "{args:?}"
+        );
+        assert_eq!(directory_entries(temp.path()), ["cuts.jsonl"], "{args:?}");
+    }
+}
+
+/// The dry-run matrix (r48): a dry run probes exactly when it opens the log.
+/// `resolve --dry-run` must fold to match IDs, so it probes; `add --dry-run` and
+/// `dogear --dry-run` never open the log, so a successful one is explicitly not
+/// a prediction that the apply will pass the probe.
+#[test]
+fn resolve_dry_run_probes_a_v1_log_and_add_dry_run_does_not() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let original = format!("{}\n", v1_cut_line());
+    std::fs::write(&file, &original).unwrap();
+
+    error(
+        &run_file(
+            &file,
+            &["resolve", "--disposition", "fixed", "a1b2", "--dry-run"],
+        ),
+        65,
+        "unsupported_log_version",
+    );
+
+    let added: SuccessEnvelope<AddData> = success(&run_file(
+        &file,
+        &["add", "predicted", "--agent", "tester", "--dry-run"],
+    ));
+    assert!(!added.data.changed);
+    let dogeared: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &["dogear", "predicted", "--agent", "tester", "--dry-run"],
+    ));
+    assert_eq!(dogeared.data["changed"], false);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+}
+
+/// Where several error codes share one exit code, the published description is
+/// a deliberately authored string naming every code that maps to it — never
+/// whichever `ERROR_CONTRACT` entry the map happened to insert last (r48). The
+/// schema test that compares the map to itself cannot catch a regression here,
+/// so the literal is pinned.
+#[test]
+fn schema_publishes_the_authored_exit_65_description() {
+    let schema: SuccessEnvelope<Value> = success(&run(&["schema", "exit-codes"]));
+    assert_eq!(
+        schema.data["exit_codes"]["65"],
+        "invalid input data, including an ambiguous ID or an unsupported log version"
+    );
+    let codes: SuccessEnvelope<Value> = success(&run(&["schema", "error"]));
+    let codes = codes.data["errors"]["codes"].as_array().unwrap();
+    assert!(codes.contains(&json!("unsupported_log_version")));
+}

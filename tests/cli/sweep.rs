@@ -437,3 +437,53 @@ fn sweep_directory_registry_is_invalid_input_65() {
     assert!(envelope.error.message.contains("not a regular file"));
     assert!(envelope.error.suggested_fix.contains("--registry"));
 }
+
+/// r48: `sweep` names a refused log in its per-log skip warning list and keeps
+/// exit 0, exactly as it does for every per-log failure (r13). One v1 log does
+/// not abort a multi-log sweep.
+#[test]
+fn sweep_skips_a_v1_log_and_keeps_exit_zero() {
+    let temp = TempDir::new().unwrap();
+    let good = temp.path().join("good");
+    let stale = temp.path().join("stale");
+    make_repo(&good);
+    make_repo(&stale);
+    let good_file = good.join(".blotter.jsonl");
+    let stale_file = stale.join(".blotter.jsonl");
+    add_at(&good_file, "2026-07-09T17:00:00Z", "Good cut", &["api"]);
+    std::fs::write(&stale_file, format!("{}\n", v1_cut_line())).unwrap();
+
+    let run_sweep = || {
+        let output = command()
+            .arg("sweep")
+            .arg(&good)
+            .arg(&stale)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        let envelope: SuccessEnvelope<SweepData> = success(&output);
+        envelope
+    };
+
+    let swept = run_sweep();
+    assert_eq!(swept.data.totals.repos_swept, 1);
+    assert_eq!(swept.data.totals.repos_skipped, 1);
+    assert_eq!(swept.data.totals.open_cuts, 1);
+    assert_eq!(swept.data.totals.open_dogears, 0);
+    // No entry for the skipped log appears in repos[].
+    assert_eq!(swept.data.repos.len(), 1);
+    assert!(!swept.data.repos[0].path.contains("stale"));
+    let expected = format!(
+        "skipped {}: unsupported log version on line 1: record has no v field",
+        stale_file.canonicalize().unwrap().display()
+    );
+    assert_eq!(swept.meta.warnings, [expected]);
+
+    // Deterministic: two runs over the same inputs produce byte-identical
+    // warnings.
+    assert_eq!(run_sweep().meta.warnings, swept.meta.warnings);
+    assert_eq!(
+        std::fs::read_to_string(&stale_file).unwrap(),
+        format!("{}\n", v1_cut_line())
+    );
+}

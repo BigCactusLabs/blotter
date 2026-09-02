@@ -747,3 +747,229 @@ fn doctor_fix_resolves_symlinked_log_and_preserves_the_link() {
     );
     assert_eq!(std::fs::read(&target).unwrap(), complete);
 }
+
+/// r48: on a v1 log `doctor` reports the file as one non-fixable
+/// `unsupported_version` finding on the first offending line and emits no other
+/// record-model finding — the log is not diagnosable under v2 rules. The
+/// envelope keeps its shape: `healthy:false`, honest `checked_lines`, exit 1,
+/// and `fix` absent on a diagnose-only run.
+#[test]
+fn doctor_reports_a_v1_log_as_one_unsupported_version_finding() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    // Three physical lines, two of which the v2 scan would otherwise call
+    // malformed or unknown, so an honest count is distinguishable from one.
+    std::fs::write(
+        &file,
+        format!("not json\n{}\n{{\"kind\":\"future\"}}\n", v1_cut_line()),
+    )
+    .unwrap();
+
+    let doctor = doctor_response(&run_file(&file, &["doctor"]), 1);
+    assert!(!doctor.data.healthy);
+    assert_eq!(doctor.data.findings.len(), 1);
+    let finding = &doctor.data.findings[0];
+    assert_eq!(finding.kind, "unsupported_version");
+    assert_eq!(finding.line, 2);
+    assert!(!finding.fixable);
+    assert_eq!(
+        finding.message,
+        "unsupported log version on line 2: record has no v field"
+    );
+    // The probe read every physical line, so the count is honest.
+    assert_eq!(doctor.data.checked_lines, 3);
+    assert!(doctor.data.fix.is_none());
+}
+
+/// `--fix` needs no special case: one non-fixable finding plans nothing, so the
+/// `fix` object is present and inert on both the apply and the dry-run path, and
+/// neither creates a sidecar.
+#[test]
+fn doctor_fix_is_inert_on_a_v1_log_and_creates_no_sidecar() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let original = format!("{}\n", v1_cut_line());
+    std::fs::write(&file, &original).unwrap();
+
+    for args in [
+        &["doctor", "--fix"][..],
+        &["doctor", "--fix", "--dry-run"][..],
+    ] {
+        let doctor = doctor_response(&run_file(&file, args), 1);
+        let fix = doctor
+            .data
+            .fix
+            .as_ref()
+            .expect("--fix reports a fix object");
+        assert!(!fix.changed, "{args:?}");
+        assert!(fix.applied.is_empty(), "{args:?}");
+        assert!(fix.backup.is_none(), "{args:?}");
+        assert!(fix.quarantine.is_none(), "{args:?}");
+        assert!(fix.restore_hint.is_none(), "{args:?}");
+        assert_eq!(fix.dry_run, args.contains(&"--dry-run"), "{args:?}");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            original,
+            "{args:?}"
+        );
+        assert_eq!(directory_entries(temp.path()), ["cuts.jsonl"], "{args:?}");
+    }
+}
+
+/// r50 supersedes r48's "that single entry": "no other findings" means no
+/// finding that classifies a record under the v2 record model. `gitignored` is
+/// about version-control status and `--leaks` is a byte-level privacy audit, so
+/// both survive the version refusal, ordered `unsupported_version`, then leak
+/// findings in line order, then `gitignored`.
+#[test]
+fn doctor_keeps_gitignored_and_leak_findings_on_a_refused_log() {
+    let git_available = std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success());
+    if !git_available {
+        return;
+    }
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    assert!(
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .arg("init")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    std::fs::write(repo.join(".gitignore"), ".blotter.jsonl\n").unwrap();
+    std::fs::write(repo.join(".blotter.jsonl"), format!("{}\n", v1_cut_line())).unwrap();
+
+    let doctor: SuccessEnvelope<DoctorData> = serde_json::from_slice(
+        &command()
+            .current_dir(&repo)
+            .arg("doctor")
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    assert!(!doctor.data.healthy);
+    assert_eq!(
+        doctor
+            .data
+            .findings
+            .iter()
+            .map(|finding| finding.kind.as_str())
+            .collect::<Vec<_>>(),
+        ["unsupported_version", "gitignored"]
+    );
+
+    // The same file with a deny pattern: the leak finding sits between them.
+    let leaks: SuccessEnvelope<DoctorData> = serde_json::from_slice(
+        &command()
+            .current_dir(&repo)
+            .args(["doctor", "--leaks", "--deny", "legacy"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    assert_eq!(
+        leaks
+            .data
+            .findings
+            .iter()
+            .map(|finding| finding.kind.as_str())
+            .collect::<Vec<_>>(),
+        ["unsupported_version", "leak", "gitignored"]
+    );
+}
+
+/// r48 rules (1)-(3), which Phase 3 implements: one non-fixable
+/// `invalid_resolution` finding per invalid event, naming the record ID and
+/// every rule the event breaks in the numbered order.
+#[test]
+fn doctor_reports_invalid_resolutions_for_rules_one_to_three() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "invalid resolution fixture");
+    let cut_id = cut.data.record.cut_id().to_owned();
+    let dogear: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &["dogear", "invalid resolution dogear", "--agent", "tester"],
+    ));
+    let dogear_id = dogear.data["record"]["id"].as_str().unwrap().to_owned();
+    let original = std::fs::read_to_string(&file).unwrap();
+
+    // (1) a cut resolve with no disposition.
+    let no_disposition = json!({
+        "v": 2, "kind": "resolve", "id": cut_id,
+        "ts": "2026-07-09T18:31:00.000Z", "agent": "fixture", "note": null
+    });
+    // (2) a dogear resolve that carries one, which also breaks nothing else.
+    let dogear_disposition = json!({
+        "v": 2, "kind": "resolve", "id": dogear_id,
+        "ts": "2026-07-09T18:32:00.000Z", "agent": "fixture", "note": null,
+        "disposition": "fixed", "disposition_ts": "2026-07-09T18:32:00.000Z"
+    });
+    // (3) a disposition with no disposition_ts. The cut arm of (1) is satisfied,
+    // so this event breaks exactly one rule.
+    let half_disposition = json!({
+        "v": 2, "kind": "resolve", "id": cut_id,
+        "ts": "2026-07-09T18:33:00.000Z", "agent": "fixture", "note": null,
+        "disposition": "fixed"
+    });
+    std::fs::write(
+        &file,
+        format!("{original}{no_disposition}\n{dogear_disposition}\n{half_disposition}\n"),
+    )
+    .unwrap();
+
+    let doctor = doctor_response(&run_file(&file, &["doctor"]), 1);
+    let findings = &doctor.data.findings;
+    assert_eq!(findings.len(), 3, "findings: {findings:?}");
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.kind == "invalid_resolution")
+    );
+    assert!(findings.iter().all(|finding| !finding.fixable));
+    assert_eq!(
+        findings[0].message,
+        format!("invalid resolution for {cut_id}: resolve targets a cut without a disposition")
+    );
+    assert_eq!(
+        findings[1].message,
+        format!("invalid resolution for {dogear_id}: resolve targets a dogear with a disposition")
+    );
+    assert_eq!(
+        findings[2].message,
+        format!(
+            "invalid resolution for {cut_id}: disposition and disposition_ts must be present together"
+        )
+    );
+    assert_eq!(
+        findings
+            .iter()
+            .map(|finding| finding.line)
+            .collect::<Vec<_>>(),
+        [3, 4, 5]
+    );
+
+    // The fold discards all three, so both records read open and the warning
+    // counts events, not rules.
+    let listed: SuccessEnvelope<ListData> = success(&run_file(
+        &file,
+        &["list", "--kind", "all", "--status", "all"],
+    ));
+    assert!(
+        listed
+            .data
+            .items
+            .iter()
+            .all(|item| item.status == ItemStatus::Open)
+    );
+    assert_eq!(listed.meta.warnings, ["skipped 3 invalid resolutions"]);
+}

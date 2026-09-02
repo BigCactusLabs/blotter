@@ -631,3 +631,86 @@ fn a_directory_log_path_is_rejected_on_read_and_mutation_alike() {
         assert_non_regular_log(&run_file(&directory, &args), what);
     }
 }
+
+/// The tear-healing newline is a byte, and a refusal writes none. A v1 log whose
+/// final line is unterminated must come back byte-identical.
+#[test]
+fn a_refused_log_is_not_tear_healed_before_the_probe() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let original = v1_cut_line();
+    assert!(!original.ends_with('\n'));
+    std::fs::write(&file, &original).unwrap();
+
+    error(
+        &run_file(&file, &["add", "new cut", "--agent", "tester"]),
+        65,
+        "unsupported_log_version",
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+}
+
+/// An empty file — no bytes, or the single newline `scan` reads as a terminator
+/// rather than a line (r26/r33) — is a fresh v2 log and passes the probe.
+#[test]
+fn an_empty_log_passes_the_probe() {
+    let temp = TempDir::new().unwrap();
+    for (name, bytes) in [("empty.jsonl", &b""[..]), ("newline.jsonl", &b"\n"[..])] {
+        let file = temp.path().join(name);
+        std::fs::write(&file, bytes).unwrap();
+        let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
+        assert_eq!(listed.data.items.len(), 0, "{name}");
+        let added: SuccessEnvelope<AddData> =
+            success(&run_file(&file, &["add", "fresh", "--agent", "tester"]));
+        assert!(added.data.changed, "{name}");
+    }
+}
+
+/// r50: what passes the probe is a log holding **no line with a known raw
+/// kind** — not-JSON lines, JSON with an unknown `kind`, JSON with no `kind`, a
+/// torn tail, or any mixture. The scan still classifies them exactly as before,
+/// so `doctor --fix` can still repair the one thing it exists to repair.
+#[test]
+fn a_log_without_a_known_kind_passes_the_probe() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(
+        &file,
+        "not json\n{\"kind\":\"future\"}\n{\"id\":\"bl_aaaaaaaaaaaa\"}\n{\"kind\":",
+    )
+    .unwrap();
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
+    assert_eq!(listed.data.items.len(), 0);
+    assert!(
+        listed
+            .meta
+            .warnings
+            .iter()
+            .all(|warning| !warning.contains("version")),
+        "warnings: {:?}",
+        listed.meta.warnings
+    );
+
+    let doctor = doctor_response(&run_file(&file, &["doctor"]), 1);
+    assert!(
+        doctor
+            .data
+            .findings
+            .iter()
+            .all(|finding| finding.kind != "unsupported_version"),
+        "findings: {:?}",
+        doctor.data.findings
+    );
+
+    // The residual r48 states rather than papers over: such a log is repairable
+    // by the one command written to repair it.
+    let fixed = doctor_response(&run_file(&file, &["doctor", "--fix"]), 1);
+    assert!(fixed.data.fix.as_ref().unwrap().changed);
+
+    let added: SuccessEnvelope<AddData> = success(&run_file(
+        &file,
+        &["add", "after repair", "--agent", "tester"],
+    ));
+    assert!(added.data.changed);
+}
