@@ -1,4 +1,4 @@
-use crate::Severity;
+use crate::{Disposition, Impact};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
@@ -41,7 +41,7 @@ Admission: file a cut only when at least one of these holds.
   systemic       a missing affordance, a doc gap, a brittle interface, a reusable footgun
 Skip one-off execution slips unless they recur: typos, shell quoting, a bad first guess,
 a patch that missed on stale context, a linter correctly rejecting code you just wrote,
-a malformed fixture you authored. Severity records consequence, not admission.";
+a malformed fixture you authored. Impact records consequence, not admission.";
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -83,10 +83,10 @@ pub struct AddArgs {
     #[arg(
         long,
         value_enum,
-        default_value_t = Severity::Minor,
-        help = "Consequence, not admission. blocker: could not proceed; major: lost real time or produced wrong work; minor: limited cost, still worth filing"
+        default_value_t = Impact::Low,
+        help = "Consequence, not admission. blocking: could not proceed; material: lost real time or produced wrong work; low: limited cost, still worth filing"
     )]
-    pub severity: Severity,
+    pub impact: Impact,
     #[arg(
         long,
         allow_hyphen_values = true,
@@ -155,8 +155,8 @@ pub struct ListArgs {
     pub agent: Option<String>,
     #[arg(long, help = "Filter by tag")]
     pub tag: Option<String>,
-    #[arg(long, value_enum, help = "Filter cuts by severity")]
-    pub severity: Option<Severity>,
+    #[arg(long, value_enum, help = "Filter cuts by impact")]
+    pub impact: Option<Impact>,
     #[arg(long, help = "Filter since an RFC3339 timestamp or Nd/Nh duration")]
     pub since: Option<String>,
     #[arg(long, default_value_t = 50, help = "Maximum records to return")]
@@ -302,6 +302,12 @@ pub struct ResolveArgs {
     pub url: Option<String>,
     #[arg(long, help = "Mark dropped (dogear records only)")]
     pub dropped: bool,
+    #[arg(
+        long,
+        value_enum,
+        help = "How the cut was disposed of; required for cuts, rejected for dogears"
+    )]
+    pub disposition: Option<Disposition>,
     #[arg(long, help = "Append a correction to an existing resolved record")]
     pub amend: bool,
     #[arg(long, help = "Validate without appending a resolution")]
@@ -370,7 +376,7 @@ mod tests {
             panic!("expected add")
         };
         assert_eq!(args.text.as_deref(), Some("ouch"));
-        assert_eq!(args.severity, Severity::Minor);
+        assert_eq!(args.impact, Impact::Low);
 
         let cli = Cli::try_parse_from(["blotter", "list"]).unwrap();
         let Command::List(args) = cli.command else {
@@ -432,7 +438,8 @@ mod tests {
         assert!(Cli::try_parse_from(["blotter", "list", "--format", "jsonl"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "digest", "--format", "jsonl"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "sweep", "--kind", "other"]).is_err());
-        assert!(Cli::try_parse_from(["blotter", "add", "x", "--severity", "critical"]).is_err());
+        assert!(Cli::try_parse_from(["blotter", "add", "x", "--impact", "critical"]).is_err());
+        assert!(Cli::try_parse_from(["blotter", "add", "x", "--severity", "minor"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "resolve"]).is_err());
         assert!(Cli::try_parse_from(["blotter"]).is_err());
         for args in [

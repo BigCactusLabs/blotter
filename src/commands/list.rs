@@ -2,7 +2,7 @@ use crate::cli::{ListArgs, ListKind, OutputFormat, StatusFilter};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use crate::store;
-use crate::{ItemStatus, ListItem, Severity, parse_since};
+use crate::{Impact, ItemStatus, ListItem, parse_since};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -17,10 +17,10 @@ pub struct ListData {
 }
 
 pub fn run(args: ListArgs, file: Option<PathBuf>, pretty: bool, now: Timestamp) -> AppResult<i32> {
-    if args.kind != ListKind::Cut && args.severity.is_some() {
+    if args.kind != ListKind::Cut && args.impact.is_some() {
         return Err(AppError::invalid_argument(
-            "--severity is only available with --kind cut",
-            "Remove --severity or use `blotter list --kind cut --severity minor|major|blocker`.",
+            "--impact is only available with --kind cut",
+            "Remove --impact or use `blotter list --kind cut --impact low|material|blocking`.",
         ));
     }
     let since = args
@@ -82,9 +82,7 @@ fn matches_filters(item: &ListItem, args: &ListArgs, since: Option<&Timestamp>) 
         && status_matches
         && args.agent.as_ref().is_none_or(|agent| &item.agent == agent)
         && args.tag.as_ref().is_none_or(|tag| item.tags.contains(tag))
-        && args
-            .severity
-            .is_none_or(|severity| item.severity == Some(severity))
+        && args.impact.is_none_or(|impact| item.impact == Some(impact))
         && since.is_none_or(|threshold| {
             item.ts
                 .parse::<Timestamp>()
@@ -95,10 +93,10 @@ fn matches_filters(item: &ListItem, args: &ListArgs, since: Option<&Timestamp>) 
 fn write_markdown(items: &[ListItem], warnings: &[String]) -> AppResult<()> {
     let mut output = output::stdout_writer()
         .map_err(|error| AppError::from_io(error, std::path::Path::new("stdout")))?;
-    for severity in [Severity::Blocker, Severity::Major, Severity::Minor] {
+    for impact in [Impact::Blocking, Impact::Material, Impact::Low] {
         let matching: Vec<_> = items
             .iter()
-            .filter(|item| item.severity == Some(severity))
+            .filter(|item| item.impact == Some(impact))
             .collect();
         if matching.is_empty() {
             continue;
@@ -106,10 +104,10 @@ fn write_markdown(items: &[ListItem], warnings: &[String]) -> AppResult<()> {
         writeln!(
             output,
             "## {}",
-            match severity {
-                Severity::Blocker => "Blocker",
-                Severity::Major => "Major",
-                Severity::Minor => "Minor",
+            match impact {
+                Impact::Blocking => "Blocking",
+                Impact::Material => "Material",
+                Impact::Low => "Low",
             }
         )
         .map_err(|error| AppError::from_io(error, std::path::Path::new("stdout")))?;

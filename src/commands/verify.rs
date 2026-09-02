@@ -22,7 +22,7 @@ pub struct Recurrence {
     pub resolved_id: String,
     pub resolved_text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
+    pub origin: Option<crate::Origin>,
     pub resolution: VerifyResolution,
     pub recurrence_ids: Vec<String>,
     pub count: usize,
@@ -226,7 +226,7 @@ fn materialize_recurrence(group: &RecurrenceGroup) -> Recurrence {
     Recurrence {
         resolved_id: group.anchor.item.id.clone(),
         resolved_text: group.anchor.item.text.clone(),
-        source: group.anchor.item.source.clone(),
+        origin: group.anchor.item.origin.clone(),
         resolution: VerifyResolution {
             ts: resolution.ts.clone(),
             task: resolution.task.clone(),

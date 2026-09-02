@@ -1,5 +1,5 @@
 use crate::cli::DoctorArgs;
-use crate::error::{AppError, AppResult};
+use crate::error::{AppError, AppResult, unsupported_log_version_message};
 use crate::output::{self, Meta};
 use crate::store;
 use crate::{LogEvent, compute_dogear_id, compute_id};
@@ -425,15 +425,24 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
     let mut findings = Vec::new();
     let mut leak_findings = Vec::new();
     let mut records = HashMap::<String, Vec<u8>>::new();
-    let mut record_ids = HashSet::new();
-    let mut base_resolve_ids = HashSet::new();
-    let mut resolves = Vec::<(usize, String, bool)>::new();
+    let mut record_kinds = HashMap::<String, &'static str>::new();
+    let mut resolves = Vec::<(usize, LogEvent)>::new();
     let mut checked_lines = 0;
+    // The version probe outranks every record-model classification for this file
+    // (r48/r50): malformed, torn, unknown-kind, duplicate, orphan and
+    // invalid-resolution findings are all replaced by one `unsupported_version`
+    // finding. The walk still happens, so `checked_lines` stays honest and the
+    // `--leaks` byte scan still runs — refusing a leak audit is a privacy
+    // regression the version boundary does not justify.
+    let unsupported = store::probe_version(bytes);
     for scanned in store::scan(bytes) {
         checked_lines += 1;
         let line = scanned.line;
         if let Some(leak_scan) = leak_scan {
             add_leak_findings(&mut leak_findings, line, scanned.raw, leak_scan);
+        }
+        if unsupported.is_some() {
+            continue;
         }
         match scanned.event {
             Err(store::ScanIssue::Torn) => findings.push(finding(
@@ -467,14 +476,14 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
                     agent,
                     text,
                     tags,
-                    severity,
+                    impact,
                     ..
                 } => {
                     if id
                         .get(..3)
                         .is_some_and(|prefix| prefix.eq_ignore_ascii_case("bl_"))
                     {
-                        let expected = compute_id(&ts, &agent, &text, severity, &tags);
+                        let expected = compute_id(&ts, &agent, &text, impact, &tags);
                         if id != expected {
                             findings.push(finding(
                                 line,
@@ -501,7 +510,9 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
                     } else {
                         records.insert(id.clone(), scanned.raw.to_vec());
                     }
-                    record_ids.insert(id);
+                    // The fold keeps the first record for an ID, so the kind a
+                    // later resolve is judged against is the first one too.
+                    record_kinds.entry(id).or_insert("cut");
                 }
                 LogEvent::Dogear {
                     id,
@@ -544,20 +555,44 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
                     } else {
                         records.insert(id.clone(), scanned.raw.to_vec());
                     }
-                    record_ids.insert(id);
+                    // The fold keeps the first record for an ID, so the kind a
+                    // later resolve is judged against is the first one too.
+                    record_kinds.entry(id).or_insert("dogear");
                 }
-                LogEvent::Resolve { id, amend, .. } => {
-                    if !amend {
-                        base_resolve_ids.insert(id.clone());
-                    }
-                    resolves.push((line, id, amend));
-                }
+                LogEvent::Resolve { .. } => resolves.push((line, event)),
                 LogEvent::Unknown => unreachable!("scanner classifies unknown events"),
             },
         }
     }
-    for (line, id, amend) in resolves {
-        let message = if !record_ids.contains(&id) {
+    // Validity is decided after the join, and an invalid event is discarded
+    // before winners are chosen (r50), so the base-resolve set an orphan amend is
+    // judged against holds valid base resolves only.
+    let mut base_resolve_ids = HashSet::new();
+    let mut checked_resolves = Vec::new();
+    for (line, event) in resolves {
+        let LogEvent::Resolve { id, amend, .. } = &event else {
+            unreachable!("only resolve events are collected here")
+        };
+        // An orphan joins to no record and is therefore never invalid.
+        let broken = record_kinds
+            .get(id)
+            .map(|kind| store::broken_resolution_rules(&event, kind))
+            .unwrap_or_default();
+        if broken.is_empty() && !*amend {
+            base_resolve_ids.insert(id.clone());
+        }
+        checked_resolves.push((line, id.clone(), *amend, broken));
+    }
+    for (line, id, amend, broken) in checked_resolves {
+        if !broken.is_empty() {
+            findings.push(finding(
+                line,
+                "invalid_resolution",
+                format!("invalid resolution for {id}: {}", broken.join("; ")),
+            ));
+            continue;
+        }
+        let message = if !record_kinds.contains_key(&id) {
             Some(format!("resolve references unknown record {id}"))
         } else if amend && !base_resolve_ids.contains(&id) {
             Some(format!(
@@ -569,6 +604,13 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
         if let Some(message) = message {
             findings.push(finding(line, "orphan_resolve", message));
         }
+    }
+    if let Some(probe) = unsupported {
+        findings = vec![finding(
+            probe.line,
+            "unsupported_version",
+            unsupported_log_version_message(probe.line, probe.found_version.as_ref()),
+        )];
     }
     findings.extend(leak_findings);
     DoctorData {
@@ -802,13 +844,13 @@ mod tests {
 
     fn cut(id: &str) -> String {
         format!(
-            r#"{{"kind":"cut","id":"{id}","ts":"2026-01-15T00:00:00.000Z","agent":"t","text":"x","tags":[],"severity":"minor","cwd":"."}}"#
+            r#"{{"v":2,"kind":"cut","id":"{id}","ts":"2026-01-15T00:00:00.000Z","agent":"t","text":"x","tags":[],"impact":"low","cwd":"."}}"#
         )
     }
 
     fn resolve(id: &str) -> String {
         format!(
-            r#"{{"kind":"resolve","id":"{id}","ts":"2026-01-15T00:00:01.000Z","agent":"t","note":null}}"#
+            r#"{{"v":2,"kind":"resolve","id":"{id}","ts":"2026-01-15T00:00:01.000Z","agent":"t","note":null,"disposition":"fixed","disposition_ts":"2026-01-15T00:00:01.000Z"}}"#
         )
     }
 
@@ -832,8 +874,8 @@ mod tests {
                 resolve("bl_zzz")
             )
             .into_bytes(),
-            br#"{"kind":"nope"}"#.to_vec(),
-            format!("{{\"kind\":\"nope\"}}\nnot-json\n{}\n", cut("bl_a")).into_bytes(),
+            br#"{"v":2,"kind":"nope"}"#.to_vec(),
+            format!("{{\"v\":2,\"kind\":\"nope\"}}\nnot-json\n{}\n", cut("bl_a")).into_bytes(),
             b"not-json\nnot-json\nnot-json\n".to_vec(),
             format!("{}\n{}\n", cut("bl_a"), resolve("bl_a")).into_bytes(),
         ];

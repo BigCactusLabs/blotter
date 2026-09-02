@@ -240,21 +240,21 @@ fn retrospect_reads_auto_tagged_records_like_any_other() {
         auto_ts,
         "hook",
         auto_text,
-        Severity::Minor,
+        Impact::Low,
         &["auto".into(), "claude-code".into()],
     );
     append_lines(
         &file,
         &[json!({
+            "v": 2,
             "kind": "cut",
             "id": auto_id,
             "ts": auto_ts,
             "agent": "hook",
             "text": auto_text,
             "tags": ["auto", "claude-code"],
-            "severity": "minor",
+            "impact": "low",
             "cwd": ".",
-            "source": "hook",
             "evidence": {"cmd": auto_text}
         })
         .to_string()],

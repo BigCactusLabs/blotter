@@ -4,7 +4,7 @@ use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use crate::redact::rewrite_home_paths;
 use crate::store;
-use crate::{LogEvent, compute_dogear_id, format_timestamp, resolve_agent_checked};
+use crate::{LogEvent, Origin, compute_dogear_id, format_timestamp, resolve_agent_checked};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -42,6 +42,7 @@ pub fn run(
             .as_deref()
             .map(|value| redact_evidence(value, home.as_deref())),
         cwd: store::record_cwd(&resolved.cwd, resolved.cwd_repo(), home.as_deref()),
+        origin: Some(Origin::agent()),
     };
     let (changed, record) = store::append_unique(&resolved.path, record, args.dry_run)?;
     let mut meta = Meta::new();

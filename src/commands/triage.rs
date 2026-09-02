@@ -23,7 +23,7 @@ pub struct TriageCluster {
     pub tags: Vec<String>,
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
+    pub origin: Option<crate::Origin>,
     pub suggested_action: String,
 }
 
@@ -485,7 +485,7 @@ pub(crate) fn chronic_clusters(items: Vec<ListItem>, min_count: usize) -> Chroni
     let scanned = candidates.len();
     let frequencies = corpus_frequencies(candidates.iter());
     // Count every folded open cut by title. This is a recurrence signal, not
-    // an ID deduplication pass, so independently materialized pc_/bl_ records
+    // an ID deduplication pass, so two independently materialized records
     // both contribute when their normalized titles match.
     let mut title_occurrences = BTreeMap::new();
     for candidate in &candidates {
@@ -896,7 +896,7 @@ fn materialize_cluster(cluster: &ChronicCluster) -> TriageCluster {
             .collect(),
         tags: tags.into_iter().collect(),
         text: latest.item.text.clone(),
-        source: latest.item.source.clone(),
+        origin: latest.item.origin.clone(),
         suggested_action: "graduate".into(),
     }
 }
@@ -904,7 +904,7 @@ fn materialize_cluster(cluster: &ChronicCluster) -> TriageCluster {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Severity;
+    use crate::Impact;
 
     #[test]
     fn stopwords_are_sorted_and_unique_for_binary_search() {
@@ -956,9 +956,9 @@ mod tests {
             agent: "test".into(),
             text: text.into(),
             tags: tags.iter().map(|tag| (*tag).into()).collect(),
-            severity: Some(Severity::Minor),
+            impact: Some(Impact::Low),
             cwd: ".".into(),
-            source: None,
+            origin: None,
             evidence: None,
             status: ItemStatus::Open,
             resolution: None,

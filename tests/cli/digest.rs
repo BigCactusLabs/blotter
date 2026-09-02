@@ -27,6 +27,8 @@ fn digest_json_reports_chronic_windowed_cuts_and_open_dogears() {
         &file,
         &[
             "resolve",
+            "--disposition",
+            "fixed",
             resolved_cut.data.record.cut_id(),
             "--note",
             "done",
@@ -69,6 +71,7 @@ fn digest_json_reports_chronic_windowed_cuts_and_open_dogears() {
                 "ids": [first.data.record.cut_id(), second.data.record.cut_id()],
                 "tags": ["api", "common"],
                 "text": "Cache config missing",
+                "origin": {"type":"agent"},
                 "suggested_action": "graduate",
             }],
             "new_cuts": {
@@ -123,6 +126,7 @@ fn digest_since_excludes_old_cuts_but_keeps_them_chronic() {
             "ids": [old.data.record.cut_id(), recent.data.record.cut_id()],
             "tags": ["build"],
             "text": "Workspace cache missing",
+            "origin": {"type":"agent"},
             "suggested_action": "graduate",
         }])
     );

@@ -6,7 +6,9 @@ pub use blotter::commands::resolve::ResolveData;
 pub use blotter::commands::sweep::SweepData;
 pub use blotter::error::exit_code_map;
 pub use blotter::output::{ErrorEnvelope, SuccessEnvelope};
-pub use blotter::{Evidence, ItemStatus, LogEvent, Severity, compute_dogear_id, compute_id};
+pub use blotter::{
+    Disposition, Evidence, Impact, ItemStatus, LogEvent, Origin, compute_dogear_id, compute_id,
+};
 pub use serde::de::DeserializeOwned;
 pub use serde_json::{Value, json};
 pub use std::collections::HashMap;
@@ -210,23 +212,104 @@ pub fn verify_success(output: &std::process::Output, exit: i32) -> SuccessEnvelo
     triage_success(output, exit)
 }
 
+/// Resolve one record at a fixed clock. A cut needs `--disposition`, so this
+/// supplies `fixed` unless the caller is exercising a lane that must not carry
+/// one: an explicit `--disposition`, an `--amend` (where it is optional and
+/// inherited), or a dogear's `--url`/`--dropped` lifecycle.
 pub fn resolve_at(file: &Path, now: &str, id: &str, args: &[&str]) -> SuccessEnvelope<ResolveData> {
     let mut cmd = command();
     cmd.env("BLOTTER_NOW", now)
         .arg("--file")
         .arg(file)
-        .arg("resolve")
-        .arg(id)
-        .args(args);
+        .arg("resolve");
+    if !args
+        .iter()
+        .any(|arg| matches!(*arg, "--disposition" | "--amend" | "--url" | "--dropped"))
+    {
+        cmd.args(["--disposition", "fixed"]);
+    }
+    cmd.arg(id).args(args);
     success(&cmd.output().unwrap())
 }
 
+/// A hand-written resolve line. A resolve targeting a cut must carry
+/// `disposition` and `disposition_ts` or the fold discards it as invalid, so the
+/// helper supplies them for cut-width IDs; a dogear-width ID must not carry one.
 pub fn resolve_line(id: &str, ts: &str, note: &str, amend: bool) -> String {
-    let mut value = json!({"kind":"resolve","id":id,"ts":ts,"agent":"fixer","note":note});
+    let mut value = json!({"v":2,"kind":"resolve","id":id,"ts":ts,"agent":"fixer","note":note});
     if amend {
         value["amend"] = json!(true);
     }
+    if id.len() != "bl_".len() + 20 {
+        value["disposition"] = json!("fixed");
+        value["disposition_ts"] = json!(ts);
+    }
     value.to_string()
+}
+
+/// A 0.15 (v1) cut line: an object whose raw `kind` is one the probe knows,
+/// carrying no `v`. Any log holding one is refused whole.
+pub fn v1_cut_line() -> String {
+    json!({
+        "kind": "cut",
+        "id": "bl_a1b2c3d4e5f6",
+        "ts": "2026-07-09T00:00:00.000Z",
+        "agent": "legacy",
+        "text": "v1 cut",
+        "tags": [],
+        "severity": "minor",
+        "cwd": "/tmp"
+    })
+    .to_string()
+}
+
+/// A v2 cut line, for the mixed-log case.
+pub fn v2_cut_line(text: &str) -> String {
+    let id = compute_id("2026-07-09T00:00:00.000Z", "tester", text, Impact::Low, &[]);
+    json!({
+        "v": 2,
+        "kind": "cut",
+        "id": id,
+        "ts": "2026-07-09T00:00:00.000Z",
+        "agent": "tester",
+        "text": text,
+        "tags": [],
+        "impact": "low",
+        "cwd": "/tmp"
+    })
+    .to_string()
+}
+
+/// The exact `suggested_fix` the upgrade refusal carries. It names the resolved
+/// path, instructs a rename to a path that does not yet exist followed by
+/// `blotter add`, and carries no literal `mv` (r48, r49).
+pub fn unsupported_version_fix(file: &Path) -> String {
+    format!(
+        "Rename {} to a path that does not yet exist, then run `blotter add` to create a fresh v2 log.",
+        file.display()
+    )
+}
+
+/// Every path in a directory, sorted — used to prove a refusal created no
+/// backup, quarantine, or archive sidecar beside the log.
+pub fn directory_entries(directory: &Path) -> Vec<String> {
+    let mut names = std::fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
+/// The stored line for an envelope record: `v` first, then the record's own
+/// members. `v` is a storage marker and appears in no envelope (r50).
+pub fn stored_line(record: &Value) -> Value {
+    let mut line = serde_json::Map::new();
+    line.insert("v".into(), json!(2));
+    for (key, value) in record.as_object().expect("records are JSON objects") {
+        line.insert(key.clone(), value.clone());
+    }
+    Value::Object(line)
 }
 
 pub fn append_lines(file: &Path, lines: &[String]) {

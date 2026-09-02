@@ -68,14 +68,23 @@ fn evidence_and_resolve_response_shapes_are_exactly_compatible() {
     assert_eq!(
         record.keys().map(String::as_str).collect::<Vec<_>>(),
         [
-            "kind", "id", "ts", "agent", "text", "tags", "severity", "cwd"
+            "kind", "id", "ts", "agent", "text", "tags", "impact", "cwd", "origin"
         ]
     );
     assert!(record.get("repo").is_none());
     assert!(record.get("evidence").is_none());
     let log_text = std::fs::read_to_string(&file).unwrap();
     let log: Value = serde_json::from_str(log_text.lines().next().unwrap()).unwrap();
-    assert_eq!(log, serde_json::to_value(&added.data.record).unwrap());
+    // r50: the stored line is the envelope record plus the storage marker, and
+    // `v` is that line's first member so a v2 log is recognizable from its first
+    // bytes. `v` reaches no envelope, so it is not in `data.record`.
+    let record = serde_json::to_value(&added.data.record).unwrap();
+    assert!(record.get("v").is_none());
+    assert_eq!(log, stored_line(&record));
+    assert_eq!(
+        log.as_object().unwrap().keys().next().map(String::as_str),
+        Some("v")
+    );
 
     let partial: SuccessEnvelope<AddData> = success(&run_file(
         &file,
@@ -99,9 +108,19 @@ fn evidence_and_resolve_response_shapes_are_exactly_compatible() {
         ["exit"]
     );
 
-    let one: Value =
-        serde_json::from_slice(&run_file(&file, &["resolve", added.data.record.cut_id()]).stdout)
-            .unwrap();
+    let one: Value = serde_json::from_slice(
+        &run_file(
+            &file,
+            &[
+                "resolve",
+                "--disposition",
+                "fixed",
+                added.data.record.cut_id(),
+            ],
+        )
+        .stdout,
+    )
+    .unwrap();
     assert_eq!(
         one["data"]
             .as_object()
@@ -123,8 +142,9 @@ fn evidence_and_resolve_response_shapes_are_exactly_compatible() {
             "agent",
             "text",
             "tags",
-            "severity",
+            "impact",
             "cwd",
+            "origin",
             "status",
             "resolution"
         ]
@@ -135,19 +155,29 @@ fn evidence_and_resolve_response_shapes_are_exactly_compatible() {
     assert_eq!(one_record["agent"], "tester");
     assert_eq!(one_record["text"], "no evidence");
     assert_eq!(one_record["tags"], json!([]));
-    assert_eq!(one_record["severity"], "minor");
+    assert_eq!(one_record["impact"], "low");
     assert_eq!(one_record["cwd"], added.data.record.cut_cwd());
     assert!(one_record.get("repo").is_none());
     assert_eq!(one_record["status"], "resolved");
     assert_eq!(
         one_record["resolution"],
-        json!({"agent":"unknown","note":null,"ts":"2026-07-09T18:30:00.123Z"})
+        json!({"agent":"unknown","note":null,"ts":"2026-07-09T18:30:00.123Z","disposition":"fixed","disposition_ts":"2026-07-09T18:30:00.123Z"})
     );
     let second = partial.data.record.cut_id();
     let third: SuccessEnvelope<AddData> =
         success(&run_file(&file, &["add", "third", "--agent", "tester"]));
     let many: Value = serde_json::from_slice(
-        &run_file(&file, &["resolve", second, third.data.record.cut_id()]).stdout,
+        &run_file(
+            &file,
+            &[
+                "resolve",
+                "--disposition",
+                "fixed",
+                second,
+                third.data.record.cut_id(),
+            ],
+        )
+        .stdout,
     )
     .unwrap();
     assert_eq!(
@@ -165,7 +195,7 @@ fn evidence_and_resolve_response_shapes_are_exactly_compatible() {
         let record = record.as_object().unwrap();
         assert_eq!(record["kind"], "cut");
         assert_eq!(record["status"], "resolved");
-        assert_eq!(record["severity"], "minor");
+        assert_eq!(record["impact"], "low");
         assert_eq!(record["tags"], json!([]));
         assert_eq!(record["ts"], "2026-07-09T18:30:00.123Z");
         assert_eq!(record["agent"], "tester");
@@ -183,8 +213,9 @@ fn evidence_and_resolve_response_shapes_are_exactly_compatible() {
                         "agent",
                         "text",
                         "tags",
-                        "severity",
+                        "impact",
                         "cwd",
+                        "origin",
                         "evidence",
                         "status",
                         "resolution"
@@ -205,8 +236,9 @@ fn evidence_and_resolve_response_shapes_are_exactly_compatible() {
                         "agent",
                         "text",
                         "tags",
-                        "severity",
+                        "impact",
                         "cwd",
+                        "origin",
                         "status",
                         "resolution"
                     ]
@@ -248,6 +280,8 @@ fn every_command_success_envelope_deserializes() {
         &file,
         &[
             "resolve",
+            "--disposition",
+            "fixed",
             added.data.record.cut_id(),
             "--agent",
             "fixer",
@@ -339,12 +373,12 @@ fn every_command_success_envelope_deserializes() {
     assert_eq!(
         schema.data["id"]["cut"]["fields_in_order"],
         json!([
-            "literal bl1",
+            "literal bl2",
             "literal cut",
             "ts",
             "agent",
             "text",
-            "severity",
+            "impact",
             "tag count",
             "each sorted unique tag as its own field"
         ])
@@ -834,7 +868,7 @@ fn shared_agent_validation_preserves_append_and_resolve_policies() {
             .env("BLOTTER_AGENT", " ")
             .arg("--file")
             .arg(&file)
-            .args(["resolve", &id])
+            .args(["resolve", "--disposition", "fixed", &id])
             .output()
             .unwrap(),
     );
@@ -918,9 +952,9 @@ fn tagged_event_serialization_preserves_record_field_order() {
         agent: "fixture".into(),
         text: "cut".into(),
         tags: vec!["a".into()],
-        severity: Severity::Major,
+        impact: Impact::Material,
         cwd: ".".into(),
-        source: None,
+        origin: Some(Origin::agent()),
         evidence: Some(Evidence {
             cmd: Some("cmd".into()),
             exit: Some(7),
@@ -930,7 +964,7 @@ fn tagged_event_serialization_preserves_record_field_order() {
     };
     assert_eq!(
         serde_json::to_string(&cut).unwrap(),
-        r#"{"kind":"cut","id":"bl_123456789abc","ts":"2026-08-01T00:00:00.000Z","agent":"fixture","text":"cut","tags":["a"],"severity":"major","cwd":".","evidence":{"cmd":"cmd","exit":7,"stderr":"stderr","note":"note"}}"#,
+        r#"{"kind":"cut","id":"bl_123456789abc","ts":"2026-08-01T00:00:00.000Z","agent":"fixture","text":"cut","tags":["a"],"impact":"material","cwd":".","origin":{"type":"agent"},"evidence":{"cmd":"cmd","exit":7,"stderr":"stderr","note":"note"}}"#,
     );
 
     let dogear = LogEvent::Dogear {
@@ -941,10 +975,11 @@ fn tagged_event_serialization_preserves_record_field_order() {
         tags: vec!["a".into()],
         evidence: Some("note".into()),
         cwd: ".".into(),
+        origin: Some(Origin::agent()),
     };
     assert_eq!(
         serde_json::to_string(&dogear).unwrap(),
-        r#"{"kind":"dogear","id":"bl_12345678901234567890","ts":"2026-08-02T00:00:00.000Z","agent":"fixture","text":"dogear","tags":["a"],"evidence":"note","cwd":"."}"#,
+        r#"{"kind":"dogear","id":"bl_12345678901234567890","ts":"2026-08-02T00:00:00.000Z","agent":"fixture","text":"dogear","tags":["a"],"evidence":"note","cwd":".","origin":{"type":"agent"}}"#,
     );
 
     let resolve = LogEvent::Resolve {
@@ -958,10 +993,12 @@ fn tagged_event_serialization_preserves_record_field_order() {
         url: Some("https://example.test".into()),
         dropped: true,
         amend: false,
+        disposition: Some(Disposition::Fixed),
+        disposition_ts: Some("2026-08-03T00:00:00.000Z".into()),
     };
     assert_eq!(
         serde_json::to_string(&resolve).unwrap(),
-        r##"{"kind":"resolve","id":"bl_123456789abc","ts":"2026-08-03T00:00:00.000Z","agent":"fixture","note":null,"task":"TASK-16","pr":"#16","commit":"deadbeef","url":"https://example.test","dropped":true}"##,
+        r##"{"kind":"resolve","id":"bl_123456789abc","ts":"2026-08-03T00:00:00.000Z","agent":"fixture","note":null,"task":"TASK-16","pr":"#16","commit":"deadbeef","url":"https://example.test","dropped":true,"disposition":"fixed","disposition_ts":"2026-08-03T00:00:00.000Z"}"##,
     );
     assert_eq!(
         serde_json::from_str::<LogEvent>(r#"{"kind":"future","extra":true}"#).unwrap(),
@@ -974,17 +1011,19 @@ fn scanner_classification_remains_distinct_through_list_and_doctor() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
     let invalid_cut = json!({
-        "kind":"cut", "id":"bl_bad", "ts":"2026-07-09T00:00:00.000Z",
-        "agent":"a", "text":"x", "tags":[], "severity":"future", "cwd":"/tmp"
+        "v": 2,
+        "kind": "cut", "id":"bl_bad", "ts":"2026-07-09T00:00:00.000Z",
+        "agent":"a", "text":"x", "tags":[], "impact":"future", "cwd":"/tmp"
     });
     let invalid_timestamp = json!({
-        "kind":"cut", "id":"bl_bad", "ts":"not-a-time",
-        "agent":"a", "text":"x", "tags":[], "severity":"minor", "cwd":"/tmp"
+        "v": 2,
+        "kind": "cut", "id":"bl_bad", "ts":"not-a-time",
+        "agent":"a", "text":"x", "tags":[], "impact":"low", "cwd":"/tmp"
     });
     std::fs::write(
         &file,
         format!(
-            "{invalid_cut}\n{{\"kind\":\"future\"}}\n{invalid_timestamp}\n{{\"kind\":\"cut\"}}\n{{\"kind\":"
+            "{invalid_cut}\n{{\"kind\":\"future\"}}\n{invalid_timestamp}\n{{\"v\":2,\"kind\":\"cut\"}}\n{{\"kind\":"
         ),
     )
     .unwrap();
@@ -1051,7 +1090,15 @@ fn mutation_dry_runs_do_not_write() {
     let before = std::fs::read(&file).unwrap();
     let resolved: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
-        &["resolve", &id, "--agent", "a", "--dry-run"],
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &id,
+            "--agent",
+            "a",
+            "--dry-run",
+        ],
     ));
     assert!(!resolved.data.changed);
     assert_eq!(resolved.data.records.len(), 1);
@@ -1102,7 +1149,7 @@ fn error_envelope_matrix() {
     let ambiguous = temp.path().join("ambiguous.jsonl");
     let lines = ["bl_abcd00000000", "bl_abcd11111111"]
         .map(|id| {
-            json!({"kind":"cut","id":id,"ts":"2026-07-09T00:00:00.000Z","agent":"a","text":id,"tags":[],"severity":"minor","cwd":"/tmp","repo":null}).to_string()
+            json!({"v":2,"kind":"cut","id":id,"ts":"2026-07-09T00:00:00.000Z","agent":"a","text":id,"tags":[],"impact":"low","cwd":"/tmp","repo":null}).to_string()
         })
         .join("\n")
         + "\n";
@@ -1132,7 +1179,7 @@ fn error_envelope_matrix() {
         );
     }
     error(
-        &run_file(&ambiguous, &["resolve", "abcd"]),
+        &run_file(&ambiguous, &["resolve", "--disposition", "fixed", "abcd"]),
         65,
         "ambiguous_id",
     );
@@ -1185,4 +1232,210 @@ fn non_utf8_blotter_agent_is_a_config_error_and_never_files_a_detected_agent() {
     let envelope = error(&output, 78, "config_error");
     assert!(envelope.error.message.contains("BLOTTER_AGENT"));
     assert!(!file.exists());
+}
+
+/// r48/r49/r50: the upgrade refusal is product surface, so every observable
+/// clause of the probe is a contract test rather than README prose. This one
+/// pins the error's own shape.
+#[test]
+fn a_v1_log_is_refused_with_the_full_unsupported_version_shape() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, format!("{}\n", v1_cut_line())).unwrap();
+
+    let output = run_file(&file, &["list"]);
+    let envelope = error(&output, 65, "unsupported_log_version");
+    assert!(!envelope.error.retryable);
+    assert!(output.stdout.is_empty());
+    assert_eq!(
+        envelope.error.message,
+        "unsupported log version on line 1: record has no v field"
+    );
+    // The message names the line and what was found, never the path: `sweep`
+    // prefixes its warning with the path and would otherwise name it twice.
+    assert!(!envelope.error.message.contains(file.to_str().unwrap()));
+    assert_eq!(
+        envelope.error.details,
+        json!({"file": file.to_string_lossy(), "line": 1})
+    );
+    assert!(envelope.error.details.get("found_version").is_none());
+    assert_eq!(envelope.error.suggested_fix, unsupported_version_fix(&file));
+    assert!(!envelope.error.suggested_fix.contains("mv "));
+}
+
+/// `found_version` is present verbatim for any `v` other than the JSON integer
+/// 2 — `null` included — and omitted only when the key is absent. Absent and
+/// wrong are told apart by key presence, never by null-ness (r50).
+#[test]
+fn found_version_carries_every_wrong_value_verbatim() {
+    let temp = TempDir::new().unwrap();
+    let cases = [
+        (json!(1), json!(1)),
+        (json!(null), json!(null)),
+        (json!("2"), json!("2")),
+        (json!(2.0), json!(2.0)),
+        (json!(3), json!(3)),
+    ];
+    for (index, (stored, expected)) in cases.into_iter().enumerate() {
+        let file = temp.path().join(format!("v-{index}.jsonl"));
+        let mut line: Value = serde_json::from_str(&v1_cut_line()).unwrap();
+        line["v"] = stored.clone();
+        std::fs::write(&file, format!("{line}\n")).unwrap();
+
+        let envelope = error(&run_file(&file, &["list"]), 65, "unsupported_log_version");
+        // Indexing a missing key yields `Null`, so key presence is asserted
+        // separately: for `"v":null` the key must be present with value null.
+        assert!(
+            envelope
+                .error
+                .details
+                .as_object()
+                .unwrap()
+                .contains_key("found_version"),
+            "stored {stored}"
+        );
+        assert_eq!(
+            envelope.error.details["found_version"], expected,
+            "stored {stored}"
+        );
+        assert_eq!(
+            envelope.error.message,
+            format!("unsupported log version on line 1: found v {expected}")
+        );
+    }
+
+    // `2e0` is the same value written as an exponent, and it is refused too:
+    // only an integer literal passes.
+    let file = temp.path().join("exponent.jsonl");
+    let line = v1_cut_line().replacen("{", "{\"v\":2e0,", 1);
+    std::fs::write(&file, format!("{line}\n")).unwrap();
+    let envelope = error(&run_file(&file, &["list"]), 65, "unsupported_log_version");
+    assert_eq!(envelope.error.details["found_version"], json!(2.0));
+}
+
+/// A mixed log refuses on the **first** offending physical line, whatever the
+/// v2 records around it.
+#[test]
+fn a_mixed_log_refuses_on_the_first_v1_line() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(
+        &file,
+        format!(
+            "{}\n{}\n{}\n",
+            v2_cut_line("first"),
+            v1_cut_line(),
+            v2_cut_line("third")
+        ),
+    )
+    .unwrap();
+
+    let envelope = error(&run_file(&file, &["list"]), 65, "unsupported_log_version");
+    assert_eq!(envelope.error.details["line"], 2);
+}
+
+/// Every read command refuses. There is no empty-state fallback: the file exists
+/// and is unreadable rather than absent.
+#[test]
+fn every_read_command_refuses_a_v1_log_with_no_empty_state_fallback() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(&file, format!("{}\n", v1_cut_line())).unwrap();
+
+    for args in [
+        &["list"][..],
+        &["triage"][..],
+        &["digest"][..],
+        &["verify"][..],
+        &["retrospect"][..],
+        &["export", "--format", "otlp-json"][..],
+    ] {
+        let output = run_file(&file, args);
+        error(&output, 65, "unsupported_log_version");
+        assert!(output.stdout.is_empty(), "{args:?} wrote stdout");
+    }
+}
+
+/// Every mutating path refuses, appends nothing, and leaves the file
+/// byte-identical with no backup, quarantine, or archive sidecar beside it.
+#[test]
+fn every_mutating_path_leaves_a_refused_log_byte_identical_with_no_sidecars() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let original = format!("{}\n", v1_cut_line());
+    std::fs::write(&file, &original).unwrap();
+
+    for args in [
+        &["add", "new cut", "--agent", "tester"][..],
+        &["dogear", "new idea", "--agent", "tester"][..],
+        &["resolve", "--disposition", "fixed", "a1b2c3d4e5f6"][..],
+        &["doctor", "--fix"][..],
+        &["doctor", "--fix", "--dry-run"][..],
+        &["archive", "--before", "1d"][..],
+    ] {
+        let output = run_file(&file, args);
+        if args[0] == "doctor" {
+            // doctor answers with findings, not an error envelope: naming what
+            // is wrong with a log is its job.
+            assert_eq!(output.status.code(), Some(1), "{args:?}");
+        } else {
+            error(&output, 65, "unsupported_log_version");
+        }
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            original,
+            "{args:?}"
+        );
+        assert_eq!(directory_entries(temp.path()), ["cuts.jsonl"], "{args:?}");
+    }
+}
+
+/// The dry-run matrix (r48): a dry run probes exactly when it opens the log.
+/// `resolve --dry-run` must fold to match IDs, so it probes; `add --dry-run` and
+/// `dogear --dry-run` never open the log, so a successful one is explicitly not
+/// a prediction that the apply will pass the probe.
+#[test]
+fn resolve_dry_run_probes_a_v1_log_and_add_dry_run_does_not() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let original = format!("{}\n", v1_cut_line());
+    std::fs::write(&file, &original).unwrap();
+
+    error(
+        &run_file(
+            &file,
+            &["resolve", "--disposition", "fixed", "a1b2", "--dry-run"],
+        ),
+        65,
+        "unsupported_log_version",
+    );
+
+    let added: SuccessEnvelope<AddData> = success(&run_file(
+        &file,
+        &["add", "predicted", "--agent", "tester", "--dry-run"],
+    ));
+    assert!(!added.data.changed);
+    let dogeared: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &["dogear", "predicted", "--agent", "tester", "--dry-run"],
+    ));
+    assert_eq!(dogeared.data["changed"], false);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+}
+
+/// Where several error codes share one exit code, the published description is
+/// a deliberately authored string naming every code that maps to it — never
+/// whichever `ERROR_CONTRACT` entry the map happened to insert last (r48). The
+/// schema test that compares the map to itself cannot catch a regression here,
+/// so the literal is pinned.
+#[test]
+fn schema_publishes_the_authored_exit_65_description() {
+    let schema: SuccessEnvelope<Value> = success(&run(&["schema", "exit-codes"]));
+    assert_eq!(
+        schema.data["exit_codes"]["65"],
+        "invalid input data, including an ambiguous ID or an unsupported log version"
+    );
+    let codes: SuccessEnvelope<Value> = success(&run(&["schema", "error"]));
+    let codes = codes.data["errors"]["codes"].as_array().unwrap();
+    assert!(codes.contains(&json!("unsupported_log_version")));
 }

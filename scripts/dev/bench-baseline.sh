@@ -286,10 +286,10 @@ run_batch() {
                         BLOTTER_NOW="$SCALE_MEASUREMENT_NOW" "$BENCH_BIN" --file "$BENCH_FIXTURE" doctor >/dev/null
                         ;;
                     add_duplicate)
-                        BLOTTER_NOW="$SCALE_DUPLICATE_ADD_NOW" "$BENCH_BIN" --file "$BENCH_FIXTURE" add "$SCALE_DUPLICATE_TEXT" --agent "$SCALE_DUPLICATE_AGENT" --severity minor --tag "$SCALE_DUPLICATE_TAG_1" --tag "$SCALE_DUPLICATE_TAG_2" >/dev/null
+                        BLOTTER_NOW="$SCALE_DUPLICATE_ADD_NOW" "$BENCH_BIN" --file "$BENCH_FIXTURE" add "$SCALE_DUPLICATE_TEXT" --agent "$SCALE_DUPLICATE_AGENT" --impact low --tag "$SCALE_DUPLICATE_TAG_1" --tag "$SCALE_DUPLICATE_TAG_2" >/dev/null
                         ;;
                     resolve)
-                        BLOTTER_NOW="$SCALE_MEASUREMENT_NOW" "$BENCH_BIN" --file "$BENCH_SCRATCH/resolve-$index.jsonl" resolve "$BENCH_RESOLVE_ID" --agent "$SCALE_DUPLICATE_AGENT" --note "scale baseline mutation" >/dev/null
+                        BLOTTER_NOW="$SCALE_MEASUREMENT_NOW" "$BENCH_BIN" --file "$BENCH_SCRATCH/resolve-$index.jsonl" resolve "$BENCH_RESOLVE_ID" --agent "$SCALE_DUPLICATE_AGENT" --disposition fixed --note "scale baseline mutation" >/dev/null
                         ;;
                 esac
                 status=$?
@@ -321,10 +321,10 @@ run_batch() {
                         BLOTTER_NOW="$SCALE_MEASUREMENT_NOW" "$BENCH_BIN" --file "$BENCH_FIXTURE" doctor >/dev/null
                         ;;
                     add_duplicate)
-                        BLOTTER_NOW="$SCALE_DUPLICATE_ADD_NOW" "$BENCH_BIN" --file "$BENCH_FIXTURE" add "$SCALE_DUPLICATE_TEXT" --agent "$SCALE_DUPLICATE_AGENT" --severity minor --tag "$SCALE_DUPLICATE_TAG_1" --tag "$SCALE_DUPLICATE_TAG_2" >/dev/null
+                        BLOTTER_NOW="$SCALE_DUPLICATE_ADD_NOW" "$BENCH_BIN" --file "$BENCH_FIXTURE" add "$SCALE_DUPLICATE_TEXT" --agent "$SCALE_DUPLICATE_AGENT" --impact low --tag "$SCALE_DUPLICATE_TAG_1" --tag "$SCALE_DUPLICATE_TAG_2" >/dev/null
                         ;;
                     resolve)
-                        BLOTTER_NOW="$SCALE_MEASUREMENT_NOW" "$BENCH_BIN" --file "$BENCH_SCRATCH/resolve-$index.jsonl" resolve "$BENCH_RESOLVE_ID" --agent "$SCALE_DUPLICATE_AGENT" --note "scale baseline mutation" >/dev/null
+                        BLOTTER_NOW="$SCALE_MEASUREMENT_NOW" "$BENCH_BIN" --file "$BENCH_SCRATCH/resolve-$index.jsonl" resolve "$BENCH_RESOLVE_ID" --agent "$SCALE_DUPLICATE_AGENT" --disposition fixed --note "scale baseline mutation" >/dev/null
                         ;;
                 esac
                 status=$?

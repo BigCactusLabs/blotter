@@ -2,7 +2,7 @@ use crate::cli::ArchiveArgs;
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use crate::store;
-use crate::{IdNamespace, ItemStatus, id_namespace, parse_before};
+use crate::{ItemStatus, is_bl_id, parse_before};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -65,6 +65,7 @@ fn dry_run(
         empty_plan,
         |log| {
             let bytes = store::read_bytes(log, &resolved.path)?;
+            store::check_version(&bytes, &resolved.path)?;
             Ok(plan_archive(&bytes, cutoff))
         },
     )?;
@@ -106,6 +107,9 @@ fn apply_archive(
     now: Timestamp,
 ) -> AppResult<(ArchiveData, Vec<String>)> {
     let original = store::read_bytes(log, path)?;
+    // Before the plan, and so before any backup or sidecar: a refused log is
+    // byte-identical afterwards and gains no files beside it.
+    store::check_version(&original, path)?;
     let mut plan = plan_archive(&original, cutoff);
     if plan.data.archived == 0 {
         return Ok((plan.data, plan.warnings));
@@ -154,15 +158,13 @@ fn plan_archive(bytes: &[u8], cutoff: Timestamp) -> ArchivePlan {
     let closed_ids = folded
         .items
         .iter()
-        .filter(|item| {
-            item.status == ItemStatus::Resolved && id_namespace(&item.id) == Some(IdNamespace::Bl)
-        })
+        .filter(|item| item.status == ItemStatus::Resolved && is_bl_id(&item.id))
         .map(|item| item.id.clone())
         .collect::<HashSet<_>>();
 
     let mut group_lines = HashMap::<&str, Vec<(usize, bool)>>::new();
     for folded_line in folded.lines() {
-        if id_namespace(&folded_line.id) != Some(IdNamespace::Bl) {
+        if !is_bl_id(&folded_line.id) {
             continue;
         }
         group_lines

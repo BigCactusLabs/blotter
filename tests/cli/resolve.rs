@@ -6,9 +6,19 @@ fn resolve_single_id_always_returns_a_records_array() {
     let file = temp.path().join("cuts.jsonl");
     let added = add(&file, "resolve one");
 
-    let resolved: Value =
-        serde_json::from_slice(&run_file(&file, &["resolve", added.data.record.cut_id()]).stdout)
-            .unwrap();
+    let resolved: Value = serde_json::from_slice(
+        &run_file(
+            &file,
+            &[
+                "resolve",
+                "--disposition",
+                "fixed",
+                added.data.record.cut_id(),
+            ],
+        )
+        .stdout,
+    )
+    .unwrap();
     let data = resolved["data"].as_object().unwrap();
     assert!(data.get("record").is_none());
     let records = data["records"].as_array().unwrap();
@@ -26,6 +36,8 @@ fn resolve_records_structured_graduation_fields() {
         &file,
         &[
             "resolve",
+            "--disposition",
+            "fixed",
             cut.data.record.cut_id(),
             "--task",
             "TASK-2",
@@ -102,7 +114,7 @@ fn resolve_records_dogear_publish_and_drop_lifecycle() {
 
 #[test]
 fn resolve_help_marks_dogear_only_lifecycle_flags() {
-    let help = run(&["resolve", "--help"]);
+    let help = run(&["resolve", "--disposition", "fixed", "--help"]);
     assert!(help.status.success());
     assert!(help.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&help.stdout);
@@ -181,8 +193,15 @@ fn resolve_without_new_flags_omits_graduation_and_lifecycle_keys() {
     let file = temp.path().join("cuts.jsonl");
     let cut = add(&file, "ordinary resolve response");
 
-    let resolved: SuccessEnvelope<Value> =
-        success(&run_file(&file, &["resolve", cut.data.record.cut_id()]));
+    let resolved: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            cut.data.record.cut_id(),
+        ],
+    ));
     let resolution = resolved.data["records"][0]["resolution"]
         .as_object()
         .unwrap();
@@ -191,7 +210,7 @@ fn resolve_without_new_flags_omits_graduation_and_lifecycle_keys() {
     }
     assert_eq!(
         resolved.data["records"][0]["resolution"],
-        json!({"agent":"unknown","note":null,"ts":"2026-07-09T18:30:00.123Z"})
+        json!({"agent":"unknown","note":null,"ts":"2026-07-09T18:30:00.123Z","disposition":"fixed","disposition_ts":"2026-07-09T18:30:00.123Z"})
     );
     let event = std::fs::read_to_string(&file)
         .unwrap()
@@ -207,7 +226,7 @@ fn resolve_without_new_flags_omits_graduation_and_lifecycle_keys() {
     assert_eq!(
         event,
         format!(
-            "{{\"kind\":\"resolve\",\"id\":\"{}\",\"ts\":\"2026-07-09T18:30:00.123Z\",\"agent\":\"unknown\",\"note\":null}}",
+            "{{\"v\":2,\"kind\":\"resolve\",\"id\":\"{}\",\"ts\":\"2026-07-09T18:30:00.123Z\",\"agent\":\"unknown\",\"note\":null,\"disposition\":\"fixed\",\"disposition_ts\":\"2026-07-09T18:30:00.123Z\"}}",
             cut.data.record.cut_id()
         )
     );
@@ -222,7 +241,16 @@ fn resolve_amend_replaces_base_resolution_and_preserves_history() {
     let _: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
         &[
-            "resolve", &id, "--agent", "base", "--note", "original", "--task", "TASK-12",
+            "resolve",
+            "--disposition",
+            "fixed",
+            &id,
+            "--agent",
+            "base",
+            "--note",
+            "original",
+            "--task",
+            "TASK-12",
         ],
     ));
     let before_amend = std::fs::read(&file).unwrap();
@@ -267,8 +295,10 @@ fn resolve_amend_latest_event_supersedes_prior_amend() {
     let file = temp.path().join("cuts.jsonl");
     let cut = add(&file, "latest correction wins");
     let id = cut.data.record.cut_id().to_owned();
-    let _: SuccessEnvelope<ResolveData> =
-        success(&run_file(&file, &["resolve", &id, "--note", "base"]));
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &["resolve", "--disposition", "fixed", &id, "--note", "base"],
+    ));
     let _: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
         &[
@@ -356,8 +386,17 @@ fn resolve_amend_batches_require_every_record_to_be_resolved() {
         .record
         .cut_id()
         .to_owned();
-    let _: SuccessEnvelope<ResolveData> =
-        success(&run_file(&file, &["resolve", &first, "--note", "base"]));
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &first,
+            "--note",
+            "base",
+        ],
+    ));
     let before = std::fs::read(&file).unwrap();
 
     error(
@@ -377,8 +416,17 @@ fn resolve_amend_batches_require_every_record_to_be_resolved() {
     );
     assert_eq!(std::fs::read(&file).unwrap(), before);
 
-    let _: SuccessEnvelope<ResolveData> =
-        success(&run_file(&file, &["resolve", &second, "--note", "base"]));
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &second,
+            "--note",
+            "base",
+        ],
+    ));
     let amended: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
         &[
@@ -463,8 +511,17 @@ fn resolve_amend_supports_dogear_lifecycle_fields() {
 
     let cut = add(&file, "cut cannot amend a URL");
     let cut_id = cut.data.record.cut_id().to_owned();
-    let _: SuccessEnvelope<ResolveData> =
-        success(&run_file(&file, &["resolve", &cut_id, "--note", "base"]));
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &cut_id,
+            "--note",
+            "base",
+        ],
+    ));
     let before = std::fs::read(&file).unwrap();
     error(
         &run_file(
@@ -489,8 +546,10 @@ fn resolve_amend_dry_run_materializes_without_appending() {
     let file = temp.path().join("cuts.jsonl");
     let cut = add(&file, "preview correction");
     let id = cut.data.record.cut_id().to_owned();
-    let _: SuccessEnvelope<ResolveData> =
-        success(&run_file(&file, &["resolve", &id, "--note", "base"]));
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &["resolve", "--disposition", "fixed", &id, "--note", "base"],
+    ));
     let before = std::fs::read(&file).unwrap();
 
     let preview: SuccessEnvelope<ResolveData> = success(&run_file(
@@ -514,8 +573,10 @@ fn amended_list_output_is_byte_deterministic_under_blotter_now() {
     let file = temp.path().join("cuts.jsonl");
     let cut = add(&file, "deterministic correction");
     let id = cut.data.record.cut_id().to_owned();
-    let _: SuccessEnvelope<ResolveData> =
-        success(&run_file(&file, &["resolve", &id, "--note", "base"]));
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &["resolve", "--disposition", "fixed", &id, "--note", "base"],
+    ));
     let _: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
         &["resolve", &id, "--amend", "--note", "corrected"],
@@ -542,12 +603,15 @@ fn orphan_resolve_amends_warn_in_the_fold_and_fail_doctor() {
     let id = cut.data.record.cut_id().to_owned();
     let original = std::fs::read_to_string(&file).unwrap();
     let orphan_amend = json!({
+        "v": 2,
         "kind": "resolve",
         "id": id,
         "ts": "2026-07-09T18:30:00.123Z",
         "agent": "fixture",
         "note": "orphan amend",
-        "amend": true
+        "amend": true,
+        "disposition": "fixed",
+        "disposition_ts": "2026-07-09T18:30:00.123Z"
     });
     std::fs::write(&file, format!("{original}{orphan_amend}\n")).unwrap();
 
@@ -568,13 +632,16 @@ fn resolve_reports_materialized_orphan_amend_after_base_append() {
     let id = cut.data.record.cut_id().to_owned();
     let original = std::fs::read_to_string(&file).unwrap();
     let orphan_amend = json!({
+        "v": 2,
         "kind": "resolve",
         "id": id,
         "ts": "2026-07-09T18:31:00.000Z",
         "agent": "stale-amend",
         "note": "stale correction",
         "task": "TASK-STALE",
-        "amend": true
+        "amend": true,
+        "disposition": "fixed",
+        "disposition_ts": "2026-07-09T18:31:00.000Z"
     });
     std::fs::write(&file, format!("{original}{orphan_amend}\n")).unwrap();
 
@@ -582,6 +649,8 @@ fn resolve_reports_materialized_orphan_amend_after_base_append() {
         &file,
         &[
             "resolve",
+            "--disposition",
+            "fixed",
             &id,
             "--agent",
             "base",
@@ -608,20 +677,26 @@ fn multiple_orphan_amends_for_one_record_count_once() {
     let id = cut.data.record.cut_id().to_owned();
     let original = std::fs::read_to_string(&file).unwrap();
     let first = json!({
+        "v": 2,
         "kind": "resolve",
         "id": id,
         "ts": "2026-07-09T18:30:00.123Z",
         "agent": "fixture",
         "note": "first orphan amend",
-        "amend": true
+        "amend": true,
+        "disposition": "fixed",
+        "disposition_ts": "2026-07-09T18:30:00.123Z"
     });
     let second = json!({
+        "v": 2,
         "kind": "resolve",
         "id": id,
         "ts": "2026-07-09T18:31:00.123Z",
         "agent": "fixture",
         "note": "second orphan amend",
-        "amend": true
+        "amend": true,
+        "disposition": "fixed",
+        "disposition_ts": "2026-07-09T18:31:00.123Z"
     });
     std::fs::write(&file, format!("{original}{first}\n{second}\n")).unwrap();
 
@@ -645,7 +720,16 @@ fn multiple_orphan_amends_for_one_record_count_once() {
     // from the deciding fold without reading the log a second time.
     let resolved: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
-        &["resolve", &id, "--agent", "base", "--note", "base"],
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &id,
+            "--agent",
+            "base",
+            "--note",
+            "base",
+        ],
     ));
     let listed: SuccessEnvelope<ListData> =
         success(&run_file(&file, &["list", "--status", "resolved"]));
@@ -695,13 +779,13 @@ fn schema_documents_resolve_amend_history() {
         resolve["amend_fold"]
             .as_str()
             .unwrap()
-            .contains("first non-amend resolve")
+            .contains("first valid non-amend resolve")
     );
     assert!(
         resolve["amend_fold"]
             .as_str()
             .unwrap()
-            .contains("latest amend")
+            .contains("latest valid amend")
     );
     assert!(schema.data["records"]["resolve"].get("amend").is_some());
     assert!(
@@ -721,25 +805,45 @@ fn resolve_prefix_errors_and_idempotence_are_structured() {
     let prefix = &id[3..7];
     let first: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
-        &["resolve", &prefix.to_ascii_uppercase(), "--agent", "fixer"],
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &prefix.to_ascii_uppercase(),
+            "--agent",
+            "fixer",
+        ],
     ));
     assert!(first.data.changed);
-    let second: SuccessEnvelope<ResolveData> =
-        success(&run_file(&file, &["resolve", id, "--agent", "fixer"]));
+    let second: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &["resolve", "--disposition", "fixed", id, "--agent", "fixer"],
+    ));
     assert!(!second.data.changed);
     assert_eq!(second.meta.warnings, ["already resolved"]);
 
-    error(&run_file(&file, &["resolve", "abc"]), 2, "invalid_argument");
-    let unknown = error(&run_file(&file, &["resolve", "deadbeef"]), 66, "not_found");
-    assert_eq!(unknown.error.message, "no cut matches ID prefix 'deadbeef'");
+    error(
+        &run_file(&file, &["resolve", "--disposition", "fixed", "abc"]),
+        2,
+        "invalid_argument",
+    );
+    let unknown = error(
+        &run_file(&file, &["resolve", "--disposition", "fixed", "deadbeef"]),
+        66,
+        "not_found",
+    );
+    assert_eq!(
+        unknown.error.message,
+        "no record matches ID prefix 'deadbeef'"
+    );
     assert_eq!(
         unknown.error.suggested_fix,
-        "Run `blotter list --status all` and retry with a listed ID."
+        "Run `blotter list --kind all --status all` and retry with a listed ID."
     );
 
     let missing = temp.path().join("missing.jsonl");
     let missing = error(
-        &run_file(&missing, &["resolve", "deadbeef"]),
+        &run_file(&missing, &["resolve", "--disposition", "fixed", "deadbeef"]),
         66,
         "not_found",
     );
@@ -758,13 +862,13 @@ fn resolve_prefix_errors_and_idempotence_are_structured() {
     let ambiguous = temp.path().join("ambiguous.jsonl");
     let lines = ["bl_abcd00000000", "bl_abcd11111111"]
         .map(|id| {
-            json!({"kind":"cut","id":id,"ts":"2026-07-09T00:00:00.000Z","agent":"a","text":id,"tags":[],"severity":"minor","cwd":"/tmp","repo":null}).to_string()
+            json!({"v":2,"kind":"cut","id":id,"ts":"2026-07-09T00:00:00.000Z","agent":"a","text":id,"tags":[],"impact":"low","cwd":"/tmp","repo":null}).to_string()
         })
         .join("\n")
         + "\n";
     std::fs::write(&ambiguous, lines).unwrap();
     let envelope = error(
-        &run_file(&ambiguous, &["resolve", "abcd"]),
+        &run_file(&ambiguous, &["resolve", "--disposition", "fixed", "abcd"]),
         65,
         "ambiguous_id",
     );
@@ -782,14 +886,33 @@ fn multi_resolve_is_atomic_deterministic_and_idempotent() {
     let second = add(&file, "multi second").data.record.cut_id().to_owned();
     let before = std::fs::read(&file).unwrap();
 
-    let invalid = run_file(&file, &["resolve", &first, "deadbeef", "--agent", "fixer"]);
+    let invalid = run_file(
+        &file,
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &first,
+            "deadbeef",
+            "--agent",
+            "fixer",
+        ],
+    );
     error(&invalid, 66, "not_found");
     assert_eq!(std::fs::read(&file).unwrap(), before);
 
     let resolved: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
         &[
-            "resolve", &second, &first, "--agent", "fixer", "--note", "batch",
+            "resolve",
+            "--disposition",
+            "fixed",
+            &second,
+            &first,
+            "--agent",
+            "fixer",
+            "--note",
+            "batch",
         ],
     ));
     assert!(resolved.data.changed);
@@ -839,7 +962,16 @@ fn multi_resolve_is_atomic_deterministic_and_idempotent() {
                 .keys()
                 .map(String::as_str)
                 .collect::<Vec<_>>(),
-            ["kind", "id", "ts", "agent", "note"]
+            [
+                "v",
+                "kind",
+                "id",
+                "ts",
+                "agent",
+                "note",
+                "disposition",
+                "disposition_ts"
+            ]
         );
         assert_eq!(event["ts"], "2026-07-09T18:30:00.123Z");
         assert_eq!(event["agent"], "fixer");
@@ -856,7 +988,15 @@ fn multi_resolve_is_atomic_deterministic_and_idempotent() {
 
     let duplicate: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
-        &["resolve", &first, &first, "--agent", "fixer"],
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &first,
+            &first,
+            "--agent",
+            "fixer",
+        ],
     ));
     assert!(!duplicate.data.changed);
     assert_eq!(duplicate.data.records.len(), 1);
@@ -870,12 +1010,29 @@ fn mixed_multi_resolve_warns_with_sorted_already_resolved_ids() {
     let file = temp.path().join("cuts.jsonl");
     let first = add(&file, "mixed first").data.record.cut_id().to_owned();
     let second = add(&file, "mixed second").data.record.cut_id().to_owned();
-    let _: SuccessEnvelope<ResolveData> =
-        success(&run_file(&file, &["resolve", &first, "--agent", "fixer"]));
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &first,
+            "--agent",
+            "fixer",
+        ],
+    ));
 
     let mixed: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
-        &["resolve", &second, &first, "--agent", "fixer"],
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &second,
+            &first,
+            "--agent",
+            "fixer",
+        ],
     ));
     assert!(mixed.data.changed);
     assert_eq!(
@@ -885,7 +1042,15 @@ fn mixed_multi_resolve_warns_with_sorted_already_resolved_ids() {
 
     let all: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
-        &["resolve", &first, &second, "--agent", "fixer"],
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &first,
+            &second,
+            "--agent",
+            "fixer",
+        ],
     ));
     assert!(!all.data.changed);
     assert_eq!(all.meta.warnings, ["already resolved"]);
@@ -905,8 +1070,17 @@ fn dry_run_warns_that_nothing_was_appended_whatever_the_already_resolved_mix() {
         .record
         .cut_id()
         .to_owned();
-    let _: SuccessEnvelope<ResolveData> =
-        success(&run_file(&file, &["resolve", &first, "--agent", "fixer"]));
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &first,
+            "--agent",
+            "fixer",
+        ],
+    ));
     let before = std::fs::read(&file).unwrap();
 
     // One open, one already resolved: the already-resolved warning must not
@@ -914,7 +1088,16 @@ fn dry_run_warns_that_nothing_was_appended_whatever_the_already_resolved_mix() {
     // real one that appends.
     let mixed: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
-        &["resolve", &second, &first, "--agent", "fixer", "--dry-run"],
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &second,
+            &first,
+            "--agent",
+            "fixer",
+            "--dry-run",
+        ],
     ));
     assert!(!mixed.data.changed);
     assert_eq!(
@@ -927,7 +1110,15 @@ fn dry_run_warns_that_nothing_was_appended_whatever_the_already_resolved_mix() {
 
     let all: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
-        &["resolve", &first, "--agent", "fixer", "--dry-run"],
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            &first,
+            "--agent",
+            "fixer",
+            "--dry-run",
+        ],
     ));
     assert!(!all.data.changed);
     assert_eq!(
@@ -948,7 +1139,7 @@ fn multi_resolve_with_ambiguous_prefix_is_atomic_and_returns_sorted_candidates()
         .to_owned();
     let ambiguous = ["bl_abcd11111111", "bl_abcd00000000"]
         .map(|id| {
-            json!({"kind":"cut","id":id,"ts":"2026-07-09T00:00:00.000Z","agent":"a","text":id,"tags":[],"severity":"minor","cwd":"/tmp","repo":null}).to_string()
+            json!({"v":2,"kind":"cut","id":id,"ts":"2026-07-09T00:00:00.000Z","agent":"a","text":id,"tags":[],"impact":"low","cwd":"/tmp","repo":null}).to_string()
         })
         .join("\n");
     let mut log = OpenOptions::new().append(true).open(&file).unwrap();
@@ -957,7 +1148,10 @@ fn multi_resolve_with_ambiguous_prefix_is_atomic_and_returns_sorted_candidates()
     let before = std::fs::read(&file).unwrap();
 
     let envelope = error(
-        &run_file(&file, &["resolve", &valid, "abcd"]),
+        &run_file(
+            &file,
+            &["resolve", "--disposition", "fixed", &valid, "abcd"],
+        ),
         65,
         "ambiguous_id",
     );
@@ -988,7 +1182,15 @@ fn multi_resolve_heals_a_torn_tail_and_keeps_first_resolution() {
     let _: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
         &[
-            "resolve", &second, &first, "--agent", "fixer", "--note", "first",
+            "resolve",
+            "--disposition",
+            "fixed",
+            &second,
+            &first,
+            "--agent",
+            "fixer",
+            "--note",
+            "first",
         ],
     ));
     let log = std::fs::read_to_string(&file).unwrap();
@@ -1001,7 +1203,7 @@ fn multi_resolve_heals_a_torn_tail_and_keeps_first_resolution() {
             .as_ref()
             .is_some_and(|resolution| resolution.note.as_deref() == Some("first"))
     }));
-    let first_resolution = json!({"kind":"resolve","id":first,"ts":"2026-07-09T18:30:00.123Z","agent":"later","note":"later"});
+    let first_resolution = json!({"v":2,"kind":"resolve","id":first,"ts":"2026-07-09T18:30:00.123Z","agent":"later","note":"later","disposition":"fixed","disposition_ts":"2026-07-09T18:30:00.123Z"});
     std::fs::write(&file, format!("{log}{first_resolution}\n")).unwrap();
     let listed: SuccessEnvelope<ListData> =
         success(&run_file(&file, &["list", "--status", "resolved"]));
@@ -1040,7 +1242,18 @@ fn concurrent_multi_resolves_share_one_critical_section() {
             let barrier = Arc::clone(&barrier);
             thread::spawn(move || {
                 barrier.wait();
-                let output = run_file(&file, &["resolve", &first, &second, "--agent", "race"]);
+                let output = run_file(
+                    &file,
+                    &[
+                        "resolve",
+                        "--disposition",
+                        "fixed",
+                        &first,
+                        &second,
+                        "--agent",
+                        "race",
+                    ],
+                );
                 let envelope: SuccessEnvelope<ResolveData> = success(&output);
                 envelope.data.changed
             })
@@ -1203,5 +1416,337 @@ fn resolve_amend_response_reports_the_timestamp_winning_amend() {
             .note
             .as_deref(),
         Some("tie amend")
+    );
+}
+
+/// r48: `--disposition` is required when any named record is a cut, rejected
+/// for a dogear, and a batch naming both cannot satisfy either rule. All three
+/// are decided inside the exclusive-lock critical section, after ID matching and
+/// before any append, so a rejected batch appends nothing at all.
+#[test]
+fn disposition_is_required_for_cuts_rejected_for_dogears_and_bars_a_mixed_batch() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "disposition rules fixture");
+    let cut_id = cut.data.record.cut_id().to_owned();
+    let dogear: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &["dogear", "disposition rules idea", "--agent", "tester"],
+    ));
+    let dogear_id = dogear.data["record"]["id"].as_str().unwrap().to_owned();
+    let original = std::fs::read_to_string(&file).unwrap();
+
+    let missing = error(
+        &run_file(&file, &["resolve", &cut_id]),
+        2,
+        "invalid_argument",
+    );
+    assert_eq!(
+        missing.error.message,
+        "--disposition is required when resolving a cut"
+    );
+
+    let rejected = error(
+        &run_file(&file, &["resolve", "--disposition", "fixed", &dogear_id]),
+        2,
+        "invalid_argument",
+    );
+    assert_eq!(
+        rejected.error.message,
+        "--disposition may only resolve cut records"
+    );
+
+    let mixed = error(
+        &run_file(
+            &file,
+            &["resolve", "--disposition", "fixed", &cut_id, &dogear_id],
+        ),
+        2,
+        "invalid_argument",
+    );
+    assert_eq!(
+        mixed.error.message,
+        "a resolve batch cannot name both cut and dogear records"
+    );
+
+    // No partial resolution: nothing was appended by any of the three.
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+
+    // Every disposition value is accepted, and both fields land on the stored
+    // event and in the materialized resolution.
+    for (index, disposition) in ["fixed", "promoted", "accepted", "invalid"]
+        .into_iter()
+        .enumerate()
+    {
+        let each = temp.path().join(format!("each-{index}.jsonl"));
+        let cut = add(&each, "each disposition");
+        let resolved: SuccessEnvelope<ResolveData> = success(&run_file(
+            &each,
+            &[
+                "resolve",
+                "--disposition",
+                disposition,
+                cut.data.record.cut_id(),
+            ],
+        ));
+        let resolution = resolved.data.records[0]
+            .resolution
+            .as_ref()
+            .expect("a resolved cut carries a resolution");
+        assert_eq!(
+            serde_json::to_value(resolution.disposition).unwrap(),
+            json!(disposition)
+        );
+        assert_eq!(
+            resolution.disposition_ts.as_deref(),
+            Some("2026-07-09T18:30:00.123Z")
+        );
+        let stored: Value = serde_json::from_str(
+            std::fs::read_to_string(&each)
+                .unwrap()
+                .lines()
+                .nth(1)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(stored["disposition"], disposition);
+        assert_eq!(stored["disposition_ts"], "2026-07-09T18:30:00.123Z");
+    }
+}
+
+/// r48/r50: an amend that omits `--disposition` inherits both fields from the
+/// **pre-append folded winner** and copies them into the stored event, so a
+/// note-only correction moves the resolution's `ts` without moving the moment
+/// the cut was classified. An amend that passes one wins with its own `ts`.
+#[test]
+fn amend_inherits_disposition_and_disposition_ts_or_restamps_an_explicit_one() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add_at(&file, "2026-07-09T18:00:00Z", "amend inheritance", &[]);
+    let id = cut.data.record.cut_id().to_owned();
+    resolve_at(
+        &file,
+        "2026-07-09T18:10:00Z",
+        &id,
+        &["--disposition", "accepted", "--note", "tolerated"],
+    );
+
+    let amended = resolve_at(
+        &file,
+        "2026-07-09T18:20:00Z",
+        &id,
+        &["--amend", "--note", "typo fixed"],
+    );
+    let resolution = amended.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(resolution.ts, "2026-07-09T18:20:00.000Z");
+    assert_eq!(resolution.note.as_deref(), Some("typo fixed"));
+    assert_eq!(
+        serde_json::to_value(resolution.disposition).unwrap(),
+        json!("accepted")
+    );
+    assert_eq!(
+        resolution.disposition_ts.as_deref(),
+        Some("2026-07-09T18:10:00.000Z")
+    );
+    // Inheritance is a write-time snapshot: it is visible in the stored bytes
+    // and needs no fold rule to reconstruct.
+    let stored: Value = serde_json::from_str(
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .lines()
+            .nth(2)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stored["disposition"], "accepted");
+    assert_eq!(stored["disposition_ts"], "2026-07-09T18:10:00.000Z");
+
+    let reclassified = resolve_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        &id,
+        &["--amend", "--disposition", "fixed"],
+    );
+    let resolution = reclassified.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_value(resolution.disposition).unwrap(),
+        json!("fixed")
+    );
+    assert_eq!(
+        resolution.disposition_ts.as_deref(),
+        Some("2026-07-09T18:30:00.000Z")
+    );
+    // `--disposition` counts as the one resolution field `--amend` requires.
+    assert!(reclassified.data.changed);
+}
+
+/// r50's stated and accepted divergence: an amend that passes `--disposition`
+/// explicitly under a backdated clock, with a later-`ts` amend already stored,
+/// appends its own disposition but **reports** the stored later amend's, because
+/// r31 requires the envelope to agree with what a later fold shows. The log then
+/// holds a disposition no read command materializes.
+#[test]
+fn a_backdated_explicit_amend_appends_its_disposition_and_reports_the_winner() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add_at(&file, "2026-07-09T18:00:00Z", "backdated amend", &[]);
+    let id = cut.data.record.cut_id().to_owned();
+    resolve_at(
+        &file,
+        "2026-07-09T18:10:00Z",
+        &id,
+        &["--disposition", "fixed"],
+    );
+    resolve_at(
+        &file,
+        "2026-07-09T18:40:00Z",
+        &id,
+        &["--amend", "--disposition", "promoted"],
+    );
+
+    let backdated = resolve_at(
+        &file,
+        "2026-07-09T18:20:00Z",
+        &id,
+        &["--amend", "--disposition", "invalid"],
+    );
+    let reported = backdated.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(
+        serde_json::to_value(reported.disposition).unwrap(),
+        json!("promoted")
+    );
+    assert_eq!(
+        reported.disposition_ts.as_deref(),
+        Some("2026-07-09T18:40:00.000Z")
+    );
+
+    // The appended event carries what was asked for; no read command shows it.
+    let stored: Value = serde_json::from_str(
+        std::fs::read_to_string(&file)
+            .unwrap()
+            .lines()
+            .nth(3)
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(stored["disposition"], "invalid");
+    assert_eq!(stored["disposition_ts"], "2026-07-09T18:20:00.000Z");
+    let listed: SuccessEnvelope<ListData> =
+        success(&run_file(&file, &["list", "--status", "resolved"]));
+    assert_eq!(
+        serde_json::to_value(
+            listed.data.items[0]
+                .resolution
+                .as_ref()
+                .unwrap()
+                .disposition
+        )
+        .unwrap(),
+        json!("promoted")
+    );
+}
+
+/// r50's corollary: the fold discards invalid resolve events **before** winners
+/// are chosen, so an invalid base resolve cannot occupy the base slot. A record
+/// whose only base resolve is invalid reads open, `--amend` on it fails with the
+/// existing not-resolved error, and a plain base resolve repairs it by becoming
+/// the first valid base.
+#[test]
+fn an_invalid_base_resolve_leaves_the_record_open_and_a_valid_base_repairs_it() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add_at(&file, "2026-07-09T18:00:00Z", "invalid base resolve", &[]);
+    let id = cut.data.record.cut_id().to_owned();
+    let original = std::fs::read_to_string(&file).unwrap();
+    let invalid_base = json!({
+        "v": 2, "kind": "resolve", "id": id,
+        "ts": "2026-07-09T18:10:00.000Z", "agent": "fixture", "note": "no disposition"
+    });
+    std::fs::write(&file, format!("{original}{invalid_base}\n")).unwrap();
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
+    assert_eq!(listed.data.items[0].status, ItemStatus::Open);
+    assert_eq!(listed.meta.warnings, ["skipped 1 invalid resolution"]);
+
+    let refused = error(
+        &run_file(&file, &["resolve", &id, "--amend", "--note", "x"]),
+        65,
+        "invalid_input",
+    );
+    assert_eq!(
+        refused.error.message,
+        "--amend requires every requested record to be resolved"
+    );
+
+    let repaired = resolve_at(
+        &file,
+        "2026-07-09T18:20:00Z",
+        &id,
+        &["--disposition", "fixed", "--note", "repaired"],
+    );
+    let resolution = repaired.data.records[0].resolution.as_ref().unwrap();
+    assert_eq!(resolution.note.as_deref(), Some("repaired"));
+    assert_eq!(
+        serde_json::to_value(resolution.disposition).unwrap(),
+        json!("fixed")
+    );
+}
+
+/// r50: `duplicate resolve` and `orphan resolve` are counted over the **valid**
+/// events only, and an orphan — a resolve joining to no record — is never
+/// evaluated for validity, so rule (3) is not applied to one.
+#[test]
+fn duplicate_and_orphan_counts_run_over_valid_events_only() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add_at(&file, "2026-07-09T18:00:00Z", "valid-only counts", &[]);
+    let id = cut.data.record.cut_id().to_owned();
+    let original = std::fs::read_to_string(&file).unwrap();
+    // An invalid base, then two valid bases: the invalid one is not the
+    // duplicate, so exactly one duplicate is counted.
+    let invalid = json!({
+        "v": 2, "kind": "resolve", "id": id,
+        "ts": "2026-07-09T18:05:00.000Z", "agent": "fixture", "note": null
+    });
+    let first = json!({
+        "v": 2, "kind": "resolve", "id": id,
+        "ts": "2026-07-09T18:10:00.000Z", "agent": "fixture", "note": "first",
+        "disposition": "fixed", "disposition_ts": "2026-07-09T18:10:00.000Z"
+    });
+    let second = json!({
+        "v": 2, "kind": "resolve", "id": id,
+        "ts": "2026-07-09T18:15:00.000Z", "agent": "fixture", "note": "second",
+        "disposition": "fixed", "disposition_ts": "2026-07-09T18:15:00.000Z"
+    });
+    // An orphan carrying a disposition with no disposition_ts joins to no
+    // record, so it is an orphan and never invalid.
+    let orphan = json!({
+        "v": 2, "kind": "resolve", "id": "bl_deadbeef0000",
+        "ts": "2026-07-09T18:20:00.000Z", "agent": "fixture", "note": null,
+        "disposition": "fixed"
+    });
+    std::fs::write(
+        &file,
+        format!("{original}{invalid}\n{first}\n{second}\n{orphan}\n"),
+    )
+    .unwrap();
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
+    assert_eq!(
+        listed.data.items[0]
+            .resolution
+            .as_ref()
+            .unwrap()
+            .note
+            .as_deref(),
+        Some("first")
+    );
+    assert_eq!(
+        listed.meta.warnings,
+        [
+            "skipped 1 duplicate resolve",
+            "skipped 1 orphan resolve",
+            "skipped 1 invalid resolution",
+        ]
     );
 }

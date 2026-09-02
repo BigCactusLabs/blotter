@@ -5,31 +5,24 @@ fn list_filters_sorts_limits_since_and_markdown() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
     let cases = [
-        ("2026-07-01T00:00:00Z", "old blocker", "blocker", "ops"),
-        ("2026-07-09T17:00:00Z", "new minor", "minor", "shell"),
-        ("2026-07-09T18:00:00Z", "new major", "major", "ops"),
+        ("2026-07-01T00:00:00Z", "old blocking", "blocking", "ops"),
+        ("2026-07-09T17:00:00Z", "new low", "low", "shell"),
+        ("2026-07-09T18:00:00Z", "new material", "material", "ops"),
     ];
-    for (now, text, severity, tag) in cases {
+    for (now, text, impact, tag) in cases {
         let output = command()
             .env("BLOTTER_NOW", now)
             .arg("--file")
             .arg(&file)
             .args([
-                "add",
-                text,
-                "--agent",
-                "tester",
-                "--severity",
-                severity,
-                "--tag",
-                tag,
+                "add", text, "--agent", "tester", "--impact", impact, "--tag", tag,
             ])
             .output()
             .unwrap();
         success::<AddData>(&output);
     }
     let limited: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--limit", "1"]));
-    assert_eq!(limited.data.items[0].text, "old blocker");
+    assert_eq!(limited.data.items[0].text, "old blocking");
     assert_eq!(limited.data.total, 3);
     assert!(limited.data.truncated);
 
@@ -43,14 +36,14 @@ fn list_filters_sorts_limits_since_and_markdown() {
             .unwrap(),
     );
     assert_eq!(since.data.items.len(), 1);
-    assert_eq!(since.data.items[0].text, "new major");
+    assert_eq!(since.data.items[0].text, "new material");
 
-    let markdown = run_file(&file, &["list", "--format", "md", "--severity", "major"]);
+    let markdown = run_file(&file, &["list", "--format", "md", "--impact", "material"]);
     assert!(markdown.status.success());
     assert!(markdown.stderr.is_empty());
     let markdown = String::from_utf8(markdown.stdout).unwrap();
-    assert!(markdown.starts_with("## Major\n"));
-    assert!(markdown.contains("new major — tester"));
+    assert!(markdown.starts_with("## Material\n"));
+    assert!(markdown.contains("new material — tester"));
     assert!(serde_json::from_str::<Value>(&markdown).is_err());
     error(
         &run_file(&file, &["list", "--since", "2026-07-09"]),
@@ -137,7 +130,7 @@ fn list_markdown_collapses_multiline_text_into_one_bullet() {
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         format!(
-            "## Minor\n- [{}] first line second line third line — tester, 2026-07-09T18:30:00.123Z\n",
+            "## Low\n- [{}] first line second line third line — tester, 2026-07-09T18:30:00.123Z\n",
             added.data.record.cut_id()
         )
     );
@@ -152,6 +145,8 @@ fn list_markdown_renders_resolution_note_and_graduation_fields() {
         &file,
         &[
             "resolve",
+            "--disposition",
+            "fixed",
             added.data.record.cut_id(),
             "--agent",
             "resolver",
@@ -172,7 +167,7 @@ fn list_markdown_renders_resolution_note_and_graduation_fields() {
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         format!(
-            "## Minor\n- [~~{}~~] the cut — tester, 2026-07-09T18:30:00.123Z\n  - resolved 2026-07-09T18:30:00.123Z by resolver (d34db33fd34db33f) pr https://github.com/BigCactusLabs/blotter/pull/25 task TASK-25: fixed it\n",
+            "## Low\n- [~~{}~~] the cut — tester, 2026-07-09T18:30:00.123Z\n  - resolved 2026-07-09T18:30:00.123Z by resolver (d34db33fd34db33f) pr https://github.com/BigCactusLabs/blotter/pull/25 task TASK-25: fixed it\n",
             added.data.record.cut_id()
         )
     );
@@ -187,6 +182,8 @@ fn list_markdown_collapses_multiline_resolution_metadata() {
         &file,
         &[
             "resolve",
+            "--disposition",
+            "fixed",
             added.data.record.cut_id(),
             "--agent",
             "multi\nline resolver",
@@ -203,7 +200,7 @@ fn list_markdown_collapses_multiline_resolution_metadata() {
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         format!(
-            "## Minor\n- [~~{}~~] the cut — tester, 2026-07-09T18:30:00.123Z\n  - resolved 2026-07-09T18:30:00.123Z by multi line resolver (d34db33f ## heading) task TASK 25\n",
+            "## Low\n- [~~{}~~] the cut — tester, 2026-07-09T18:30:00.123Z\n  - resolved 2026-07-09T18:30:00.123Z by multi line resolver (d34db33f ## heading) task TASK 25\n",
             added.data.record.cut_id()
         )
     );
@@ -219,6 +216,8 @@ fn list_markdown_collapses_multiline_resolution_note() {
         &file,
         &[
             "resolve",
+            "--disposition",
+            "fixed",
             added.data.record.cut_id(),
             "--agent",
             "resolver",
@@ -245,7 +244,7 @@ fn list_markdown_collapses_multiline_resolution_note() {
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),
         format!(
-            "## Minor\n- [~~{}~~] the cut — tester, 2026-07-09T18:30:00.123Z\n  - resolved 2026-07-09T18:30:00.123Z by resolver: first line second line third line\n",
+            "## Low\n- [~~{}~~] the cut — tester, 2026-07-09T18:30:00.123Z\n  - resolved 2026-07-09T18:30:00.123Z by resolver: first line second line third line\n",
             added.data.record.cut_id()
         )
     );
@@ -255,8 +254,8 @@ fn list_markdown_collapses_multiline_resolution_note() {
 fn list_sorts_rfc3339_offsets_by_instant_not_text() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("offsets.jsonl");
-    let earlier = json!({"kind":"cut","id":"bl_111111111111","ts":"2026-07-09T10:00:00+02:00","agent":"a","text":"earlier","tags":[],"severity":"minor","cwd":"/tmp","repo":null});
-    let later = json!({"kind":"cut","id":"bl_222222222222","ts":"2026-07-09T09:00:00Z","agent":"a","text":"later","tags":[],"severity":"minor","cwd":"/tmp","repo":null});
+    let earlier = json!({"v":2,"kind":"cut","id":"bl_111111111111","ts":"2026-07-09T10:00:00+02:00","agent":"a","text":"earlier","tags":[],"impact":"low","cwd":"/tmp","repo":null});
+    let later = json!({"v":2,"kind":"cut","id":"bl_222222222222","ts":"2026-07-09T09:00:00Z","agent":"a","text":"later","tags":[],"impact":"low","cwd":"/tmp","repo":null});
     std::fs::write(&file, format!("{earlier}\n{later}\n")).unwrap();
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
     assert_eq!(listed.data.items[0].text, "later");
@@ -276,4 +275,44 @@ fn markdown_format_is_byte_deterministic() {
     let second = run_file(&file, &["list", "--format", "md"]);
     assert!(second.status.success());
     assert_eq!(first.stdout, second.stdout);
+}
+
+/// r48: `--severity` is removed rather than aliased, so clap rejects it as an
+/// unknown argument on both the commands that carried it, and `--impact` takes
+/// its place with the new vocabulary.
+#[test]
+fn severity_is_removed_and_impact_replaces_it() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    for args in [
+        &["add", "x", "--severity", "minor"][..],
+        &["list", "--severity", "minor"][..],
+    ] {
+        error(&run_file(&file, args), 2, "invalid_argument");
+    }
+    for value in ["minor", "major", "blocker"] {
+        error(
+            &run_file(&file, &["add", "x", "--impact", value]),
+            2,
+            "invalid_argument",
+        );
+    }
+
+    // The default is `low`, and the sort ranks blocking > material > low.
+    add_at(&file, "2026-07-09T18:00:00Z", "default impact", &[]);
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
+    assert_eq!(
+        serde_json::to_value(listed.data.items[0].impact).unwrap(),
+        json!("low")
+    );
+
+    let blocking = run_file(
+        &file,
+        &[
+            "add", "stopped", "--agent", "tester", "--impact", "blocking",
+        ],
+    );
+    success::<AddData>(&blocking);
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
+    assert_eq!(listed.data.items[0].text, "stopped");
 }
