@@ -6,7 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-08-31 15:35'
-updated_date: '2026-09-02 15:11'
+updated_date: '2026-09-02 21:01'
 labels:
   - v2
 dependencies: []
@@ -54,4 +54,6 @@ Contract note: `is_rare`'s ceiling is normative text, stated in r19 and restated
 2026-09-02 progress-review ruling: promoted from optional follow-up to a Phase 5 precision gate (dependency of TASK-77). Retrospect consumes the same clustering at a threshold of two linked records, so a bad rare-token linkage is no longer a wonky triage cluster; it becomes input to the promotion layer. Gate procedure: measure linked pairs on several representative logs, not one. Caveat: the v2 binary refuses v1 logs, and the existing dogfood logs are v1, so measure with the last 0.15 binary (main) or a throwaway copy converted to v2 for measurement only; the r44 linkage rules are identical on both. Decide fix-or-close on the numbers, and write them into this task either way.
 
 Measurement corpus located 2026-09-02 (all v1 logs, no v:2 anywhere; several carry pc_ IDs): blotter/.blotter.jsonl 167 cuts/24 resolves; compas/.blotter.jsonl 132 cuts/70 resolves (pc_ present); walkmaxx/.blotter.jsonl 97 cuts/97 resolves (pc_); origin-brands-workspace/data-platform/.blotter.jsonl 105 cuts/64 resolves; eatmoji/tools/blotter/.blotter.jsonl 58 cuts/57 resolves (pc_). All under ~/Documents/GitHub. Smaller logs (Aski 15, moode 15, pantone-pipe 16) are fixture-scale and only useful for the floor check. Use these five, via the 0.15 binary on main.
+
+2026-09-02 gate measurement (TASK-77 Leg C, note at docs/research/2026-09-02-task71-linkage-precision.md): five logs, 0.15 binary, hand-judged clusters. Divisor 4 (today): 71 linked pairs, 23 related, 48 unrelated (67.6% unrelated); blotter v1 log alone 57 pairs / 71.9% unrelated. Divisor 8: 50 pairs, 58.0% unrelated, 0 related clusters lost. Divisor 16: 29 pairs, 34.5% unrelated, 3 of 11 related clusters lost. N=2 fixture passes at every divisor. Worst clusters are same-tag plus generic domain tokens (backlog/task, clippy/gate/test, test/fixture). Decision: unrelated share is material, so the ceiling is reshaped in the TASK-77 PR under a new amendment; candidate rule shapes are being measured against the same judgments before the amendment is written.
 <!-- SECTION:NOTES:END -->
