@@ -1473,5 +1473,8 @@ fn every_v2_identity_is_twenty_hex() {
     assert_eq!(schema.data["id"]["cut"]["hex_digits"], 20);
     assert_eq!(schema.data["id"]["cut"]["hash"], "SHA-256 first 10 bytes");
     assert_eq!(schema.data["id"]["dogear"]["hex_digits"], 20);
-    assert_eq!(schema.data["id"]["dogear"]["hash"], "SHA-256 first 10 bytes");
+    assert_eq!(
+        schema.data["id"]["dogear"]["hash"],
+        "SHA-256 first 10 bytes"
+    );
 }
