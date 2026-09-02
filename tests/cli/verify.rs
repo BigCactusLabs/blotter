@@ -77,6 +77,8 @@ fn verify_reports_an_exact_title_recurrence_with_the_full_envelope() {
                     "resolved_text": "Cache configuration missing",
                     "resolution": {
                         "ts": "2026-07-09T18:31:00.000Z",
+                        "disposition": "fixed",
+                        "disposition_ts": "2026-07-09T18:31:00.000Z",
                         "task": "TASK-VERIFY",
                         "pr": "https://github.com/BigCactusLabs/blotter/pull/99",
                         "commit": "abc123",
@@ -321,7 +323,11 @@ fn verify_ignores_dogear_noise() {
 }
 
 #[test]
-fn verify_uses_the_materialized_amend_resolution_timestamp() {
+fn verify_note_only_amend_does_not_move_the_disposition_ts_boundary() {
+    // r51: verify partitions against the winning resolution's disposition_ts,
+    // not its ts. A note-only --amend changes ts but inherits disposition_ts
+    // unchanged, so a cut logged between the fix and the note must still be a
+    // recurrence, and the rest of the envelope must not move either.
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
     let resolved = add_at(
@@ -332,33 +338,103 @@ fn verify_uses_the_materialized_amend_resolution_timestamp() {
     );
     let _: SuccessEnvelope<ResolveData> = resolve_at(
         &file,
-        "2026-07-09T18:31:00Z",
+        "2026-07-09T18:31:00Z", // T1
+        resolved.data.record.cut_id(),
+        &["--agent", "fixer", "--note", "base"],
+    );
+    let recurring = add_at(
+        &file,
+        "2026-07-09T18:32:00Z", // T2 > T1
+        "cache configuration missing",
+        &["ops"],
+    );
+
+    let before = verify_success(&run_file(&file, &["verify"]), 1);
+
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:33:00Z", // T3 > T2, note-only amend
+        resolved.data.record.cut_id(),
+        &["--amend", "--agent", "corrector", "--note", "corrected"],
+    );
+
+    let after = verify_success(&run_file(&file, &["verify"]), 1);
+
+    let mut expected = before.data.clone();
+    expected["recurrences"][0]["resolution"]["ts"] = json!("2026-07-09T18:33:00.000Z");
+    assert_eq!(after.data, expected);
+
+    assert_eq!(
+        after.data["recurrences"][0]["resolution"]["disposition_ts"],
+        "2026-07-09T18:31:00.000Z"
+    );
+    assert_eq!(
+        after.data["recurrences"][0]["recurrence_ids"],
+        json!([recurring.data.record.cut_id()])
+    );
+    let first_recurrence_ts = after.data["recurrences"][0]["first_recurrence_ts"]
+        .as_str()
+        .unwrap();
+    let resolution_ts = after.data["recurrences"][0]["resolution"]["ts"]
+        .as_str()
+        .unwrap();
+    assert!(
+        first_recurrence_ts < resolution_ts,
+        "first_recurrence_ts {first_recurrence_ts} should precede the displayed resolution.ts {resolution_ts} after a note-only amend"
+    );
+}
+
+#[test]
+fn verify_disposition_changing_amend_moves_the_disposition_ts_boundary() {
+    // r51: when an amend re-decides the disposition, disposition_ts moves
+    // with it, and the boundary the recurrence scan uses moves too.
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let resolved = add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "Cache configuration missing",
+        &["ops"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:31:00Z", // T1
         resolved.data.record.cut_id(),
         &["--agent", "fixer", "--note", "base"],
     );
     add_at(
         &file,
-        "2026-07-09T18:32:00Z",
+        "2026-07-09T18:32:00Z", // T2 > T1
         "cache configuration missing",
         &["ops"],
     );
     let _: SuccessEnvelope<ResolveData> = resolve_at(
         &file,
-        "2026-07-09T18:33:00Z",
+        "2026-07-09T18:33:00Z", // T3 > T2, disposition-changing amend
         resolved.data.record.cut_id(),
-        &["--amend", "--agent", "corrector", "--note", "corrected"],
+        &[
+            "--amend",
+            "--disposition",
+            "fixed",
+            "--agent",
+            "corrector",
+            "--note",
+            "corrected",
+        ],
     );
     let recurring = add_at(
         &file,
-        "2026-07-09T18:34:00Z",
+        "2026-07-09T18:34:00Z", // T4 > T3
         "cache configuration missing",
         &["ops"],
     );
 
     let verify = verify_success(&run_file(&file, &["verify"]), 1);
+    // Both open cuts (the one at T2 that no longer recurs, and the one at T4
+    // that does) are scanned; disposition_ts only changes which ones link.
     assert_eq!(verify.data["scanned"], 2);
     assert_eq!(
-        verify.data["recurrences"][0]["resolution"]["ts"],
+        verify.data["recurrences"][0]["resolution"]["disposition_ts"],
         "2026-07-09T18:33:00.000Z"
     );
     assert_eq!(
@@ -672,7 +748,11 @@ fn verify_sorts_recurrence_ids_and_anchors_by_first_recurrence() {
                 "resolved_id": first_anchor.data.record.cut_id(),
                 "origin": {"type":"agent"},
                     "resolved_text": "Cache configuration missing",
-                "resolution": {"ts": "2026-07-09T18:31:00.000Z"},
+                "resolution": {
+                    "ts": "2026-07-09T18:31:00.000Z",
+                    "disposition": "fixed",
+                    "disposition_ts": "2026-07-09T18:31:00.000Z",
+                },
                 "recurrence_ids": [first.data.record.cut_id(), late_first.data.record.cut_id()],
                 "count": 2,
                 "first_recurrence_ts": "2026-07-09T18:33:00.000Z",
@@ -681,7 +761,11 @@ fn verify_sorts_recurrence_ids_and_anchors_by_first_recurrence() {
                 "resolved_id": second_anchor.data.record.cut_id(),
                 "origin": {"type":"agent"},
                     "resolved_text": "Build cache checksum mismatch",
-                "resolution": {"ts": "2026-07-09T18:31:00.000Z"},
+                "resolution": {
+                    "ts": "2026-07-09T18:31:00.000Z",
+                    "disposition": "fixed",
+                    "disposition_ts": "2026-07-09T18:31:00.000Z",
+                },
                 "recurrence_ids": [second.data.record.cut_id()],
                 "count": 1,
                 "first_recurrence_ts": "2026-07-09T18:34:00.000Z",
@@ -697,14 +781,12 @@ fn schema_documents_verify() {
     assert!(verify["flags"].get("--include-auto").is_none());
     assert_eq!(
         verify["output"],
-        "{recurrences:[{resolved_id,resolved_text,origin?,resolution:{ts,task?,pr?,commit?},recurrence_ids,count,first_recurrence_ts}],count,distinct_recurring_cuts,scanned}"
+        "{recurrences:[{resolved_id,resolved_text,origin?,resolution:{ts,disposition,disposition_ts,task?,pr?,commit?},recurrence_ids,count,first_recurrence_ts}],count,distinct_recurring_cuts,scanned}"
     );
-    assert!(
-        verify["semantics"]
-            .as_str()
-            .unwrap()
-            .contains("filtered-token rule")
-    );
+    let semantics = verify["semantics"].as_str().unwrap();
+    assert!(semantics.contains("filtered-token rule"));
+    assert!(semantics.contains("disposition_ts"));
+    assert!(semantics.contains("no recurrence was observed"));
     assert_eq!(
         verify["exit_codes"],
         json!({"0":"no recurrences","1":"recurrences found"})

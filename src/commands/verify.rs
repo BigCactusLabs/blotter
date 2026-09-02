@@ -32,6 +32,8 @@ pub struct Recurrence {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VerifyResolution {
     pub ts: String,
+    pub disposition: crate::Disposition,
+    pub disposition_ts: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,7 +44,7 @@ pub struct VerifyResolution {
 
 struct ResolvedAnchor {
     candidate: Candidate,
-    resolution_timestamp: Timestamp,
+    disposition_timestamp: Timestamp,
 }
 
 pub(crate) struct RecurrenceGroup {
@@ -149,8 +151,10 @@ pub(crate) fn recurrence_groups(items: Vec<ListItem>) -> RecurrenceAnalysis {
                     .as_ref()
                     .expect("resolved folded items have a resolution");
                 anchors.push(ResolvedAnchor {
-                    resolution_timestamp: resolution
-                        .ts
+                    disposition_timestamp: resolution
+                        .disposition_ts
+                        .as_deref()
+                        .expect("resolved cut anchors carry disposition_ts")
                         .parse()
                         .expect("folded resolutions have valid RFC3339 timestamps"),
                     candidate,
@@ -175,12 +179,12 @@ pub(crate) fn recurrence_groups(items: Vec<ListItem>) -> RecurrenceAnalysis {
     let mut recurrences = Vec::new();
     for anchor in anchors {
         // `open` is sorted by (timestamp, id) and the prefilter returns
-        // positions into it, so the post-resolution cutoff is a floor on the
+        // positions into it, so the disposition_ts cutoff is a floor on the
         // bitset walk rather than a second pass. Triage's
         // `candidate <= representative` self-exclusion has no counterpart: an
         // anchor is never a member of `open`.
         let floor =
-            open.partition_point(|candidate| candidate.timestamp <= anchor.resolution_timestamp);
+            open.partition_point(|candidate| candidate.timestamp <= anchor.disposition_timestamp);
         let recurring: Vec<_> = scratch
             .matching_candidates(&anchor.candidate, &index, &frequencies, floor)
             .indices_from(floor)
@@ -231,6 +235,13 @@ fn materialize_recurrence(group: &RecurrenceGroup) -> Recurrence {
         origin: group.anchor.item.origin.clone(),
         resolution: VerifyResolution {
             ts: resolution.ts.clone(),
+            disposition: resolution
+                .disposition
+                .expect("resolved anchors carry a disposition"),
+            disposition_ts: resolution
+                .disposition_ts
+                .clone()
+                .expect("resolved cut anchors carry disposition_ts"),
             task: resolution.task.clone(),
             pr: resolution.pr.clone(),
             commit: resolution.commit.clone(),
