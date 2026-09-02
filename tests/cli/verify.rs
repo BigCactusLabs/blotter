@@ -160,6 +160,227 @@ fn verify_excludes_a_dropped_resolution_anchor() {
 }
 
 #[test]
+fn verify_excludes_an_accepted_anchor_with_a_later_linked_open_cut() {
+    // r48: accepted is a deliberate decision to tolerate friction, so its
+    // recurrence is expected, not a failed intervention. An accepted
+    // resolution is never an anchor.
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let resolved = add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "Cache configuration missing",
+        &["ops"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:31:00Z",
+        resolved.data.record.cut_id(),
+        &["--agent", "fixer", "--disposition", "accepted"],
+    );
+    add_at(
+        &file,
+        "2026-07-09T18:32:00Z",
+        "cache configuration missing",
+        &["ops"],
+    );
+
+    let verify = verify_success(&run_file(&file, &["verify"]), 0);
+    assert_eq!(verify.data["recurrences"], json!([]));
+    assert_eq!(verify.data["scanned"], 1);
+}
+
+#[test]
+fn verify_excludes_an_invalid_anchor_with_a_later_linked_open_cut() {
+    // r48: invalid says the anchor was never friction at all.
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let resolved = add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "Cache configuration missing",
+        &["ops"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:31:00Z",
+        resolved.data.record.cut_id(),
+        &["--agent", "fixer", "--disposition", "invalid"],
+    );
+    add_at(
+        &file,
+        "2026-07-09T18:32:00Z",
+        "cache configuration missing",
+        &["ops"],
+    );
+
+    let verify = verify_success(&run_file(&file, &["verify"]), 0);
+    assert_eq!(verify.data["recurrences"], json!([]));
+    assert_eq!(verify.data["scanned"], 1);
+}
+
+#[test]
+fn verify_fixed_and_promoted_anchors_both_report_a_recurrence() {
+    let temp = TempDir::new().unwrap();
+
+    let fixed_file = temp.path().join("fixed.jsonl");
+    let fixed_resolved = add_at(
+        &fixed_file,
+        "2026-07-09T18:30:00Z",
+        "Cache configuration missing",
+        &["ops"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &fixed_file,
+        "2026-07-09T18:31:00Z",
+        fixed_resolved.data.record.cut_id(),
+        &["--agent", "fixer", "--disposition", "fixed"],
+    );
+    add_at(
+        &fixed_file,
+        "2026-07-09T18:32:00Z",
+        "cache configuration missing",
+        &["ops"],
+    );
+    let fixed = verify_success(&run_file(&fixed_file, &["verify"]), 1);
+    assert_eq!(fixed.data["count"], 1);
+    assert_eq!(
+        fixed.data["recurrences"][0]["resolution"]["disposition"],
+        "fixed"
+    );
+
+    let promoted_file = temp.path().join("promoted.jsonl");
+    let promoted_resolved = add_at(
+        &promoted_file,
+        "2026-07-09T18:30:00Z",
+        "Cache configuration missing",
+        &["ops"],
+    );
+    let promotion: SuccessEnvelope<PromoteData> = success(&promote_at(
+        &promoted_file,
+        "2026-07-09T18:31:00Z",
+        &[
+            "--source",
+            promoted_resolved.data.record.cut_id(),
+            "--artifact-type",
+            "doc",
+            "--artifact-ref",
+            "docs/cache.md",
+        ],
+    ));
+    let promotion_record_id = promotion_id(&promotion.data.record);
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &promoted_file,
+        "2026-07-09T18:32:00Z",
+        promoted_resolved.data.record.cut_id(),
+        &[
+            "--agent",
+            "fixer",
+            "--disposition",
+            "promoted",
+            "--promotion",
+            &promotion_record_id,
+        ],
+    );
+    add_at(
+        &promoted_file,
+        "2026-07-09T18:33:00Z",
+        "cache configuration missing",
+        &["ops"],
+    );
+    let promoted = verify_success(&run_file(&promoted_file, &["verify"]), 1);
+    assert_eq!(promoted.data["count"], 1);
+    assert_eq!(
+        promoted.data["recurrences"][0]["resolution"]["disposition"],
+        "promoted"
+    );
+}
+
+#[test]
+fn verify_disposition_amend_from_fixed_to_accepted_removes_the_anchor_and_back_restores_it() {
+    // A1(4): an amend that moves fixed -> accepted removes the anchor, and
+    // accepted -> fixed (re-deciding, new disposition_ts) restores it with
+    // the boundary at the new disposition_ts.
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let resolved = add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "Cache configuration missing",
+        &["ops"],
+    );
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:31:00Z", // T1
+        resolved.data.record.cut_id(),
+        &["--agent", "fixer", "--disposition", "fixed"],
+    );
+    let recurring = add_at(
+        &file,
+        "2026-07-09T18:32:00Z", // T2 > T1
+        "cache configuration missing",
+        &["ops"],
+    );
+
+    let fixed = verify_success(&run_file(&file, &["verify"]), 1);
+    assert_eq!(fixed.data["count"], 1);
+
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:33:00Z", // T3 > T2, disposition-changing amend
+        resolved.data.record.cut_id(),
+        &[
+            "--amend",
+            "--disposition",
+            "accepted",
+            "--agent",
+            "corrector",
+        ],
+    );
+
+    let accepted = verify_success(&run_file(&file, &["verify"]), 0);
+    assert_eq!(accepted.data["recurrences"], json!([]));
+
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T18:34:00Z", // T4 > T3, re-deciding amend back to fixed
+        resolved.data.record.cut_id(),
+        &[
+            "--amend",
+            "--disposition",
+            "fixed",
+            "--agent",
+            "re-corrector",
+        ],
+    );
+
+    // The boundary now sits at T4, strictly after the T2 open cut, so that
+    // cut no longer links even though the anchor is eligible again; it takes
+    // a cut logged after T4 to recur.
+    let too_early = verify_success(&run_file(&file, &["verify"]), 0);
+    assert_eq!(too_early.data["recurrences"], json!([]));
+    let _ = recurring;
+
+    let later_recurring = add_at(
+        &file,
+        "2026-07-09T18:35:00Z", // T5 > T4
+        "cache configuration missing",
+        &["ops"],
+    );
+
+    let restored = verify_success(&run_file(&file, &["verify"]), 1);
+    assert_eq!(restored.data["count"], 1);
+    assert_eq!(
+        restored.data["recurrences"][0]["resolution"]["disposition_ts"],
+        "2026-07-09T18:34:00.000Z"
+    );
+    assert_eq!(
+        restored.data["recurrences"][0]["recurrence_ids"],
+        json!([later_recurring.data.record.cut_id()])
+    );
+}
+
+#[test]
 fn verify_excludes_an_empty_normalized_resolved_title() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
@@ -787,6 +1008,9 @@ fn schema_documents_verify() {
     assert!(semantics.contains("filtered-token rule"));
     assert!(semantics.contains("disposition_ts"));
     assert!(semantics.contains("no recurrence was observed"));
+    assert!(semantics.contains(
+        "anchors are resolved cuts whose winning disposition is fixed or promoted; accepted and invalid are excluded"
+    ));
     assert_eq!(
         verify["exit_codes"],
         json!({"0":"no recurrences","1":"recurrences found"})
