@@ -222,14 +222,12 @@ fn retrospect_does_not_promote_a_single_recurrence() {
 }
 
 #[test]
-fn retrospect_includes_auto_captures_without_a_flag() {
+fn retrospect_reads_auto_tagged_records_like_any_other() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
-    // r32 retired the capture lane, but stored auto records remain, so retrospect's
-    // inverted default still has to hold. The hand-filed text differs from the auto
-    // record's command text; linkage rides the shared tag, and the hand-filed cut
-    // stays untagged by auto so scanned == 2 proves the auto record is included
-    // without a flag.
+    // Stored auto-tagged records are ordinary input. The hand-filed text differs
+    // from the stored record's command text; linkage rides the shared tag, and
+    // scanned == 2 proves the tag has no special read behavior.
     let hand_filed = add_at(
         &file,
         "2026-07-09T18:30:00Z",
@@ -435,12 +433,7 @@ fn schema_documents_retrospect_and_its_no_window_posture() {
             .unwrap()
             .contains("retrospect takes no window: chronic signal is long-horizon by design")
     );
-    assert!(
-        retrospect["semantics"]
-            .as_str()
-            .unwrap()
-            .contains("auto-captures are included by default")
-    );
+    assert!(!retrospect["semantics"].as_str().unwrap().contains("auto"));
     assert_eq!(
         retrospect["exit_codes"],
         json!({"0":"no promotion candidates","1":"promotion candidates found"})

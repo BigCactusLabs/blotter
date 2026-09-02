@@ -43,7 +43,6 @@ pub fn run(
 
     let resolved = store::discover(file)?;
     let store::LoadedFold { items, warnings: _ } = store::load_folded(&resolved)?;
-    let (items, _) = crate::partition_auto_captures(items, args.include_auto);
 
     let data = LogsData::from_items(items, since)?;
     write_otlp_json(&data)?;

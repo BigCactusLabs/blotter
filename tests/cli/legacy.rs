@@ -29,7 +29,7 @@ fn old_format_cuts_without_source_fold_and_list_byte_identically() {
     assert!(output.stderr.is_empty());
     let file_json = serde_json::to_string(&file.to_string_lossy()).unwrap();
     let expected = format!(
-        r#"{{"ok":true,"data":{{"items":[{{"kind":"cut","id":"{id}","ts":"2026-08-01T00:00:00.000Z","agent":"legacy","text":"old-format cut","tags":["legacy"],"severity":"minor","cwd":"/tmp","status":"open"}}],"count":1,"total":1,"truncated":false}},"meta":{{"contract":5,"file":{file_json}}}}}"#
+        r#"{{"ok":true,"data":{{"items":[{{"kind":"cut","id":"{id}","ts":"2026-08-01T00:00:00.000Z","agent":"legacy","text":"old-format cut","tags":["legacy"],"severity":"minor","cwd":"/tmp","status":"open"}}],"count":1,"total":1,"truncated":false}},"meta":{{"contract":6,"file":{file_json}}}}}"#
     );
     assert_eq!(
         String::from_utf8(output.stdout).unwrap(),

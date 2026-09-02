@@ -59,18 +59,7 @@ pub fn run(
 ) -> AppResult<i32> {
     let since = parse_since(&args.since, now)?;
     let resolved = store::discover(file)?;
-    let store::LoadedFold {
-        items,
-        mut warnings,
-    } = store::load_folded(&resolved)?;
-    let (items, auto_captures) = crate::partition_auto_captures(items, args.include_auto);
-    let hidden = auto_captures
-        .iter()
-        .filter(|item| item.status == ItemStatus::Open)
-        .count();
-    if hidden > 0 {
-        warnings.push(crate::auto_capture_warning(hidden));
-    }
+    let store::LoadedFold { items, warnings } = store::load_folded(&resolved)?;
 
     let data = digest(items, since, now);
     if args.format == OutputFormat::Md {

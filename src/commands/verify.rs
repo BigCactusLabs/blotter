@@ -77,20 +77,9 @@ fn is_verify_eligible(item: &ListItem) -> bool {
     }
 }
 
-pub fn run(args: VerifyArgs, file: Option<PathBuf>, pretty: bool) -> AppResult<i32> {
+pub fn run(_args: VerifyArgs, file: Option<PathBuf>, pretty: bool) -> AppResult<i32> {
     let resolved = store::discover(file)?;
-    let store::LoadedFold {
-        items,
-        mut warnings,
-    } = store::load_folded(&resolved)?;
-    let (items, auto_captures) = crate::partition_auto_captures(items, args.include_auto);
-    let hidden = auto_captures
-        .iter()
-        .filter(|item| is_verify_eligible(item))
-        .count();
-    if hidden > 0 {
-        warnings.push(crate::auto_capture_warning(hidden));
-    }
+    let store::LoadedFold { items, warnings } = store::load_folded(&resolved)?;
 
     let data = verify(items);
     let exit = i32::from(!data.recurrences.is_empty());

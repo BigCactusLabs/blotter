@@ -32,17 +32,6 @@ pub struct Cli {
     pub command: Command,
 }
 
-impl Cli {
-    pub fn is_hook_exec(&self) -> bool {
-        matches!(
-            &self.command,
-            Command::Hook(HookArgs {
-                command: HookCommand::Exec(_)
-            })
-        )
-    }
-}
-
 const ADD_AFTER_HELP: &str = "\
 Admission: file a cut only when at least one of these holds.
   transferable   another agent or user would plausibly hit the same thing
@@ -69,7 +58,6 @@ pub enum Command {
     Sweep(SweepArgs),
     Resolve(ResolveArgs),
     Archive(ArchiveArgs),
-    Hook(HookArgs),
     Schema {
         #[arg(
             value_enum,
@@ -167,8 +155,6 @@ pub struct ListArgs {
     pub agent: Option<String>,
     #[arg(long, help = "Filter by tag")]
     pub tag: Option<String>,
-    #[arg(long, help = "Include records tagged auto")]
-    pub include_auto: bool,
     #[arg(long, value_enum, help = "Filter cuts by severity")]
     pub severity: Option<Severity>,
     #[arg(long, help = "Filter since an RFC3339 timestamp or Nd/Nh duration")]
@@ -190,8 +176,6 @@ pub struct ExportArgs {
     pub format: Option<ExportFormat>,
     #[arg(long, help = "Filter since an RFC3339 timestamp or Nd/Nh duration")]
     pub since: Option<String>,
-    #[arg(long, help = "Include records tagged auto")]
-    pub include_auto: bool,
 }
 
 #[derive(Debug, Args)]
@@ -203,15 +187,10 @@ pub struct TriageArgs {
         help = "Minimum similar open cuts per cluster"
     )]
     pub min_count: usize,
-    #[arg(long, help = "Include records tagged auto")]
-    pub include_auto: bool,
 }
 
 #[derive(Debug, Args)]
-pub struct VerifyArgs {
-    #[arg(long, help = "Include records tagged auto")]
-    pub include_auto: bool,
-}
+pub struct VerifyArgs {}
 
 #[derive(Debug, Args)]
 pub struct RetrospectArgs {}
@@ -224,8 +203,6 @@ pub struct DigestArgs {
         help = "Report since an RFC3339 timestamp or Nd/Nh duration"
     )]
     pub since: String,
-    #[arg(long, help = "Include records tagged auto")]
-    pub include_auto: bool,
     #[arg(
         long,
         value_enum,
@@ -291,8 +268,6 @@ pub struct SweepArgs {
         help = "Record kind to include in items"
     )]
     pub kind: ListKind,
-    #[arg(long, help = "Include records tagged auto")]
-    pub include_auto: bool,
 }
 
 #[derive(Debug, Args)]
@@ -331,32 +306,6 @@ pub struct ResolveArgs {
     pub amend: bool,
     #[arg(long, help = "Validate without appending a resolution")]
     pub dry_run: bool,
-}
-
-#[derive(Debug, Args)]
-pub struct HookArgs {
-    #[command(subcommand)]
-    pub command: HookCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum HookCommand {
-    #[command(
-        about = "Retired auto-capture receiver; files nothing; keeps installed hooks fail open",
-        long_about = "Retired auto-capture receiver kept so installed hooks fail open. It files nothing. Global flags such as --file and --pretty are accepted but ignored."
-    )]
-    Exec(HookExecArgs),
-}
-
-#[derive(Debug, Args)]
-pub struct HookExecArgs {
-    #[arg(value_enum, help = "Retired hook integration target; nothing is filed")]
-    pub target: HookTarget,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum HookTarget {
-    ClaudeCode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -486,6 +435,24 @@ mod tests {
         assert!(Cli::try_parse_from(["blotter", "add", "x", "--severity", "critical"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "resolve"]).is_err());
         assert!(Cli::try_parse_from(["blotter"]).is_err());
+        for args in [
+            vec!["blotter", "list", "--include-auto"],
+            vec![
+                "blotter",
+                "export",
+                "--format",
+                "otlp-json",
+                "--include-auto",
+            ],
+            vec!["blotter", "triage", "--include-auto"],
+            vec!["blotter", "verify", "--include-auto"],
+            vec!["blotter", "digest", "--include-auto"],
+            vec!["blotter", "sweep", "repo", "--include-auto"],
+            vec!["blotter", "hook", "exec", "claude-code"],
+            vec!["blotter", "hook", "install", "claude-code"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
     }
 
     #[test]
@@ -502,24 +469,11 @@ mod tests {
             vec!["blotter", "sweep", "repo"],
             vec!["blotter", "resolve", "abcd"],
             vec!["blotter", "archive", "--before", "1d"],
-            vec!["blotter", "hook", "exec", "claude-code"],
             vec!["blotter", "schema", "record"],
             vec!["blotter", "doctor"],
         ] {
             assert!(Cli::try_parse_from(args).is_ok());
         }
-    }
-
-    #[test]
-    fn parser_rejects_removed_codex_hook_target() {
-        assert!(Cli::try_parse_from(["blotter", "hook", "exec", "codex"]).is_err());
-    }
-
-    /// r32 retired the auto-capture lane. `hook exec` survives as a no-op for
-    /// already-installed harnesses; the installer that created them does not.
-    #[test]
-    fn parser_rejects_the_retired_hook_installer() {
-        assert!(Cli::try_parse_from(["blotter", "hook", "install", "claude-code"]).is_err());
     }
 
     #[test]

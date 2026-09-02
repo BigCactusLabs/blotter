@@ -9,7 +9,7 @@ Agents hit friction constantly and silently push through; the signal evaporates.
 
 ```
 $ blotter add "yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web" --tag tooling
-{"ok":true,"data":{"changed":true,"record":{"kind":"cut","id":"bl_9f2c41d0a8b3","ts":"2026-07-09T21:14:03.412Z","agent":"claude-code","text":"yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web","tags":["tooling"],"severity":"minor",...}},"meta":{"contract":5,"file":"/repo/.blotter.jsonl","agent_source":"detected"}}
+{"ok":true,"data":{"changed":true,"record":{"kind":"cut","id":"bl_9f2c41d0a8b3","ts":"2026-07-09T21:14:03.412Z","agent":"claude-code","text":"yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web","tags":["tooling"],"severity":"minor",...}},"meta":{"contract":6,"file":"/repo/.blotter.jsonl","agent_source":"detected"}}
 
 $ blotter dogear "The retry-backoff pattern in our fetch helper would make a good standalone write-up" --tag research
 ```
@@ -18,7 +18,7 @@ It is an agent-only tool by design: JSON envelopes on stdout, structured errors 
 
 The friction-log idea comes from [a tool Steve Ruiz built](https://x.com/steveruizok) for his own repos: once agents had a place to complain, they immediately surfaced real workflow defects — quoting bugs, wrong test working directories, YAML footguns — that they'd been eating silently for months.
 
-This project began as a fork of [treygoff24/papercuts](https://github.com/treygoff24/papercuts) and owes its core design — the append-only journal, the agent-first envelope contract, the concurrency model — to that upstream project. The fork added dogears, structured resolve provenance, chronic-cut triage and its analysis family, and a Claude Code hook integration (since retired), then took the name **blotter** to stand on its own. `cargo install papercuts` still installs the upstream crate, which has none of those additions. Other tools explore the same space with different bets — e.g. wevm's frog takes a remote-canonical approach where blotter stays local and append-only.
+This project began as a fork of [treygoff24/papercuts](https://github.com/treygoff24/papercuts) and owes its core design — the append-only journal, the agent-first envelope contract, the concurrency model — to that upstream project. The fork added dogears, structured resolve provenance, and a Claude Code hook integration (since retired), and chronic-cut triage with its analysis family, then took the name **blotter** to stand on its own. `cargo install papercuts` still installs the upstream crate, which has none of those additions. Other tools explore the same space with different bets — e.g. wevm's frog takes a remote-canonical approach where blotter stays local and append-only.
 
 ## Install
 
@@ -28,6 +28,10 @@ cargo install blotter-cli
 
 The crate is named `blotter-cli` (the crates.io name `blotter` is already taken by a placeholder crate), but the installed binary is plain `blotter`. To build from the latest source instead: `cargo install --git https://github.com/BigCactusLabs/blotter blotter-cli`.
 
+## Upgrade to 1.0.0
+
+Before upgrading, remove the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from your Claude Code settings. Otherwise every failed tool call puts an `invalid_argument` error envelope (exit 2, unrecognized subcommand) into the host session: Claude Code shows that stderr to the agent on `PostToolUseFailure` and blocks nothing, but it is noise on every failure.
+
 ## How it works
 
 Records live in an **append-only JSONL file** — by default `.blotter.jsonl` at your repo root, so every entry shows up in `git diff` and travels with the repo. No server, no sync, no telemetry. The file is the product.
@@ -36,13 +40,13 @@ Records live in an **append-only JSONL file** — by default `.blotter.jsonl` at
 - **Concurrency-safe**: multiple agents on one file are fine (advisory locking, atomic appends, self-healing torn lines).
 - **Deterministic**: content-addressed IDs — a cut's identity covers its timestamp, agent, text, severity, and sorted tags, so the same text filed under different tags is a different cut — plus stable sort and a reproducible-clock override for tests.
 - **Never rewrites history**: `resolve` appends an event; the log is a journal, not a database. The two exceptions, [`archive`](#archive) and [`doctor --fix`](#doctor), never edit in place — each writes a replacement copy and atomically swaps it in, always preserving the original as a timestamped backup.
-- **Evidence is bounded and redacted**: `add` can attach a failed command (`--cmd`), exit status (`--exit`), UTF-8 stderr file (`--stderr-file`), or free-form note (`--evidence`). Redaction covers every authored free-text field, not just `add`: `dogear --evidence` and `resolve --note`/`--amend` go through the same pass at write time. `--stderr-file` rejects non-regular files and inputs over 1 MiB before sanitized stderr is stored up to 4096 UTF-8 bytes; a symlink is followed to its target, which must itself be a regular file. Redaction is best-effort hygiene, not a security boundary; never feed raw environment dumps. Every input lane carries the same 1 MiB read bound — `--stderr-file`, the hook payload, and text piped to `add -` or `dogear -` — and the log file itself must be a regular file, so a `--file` or `BLOTTER_FILE` naming a FIFO, device, or directory is rejected rather than blocking or growing without bound.
+- **Evidence is bounded and redacted**: `add` can attach a failed command (`--cmd`), exit status (`--exit`), UTF-8 stderr file (`--stderr-file`), or free-form note (`--evidence`). Redaction covers every authored free-text field, not just `add`: `dogear --evidence` and `resolve --note`/`--amend` go through the same pass at write time. `--stderr-file` rejects non-regular files and inputs over 1 MiB before sanitized stderr is stored up to 4096 UTF-8 bytes; a symlink is followed to its target, which must itself be a regular file. Redaction is best-effort hygiene, not a security boundary; never feed raw environment dumps. Every input lane carries the same 1 MiB read bound — `--stderr-file` and text piped to `add -` or `dogear -` — and the log file itself must be a regular file, so a `--file` or `BLOTTER_FILE` naming a FIFO, device, or directory is rejected rather than blocking or growing without bound.
 
 Two global flags apply to every subcommand: `--file PATH` overrides log discovery for one invocation (same target as `BLOTTER_FILE`), and `--pretty` indents the JSON envelope for human reading. The one exception is `sweep`, which rejects `--file` because its inputs are its arguments.
 
 ## The commands
 
-Fourteen subcommands, four jobs:
+Thirteen subcommands, four jobs:
 
 **Write** — append records to the log by hand:
 
@@ -80,15 +84,13 @@ blotter doctor --fix              # quarantine unreadable lines (backup + atomic
 blotter archive --before 180d     # move fully closed, fully old history to a sidecar
 ```
 
-**Integrate** — harness plumbing and the machine contract:
+**Contract** — the machine contract:
 
 ```bash
 blotter schema                    # full machine contract — agents self-orient with this
 ```
 
 One other path appends besides the write commands: `doctor --fix` appends in the course of a repair. `blotter schema` carries the authoritative `read_only`/`appends` annotation for every command.
-
-Six read commands — `list`, `triage`, `verify`, `digest`, `sweep`, and `export` — show hand-filed records by default; pass `--include-auto` to include records tagged `auto`. On `list`, `--tag auto` implies `--include-auto`, so you can ask for auto records by name without the extra flag. Nothing writes an `auto` record any more — see [Hooks](#hooks) — so those flags now reach stored history only.
 
 ## Cuts
 
@@ -132,7 +134,7 @@ Dogears use the same append-only journal, agent resolution, tags, dry-run, deter
 
 ## Triage
 
-`triage` is a read-only scan of open cuts. Cuts whose normalized titles are identical always link, regardless of tags. Otherwise, cuts must share a tag (or both be untagged), then link from filtered tokens: 80% overlap with the shorter token set, or at least three shared tokens that appear in no more than `max(2, ceil(scanned / 4))` open cuts. Filtering removes tokens of two characters or fewer, the Snowball English stopword list normalized the same way tokens are, and four retained filler words the Snowball list omits: `need`, `one`, `use`, `uses`. Only clusters that meet the threshold are reported; resolved cuts and dogears are excluded. Each cluster carries `occurrences` — how many open cuts share the normalized title of the cluster's displayed `text`. The JSON output suggests `graduate` for each chronic cluster, and exit 1 means at least one was found. Records tagged `auto` are excluded by default; pass `--include-auto` to include them.
+`triage` is a read-only scan of open cuts. Cuts whose normalized titles are identical always link, regardless of tags. Otherwise, cuts must share a tag (or both be untagged), then link from filtered tokens: 80% overlap with the shorter token set, or at least three shared tokens that appear in no more than `max(2, ceil(scanned / 4))` open cuts. Filtering removes tokens of two characters or fewer, the Snowball English stopword list normalized the same way tokens are, and four retained filler words the Snowball list omits: `need`, `one`, `use`, `uses`. Only clusters that meet the threshold are reported; resolved cuts and dogears are excluded. Each cluster carries `occurrences` — how many open cuts share the normalized title of the cluster's displayed `text`. The JSON output suggests `graduate` for each chronic cluster, and exit 1 means at least one was found.
 
 ```bash
 blotter triage --min-count 3
@@ -142,7 +144,7 @@ blotter triage --min-count 3
 
 ## Verify
 
-`verify` is a read-only check for cuts that reappear after they were resolved. Each eligible resolved cut is an anchor. A later open cut recurs when it matches under the same exact-title, tag, and filtered-token linkage rules as `triage`. Dogears, dropped resolutions, and blank normalized resolved titles are ignored. One open cut can be reported against more than one resolved anchor. Records tagged `auto` are excluded by default; pass `--include-auto` to include them.
+`verify` is a read-only check for cuts that reappear after they were resolved. Each eligible resolved cut is an anchor. A later open cut recurs when it matches under the same exact-title, tag, and filtered-token linkage rules as `triage`. Dogears, dropped resolutions, and blank normalized resolved titles are ignored. One open cut can be reported against more than one resolved anchor.
 
 ```bash
 blotter verify
@@ -158,7 +160,7 @@ The JSON envelope includes each anchor's resolution timestamp and optional task,
 blotter retrospect
 ```
 
-Retrospect takes no window and no flags: chronic signal is long-horizon, so a window would hide the evidence it looks for. It also **includes auto-captured records by default**, inverting the rule the other read commands follow — the repeated-command-failure signal behind `wrapper_alias` lives in the `auto` lane, so excluding it would remove the point of the command. That lane is [retired](#hooks) and no longer grows, so this default now reaches stored history only.
+Retrospect takes no window and no flags: chronic signal is long-horizon, so a window would hide the evidence it looks for.
 
 Each candidate carries its record IDs, first and last timestamps, and bounded evidence: at most 10 member texts and 5 resolution notes, never a record's evidence command, stderr, or note. `occurrences` counts each distinct normalized title in the candidate once, so members that share a title do not multiply the count. Exit 1 means candidates were found, exit 0 means none.
 
@@ -166,7 +168,7 @@ Retrospect never writes anything — no doc, no skill, no alias, and no record i
 
 ## Digest
 
-`digest` is the periodic read-only report: what keeps recurring, what is new, and what ideas are waiting. It combines three views — chronic clusters (the triage analysis at a threshold of 2), open cuts filed inside the window grouped by tag, and all open dogears. Records tagged `auto` are excluded by default; pass `--include-auto` to include them.
+`digest` is the periodic read-only report: what keeps recurring, what is new, and what ideas are waiting. It combines three views — chronic clusters (the triage analysis at a threshold of 2), open cuts filed inside the window grouped by tag, and all open dogears.
 
 ```bash
 blotter digest --since 7d              # JSON envelope, default window
@@ -186,7 +188,7 @@ blotter sweep --registry ~/.config/blotter-repos.txt --since 14d --kind all
 
 Each path is a repository directory or a direct JSONL log. A **repository directory** means a directory inside a git working tree: sweep walks up to the nearest `.git` and reads `<repo root>/.blotter.jsonl`. A directory that holds a `.blotter.jsonl` but is not under git is skipped with `not a repository directory` — point sweep at the log file itself in that case. A registry is a plain text file you own with one path per line; blank lines and `#` comments are ignored, and relative paths resolve from the registry file's own directory. Like `--file`, it must name a regular file: a directory, or bytes that are not UTF-8, is `invalid_input` (exit 65) rather than a generic I/O failure, and a missing registry is `not_found` (exit 66). `blotter` never creates or looks for a registry on its own — there is no blotter-owned config file.
 
-Sweep reads one log at a time under a shared lock and never writes. `BLOTTER_FILE` is ignored and the global `--file` flag is rejected, because sweep's inputs are its arguments. A path that is locked, unreadable, or not a repository directory becomes a skip warning and does not fail the run: sweep exits 0 with `totals.repos_skipped` set, deliberately unlike the exit-75 lock-timeout rule elsewhere. Check `totals.repos_swept` against the number of paths you passed — an all-skipped run still exits 0. Records tagged `auto` are excluded by default; pass `--include-auto` to include them.
+Sweep reads one log at a time under a shared lock and never writes. `BLOTTER_FILE` is ignored and the global `--file` flag is rejected, because sweep's inputs are its arguments. A path that is locked, unreadable, or not a repository directory becomes a skip warning and does not fail the run: sweep exits 0 with `totals.repos_skipped` set, deliberately unlike the exit-75 lock-timeout rule elsewhere. Check `totals.repos_swept` against the number of paths you passed — an all-skipped run still exits 0.
 
 ## Export
 
@@ -197,23 +199,13 @@ blotter export --format otlp-json
 blotter export --format otlp-json --since 30d > friction.otlp.json
 ```
 
-`--format otlp-json` is required: a bare `export` is `invalid_argument`, reported before the clock is read. `--since` takes a full RFC3339 timestamp or an `Nd`/`Nh` duration. Records tagged `auto` are excluded by default; pass `--include-auto` to include them. Only cuts are exported — dogears are out of scope.
+`--format otlp-json` is required: a bare `export` is `invalid_argument`, reported before the clock is read. `--since` takes a full RFC3339 timestamp or an `Nd`/`Nh` duration. Only cuts are exported — dogears are out of scope.
 
 Cuts of every status are exported, and the status travels as the `blotter.friction.status` attribute (`open`, `resolved`, or `dropped`) rather than as a selector: there is no flag to export one status. Each cut becomes a log record with `eventName` `blotter.friction.reported`, a decimal-string `timeUnixNano`, the cut text as the body, severity mapped to OTLP (`minor`/`major`/`blocker` → `INFO`/`WARN`/`ERROR`), and `blotter.friction.*` attributes for id, severity, status, agent, tags, and `cwd`; a resolved cut also carries `blotter.friction.resolved_ts`.
 
 Evidence fields are never exported. A failed command, its stderr, and free-form evidence notes are the parts of a cut most likely to hold local paths or secrets, so the outward mapping leaves them in the log. Trace and span identity is absent for the same reason — the bridge reports friction, it does not join your traces — and so is `schemaUrl`.
 
 Output is deterministic: records sort by timestamp, then by id, and an empty selection is a stable empty record list at exit 0. OTLP types `timeUnixNano` as an unsigned 64-bit value, so a selected record whose timestamp falls outside that range (pre-1970, or past the ceiling) rejects the **whole** export with `invalid_input` (exit 65), naming the offending record and timestamp. There is no partial output and no silently skipped record; correct that record, or exclude it with `--since`, then export again.
-
-## Hooks
-
-**The Claude Code auto-capture lane is retired.** `blotter hook install claude-code` no longer exists, and `blotter hook exec claude-code` files nothing.
-
-It used to auto-file a minor `auto`-tagged cut for every failed Bash tool call. Ten days of dogfooding produced 27 such records and no reader: they were hidden from every read command by default, and what they stored was a failed command line with no statement of why the failure mattered. A non-zero exit is not a claim that something got in the way, and successive gates narrowed the lane without ever making a captured record worth reading. File friction by hand with `blotter add` — one or two sentences saying what you were doing and what got in the way. That is the channel.
-
-Records already tagged `auto` stay in the log, because the log is append-only. They remain hidden from `list`, `triage`, `digest`, `verify`, `sweep`, and `export` by default; pass `--include-auto` to read them. `retrospect` still includes them without a flag.
-
-`blotter hook exec claude-code` survives as a no-op receiver so a settings file installed against an older binary cannot break the session it was meant to observe: it reads and discards stdin, resolves no clock, opens no log, keeps stdout empty, and always exits 0. `BLOTTER_HOOK_EXPLAIN=1` makes it write one stderr line naming the retirement; any other value keeps it silent. Delete the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from your Claude Code settings — blotter no longer writes another program's configuration at all.
 
 ## Doctor
 
@@ -300,7 +292,7 @@ Duplicate lines after a merge are harmless — the fold is first-wins and `blott
 
 ## Contract
 
-Everything an agent needs is in `blotter schema`: commands and flags with read-only/appends annotations, env vars (`BLOTTER_FILE`, `BLOTTER_AGENT`, `BLOTTER_NOW`, `BLOTTER_HOOK_EXPLAIN`), record shapes, error codes, and the exit-code dictionary (0 success · 1 command findings · 2 usage · 65 bad input · 66 not found · 70 internal · 74 I/O · 75 lock timeout, retryable · 77 permission denied · 78 config). Empty results are exit 0, never errors.
+Everything an agent needs is in `blotter schema`: commands and flags with read-only/appends annotations, env vars (`BLOTTER_FILE`, `BLOTTER_AGENT`, `BLOTTER_NOW`), record shapes, error codes, and the exit-code dictionary (0 success · 1 command findings · 2 usage · 65 bad input · 66 not found · 70 internal · 74 I/O · 75 lock timeout, retryable · 77 permission denied · 78 config). Empty results are exit 0, never errors.
 
 Exit 1 is not an error — it is a finding count. `doctor` returns it for an unhealthy log, `triage` for at least one chronic cluster, `verify` for at least one recurrence, and `retrospect` for at least one promotion candidate. Each command's own `exit_codes` entry in `blotter schema` says which meaning applies.
 

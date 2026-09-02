@@ -207,28 +207,6 @@ impl ListItem {
     }
 }
 
-pub fn is_auto_capture(tags: &[String]) -> bool {
-    tags.iter().any(|tag| tag == "auto")
-}
-
-pub(crate) fn partition_auto_captures(
-    items: Vec<ListItem>,
-    include_auto: bool,
-) -> (Vec<ListItem>, Vec<ListItem>) {
-    if include_auto {
-        (items, Vec::new())
-    } else {
-        items
-            .into_iter()
-            .partition(|item| !is_auto_capture(&item.tags))
-    }
-}
-
-pub(crate) fn auto_capture_warning(count: usize) -> String {
-    let noun = if count == 1 { "record" } else { "records" };
-    format!("{count} auto-captured {noun} hidden; use --include-auto to include them")
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ItemStatus {

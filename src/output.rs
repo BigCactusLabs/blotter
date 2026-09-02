@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::io::{self, Write};
 
-pub const CONTRACT: u8 = 5;
+pub const CONTRACT: u8 = 6;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Meta {

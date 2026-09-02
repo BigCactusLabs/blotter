@@ -342,12 +342,7 @@ fn schema_documents_sweep() {
     );
     assert_eq!(sweep["flags"]["--since"], "full RFC3339|Nd|Nh; optional");
     assert_eq!(sweep["flags"]["--kind"], "cut|dogear|all; default cut");
-    assert!(
-        sweep["flags"]["--include-auto"]
-            .as_str()
-            .unwrap()
-            .contains("include records tagged auto")
-    );
+    assert!(sweep["flags"].get("--include-auto").is_none());
     assert!(sweep["output"].as_str().unwrap().contains("repos_skipped"));
     assert!(
         sweep["semantics"]

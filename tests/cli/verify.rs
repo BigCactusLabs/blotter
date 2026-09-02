@@ -88,7 +88,7 @@ fn verify_reports_an_exact_title_recurrence_with_the_full_envelope() {
                 "distinct_recurring_cuts": 1,
                 "scanned": 1,
             },
-            "meta": {"contract": 5, "file": file},
+            "meta": {"contract": 6, "file": file},
         })
     );
 }
@@ -688,12 +688,7 @@ fn verify_sorts_recurrence_ids_and_anchors_by_first_recurrence() {
 fn schema_documents_verify() {
     let schema: SuccessEnvelope<Value> = success(&run(&["schema"]));
     let verify = &schema.data["commands"]["verify"];
-    assert!(
-        verify["flags"]["--include-auto"]
-            .as_str()
-            .unwrap()
-            .contains("include records tagged auto")
-    );
+    assert!(verify["flags"].get("--include-auto").is_none());
     assert_eq!(
         verify["output"],
         "{recurrences:[{resolved_id,resolved_text,source?,resolution:{ts,task?,pr?,commit?},recurrence_ids,count,first_recurrence_ts}],count,distinct_recurring_cuts,scanned}"

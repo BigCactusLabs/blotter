@@ -312,12 +312,7 @@ fn schema_documents_export_otlp_bridge() {
     let export = &schema.data["commands"]["export"];
     assert_eq!(export["flags"]["--format"], "otlp-json; required");
     assert_eq!(export["flags"]["--since"], "full RFC3339|Nd|Nh");
-    assert!(
-        export["flags"]["--include-auto"]
-            .as_str()
-            .unwrap()
-            .contains("include records tagged auto")
-    );
+    assert!(export["flags"].get("--include-auto").is_none());
     assert_eq!(export["eventName"], "blotter.friction.reported");
     assert!(export["output"].as_str().unwrap().contains("raw"));
     assert!(export["output"].as_str().unwrap().contains("LogsData"));

@@ -490,7 +490,7 @@ fn plain_doctor_healthy_output_remains_byte_identical() {
     let mut expected = serde_json::to_vec(&json!({
         "ok": true,
         "data": {"healthy": true, "findings": [], "checked_lines": 1},
-        "meta": {"contract": 5, "file": file.to_string_lossy()},
+        "meta": {"contract": 6, "file": file.to_string_lossy()},
     }))
     .unwrap();
     expected.push(b'\n');

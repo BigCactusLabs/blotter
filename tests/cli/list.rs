@@ -106,6 +106,26 @@ fn list_empty_results_emit_kind_specific_warnings() {
 }
 
 #[test]
+fn list_md_renders_warnings_as_trailing_note_lines() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let added = add(&file, "valid markdown row");
+    let mut log = std::fs::read(&file).unwrap();
+    log.extend_from_slice(b"{ malformed physical line\n");
+    std::fs::write(&file, log).unwrap();
+
+    let output = run_file(&file, &["list", "--format", "md"]);
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let markdown = String::from_utf8(output.stdout).unwrap();
+    let row = format!("- [{}] valid markdown row", added.data.record.cut_id());
+    let note = "> note: skipped 1 malformed line\n";
+    assert!(markdown.contains(&row));
+    assert!(markdown.ends_with(note), "{markdown}");
+    assert!(markdown.find(note).unwrap() > markdown.find(&row).unwrap());
+}
+
+#[test]
 fn list_markdown_collapses_multiline_text_into_one_bullet() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");

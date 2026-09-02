@@ -245,12 +245,7 @@ fn schema_documents_digest() {
     let schema: SuccessEnvelope<Value> = success(&run(&["schema"]));
     let digest = &schema.data["commands"]["digest"];
     assert_eq!(digest["flags"]["--since"], "full RFC3339|Nd|Nh; default 7d");
-    assert!(
-        digest["flags"]["--include-auto"]
-            .as_str()
-            .unwrap()
-            .contains("include records tagged auto")
-    );
+    assert!(digest["flags"].get("--include-auto").is_none());
     assert_eq!(digest["flags"]["--format"], "json|md; default json");
     assert!(digest["output"].as_str().unwrap().contains("new_cuts"));
     assert!(digest["output"].as_str().unwrap().contains("open_dogears"));

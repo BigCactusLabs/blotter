@@ -87,7 +87,6 @@ pub fn run(args: SweepArgs, file: Option<PathBuf>, pretty: bool, now: Timestamp)
         open_cuts: 0,
         open_dogears: 0,
     };
-    let mut hidden_auto_captures = 0;
     for path in paths {
         match store::with_shared(&path, |file| {
             let bytes = store::read_bytes(file, &path)?;
@@ -97,13 +96,7 @@ pub fn run(args: SweepArgs, file: Option<PathBuf>, pretty: bool, now: Timestamp)
                 for warning in folded.warnings {
                     warnings.push(format!("{}: {warning}", path.display()));
                 }
-                let (items, auto_captures) =
-                    crate::partition_auto_captures(folded.items, args.include_auto);
-                hidden_auto_captures += auto_captures
-                    .iter()
-                    .filter(|item| item.status == ItemStatus::Open)
-                    .count();
-                let repo = sweep_repo(path, items, args.kind, since);
+                let repo = sweep_repo(path, folded.items, args.kind, since);
                 totals.repos_swept += 1;
                 totals.open_cuts += repo.counts.open_cuts;
                 totals.open_dogears += repo.counts.open_dogears;
@@ -121,10 +114,6 @@ pub fn run(args: SweepArgs, file: Option<PathBuf>, pretty: bool, now: Timestamp)
         }
     }
     totals.repos_skipped = repos_skipped;
-    if hidden_auto_captures > 0 {
-        warnings.push(crate::auto_capture_warning(hidden_auto_captures));
-    }
-
     let mut meta = Meta::new();
     meta.warnings = warnings;
     output::write_success(SweepData { repos, totals }, pretty, meta)
