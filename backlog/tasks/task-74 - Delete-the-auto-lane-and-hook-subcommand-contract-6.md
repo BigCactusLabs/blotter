@@ -4,11 +4,13 @@ title: Delete the auto lane and hook subcommand (contract 6)
 status: To Do
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-01 22:26'
+updated_date: '2026-09-02 01:53'
 labels:
   - v2
   - breaking
-dependencies: []
+dependencies:
+  - TASK-72
+  - TASK-73
 ordinal: 83000
 ---
 
