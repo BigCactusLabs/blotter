@@ -448,3 +448,15 @@ Production / practitioner systems:
 - Arize Signal tutorial — https://arize.com/blog/debug-production-ai-agents-with-signal-tutorial/
 - Arize Signal launch / Signal-to-PR — https://arize.com/blog/from-signal-to-pr/
 - Arize self-improving agent loop — https://arize.com/blog/building-ai-factory-self-improving-agents-arize-ax/
+
+## Verification, 2026-09-02
+
+Every source above was fetched and checked against its live text before this note was folded into the design doc (r52; `docs/plans/2026-09-01-blotter-v2-plan.md` §13). Ten claims are supported verbatim, including every figure quoted from Jiang et al. Three corrections, none of which changes a conclusion:
+
+- **ProcMEM.** The arXiv page at 2602.01869 currently carries the title *Skill-Pro: Learning Reusable Skills from Experience via Non-Parametric PPO for LLM Agents*. The *ProcMEM* title appears on the ICML 2026 poster (icml.cc/virtual/2026/poster/65830). Same first author and mechanism; the paper was renamed between preprint and camera-ready.
+- **"Evidence promotion as a security boundary."** Chen et al. do not write this. They write that skill creation is "a security boundary" and, separately, that defenses "should therefore treat evidence promotion as a provenance-sensitive authorization decision". The composite phrase in §3 is this note's, not the authors'.
+- **29.6% → 3.3%.** Jiang et al.'s precision figure is an average across two model pairings with wide spread (16.9% → 0.7% and 42.3% → 5.9%); the trend holds for both, the magnitude does not.
+
+Two smaller notes: Rhodes and Kang specify a "three-step promotion gate" where §6 says "multi-step"; and the "automatic reopen" and "offline evaluation examples" claims about LangSmith Engine and the review-before-deploy claim about Arize Signal are supported verbatim on the cited pages.
+
+**Dissent this note omitted.** A counter-evidence hunt for the three positions taken without a dissenting source found one credible primary: Databricks, *Memory scaling for AI agents* (2026-04-10, databricks.com/blog/memory-scaling-ai-agents), reports raw conversation logs filtered only by an LLM quality judge rising "from 2.5% to over 50%, surpassing the expert-curated baseline (33.0%) after just 62 log records". It is not an argument for unfiltered retention (the judge is the selection step) and it measures retrieval memory for task accuracy, not friction claims, but §1's "increasingly well-supported" should read as *direction supported, mechanism and magnitude contested*. No current source was found showing gate-free promotion beats a human gate, and none arguing recurrence is a misleading triage signal.
