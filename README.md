@@ -175,7 +175,9 @@ blotter triage --min-count 3
 blotter verify
 ```
 
-The JSON envelope includes each anchor's resolution timestamp and optional task, pull request, and commit provenance, plus the later recurrence IDs. The top-level `count` is the number of matched anchors, not the number of live problems — a single recurring cut resembling three resolved anchors reports `count: 3` and `distinct_recurring_cuts: 1`. Exit 1 means one or more recurrences were found; no recurrences is exit 0.
+The JSON envelope includes each anchor's resolution timestamp, disposition, and optional task, pull request, and commit provenance, plus the later recurrence IDs. The top-level `count` is the number of matched anchors, not the number of live problems — a single recurring cut resembling three resolved anchors reports `count: 3` and `distinct_recurring_cuts: 1`. Exit 1 means one or more recurrences were found; no recurrences is exit 0.
+
+The "later" boundary is the winning resolution's `disposition_ts` — the moment the disposition was decided — not its `ts`, so a note-only `--amend` never moves it. An empty result means no recurrence was observed in this log after `disposition_ts`; it is evidence the intervention held, not proof that the friction is fixed.
 
 ## Retrospect
 
