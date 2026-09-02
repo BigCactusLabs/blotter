@@ -1,10 +1,10 @@
 ---
 id: TASK-76
 title: promotion record and blotter promote
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-02 15:10'
+updated_date: '2026-09-02 16:32'
 labels:
   - v2
 dependencies:
