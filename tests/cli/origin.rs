@@ -222,7 +222,7 @@ fn origin_non_string_member_is_a_malformed_line() {
     let stored = json!({
         "v": 2,
         "kind": "cut",
-        "id": "bl_aaaaaaaaaaaa",
+        "id": "bl_aaaaaaaaaaaaaaaaaaaa",
         "ts": "2026-08-01T00:00:00.000Z",
         "agent": "porter",
         "text": "non-string origin member",

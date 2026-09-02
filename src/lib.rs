@@ -381,7 +381,7 @@ pub fn compute_id(ts: &str, agent: &str, text: &str, impact: Impact, tags: &[Str
         count.as_str(),
     ];
     fields.extend(tags.iter().map(String::as_str));
-    compute_id_fields_bytes(&fields, 6)
+    compute_id_fields_bytes(&fields, 10)
 }
 
 pub fn compute_dogear_id(ts: &str, agent: &str, text: &str, tags: &[String]) -> String {
@@ -392,7 +392,7 @@ pub fn compute_dogear_id(ts: &str, agent: &str, text: &str, tags: &[String]) -> 
     // bl2 dogear identity: the domain literal and the kind field provide domain
     // separation, and every tag is its own length-prefixed field (TupleHash
     // style) so tag-set boundaries cannot collide (`["a","b"]` != `["a,b"]`).
-    // 80-bit digest; cut IDs use the matching framed scheme at 48 bits.
+    // 80-bit digest; every v2 identity is the same width (r51).
     let mut fields: Vec<&str> = vec!["bl2", "dogear", ts, agent, text, count.as_str()];
     fields.extend(tags.iter().map(String::as_str));
     compute_id_fields_bytes(&fields, 10)

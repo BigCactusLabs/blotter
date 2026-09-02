@@ -1429,7 +1429,7 @@ mod tests {
                 "unknown malformed orphan",
                 format!(
                     "{{\"v\":2,\"kind\":\"future\"}}\nnope\n{}\n{}\n",
-                    resolve("bl_deadbeef0000"),
+                    resolve("bl_deadbeef000000000000"),
                     cut(&id)
                 ),
                 1,
@@ -1452,7 +1452,7 @@ mod tests {
                     cut(&id),
                     cut_with_text(&id, "conflicting payload"),
                     resolve(&id),
-                    resolve("bl_deadbeef0000"),
+                    resolve("bl_deadbeef000000000000"),
                 ),
                 1,
                 ItemStatus::Resolved,

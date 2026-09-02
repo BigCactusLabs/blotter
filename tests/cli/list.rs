@@ -254,8 +254,8 @@ fn list_markdown_collapses_multiline_resolution_note() {
 fn list_sorts_rfc3339_offsets_by_instant_not_text() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("offsets.jsonl");
-    let earlier = json!({"v":2,"kind":"cut","id":"bl_111111111111","ts":"2026-07-09T10:00:00+02:00","agent":"a","text":"earlier","tags":[],"impact":"low","cwd":"/tmp","repo":null});
-    let later = json!({"v":2,"kind":"cut","id":"bl_222222222222","ts":"2026-07-09T09:00:00Z","agent":"a","text":"later","tags":[],"impact":"low","cwd":"/tmp","repo":null});
+    let earlier = json!({"v":2,"kind":"cut","id":"bl_11111111111111111111","ts":"2026-07-09T10:00:00+02:00","agent":"a","text":"earlier","tags":[],"impact":"low","cwd":"/tmp","repo":null});
+    let later = json!({"v":2,"kind":"cut","id":"bl_22222222222222222222","ts":"2026-07-09T09:00:00Z","agent":"a","text":"later","tags":[],"impact":"low","cwd":"/tmp","repo":null});
     std::fs::write(&file, format!("{earlier}\n{later}\n")).unwrap();
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
     assert_eq!(listed.data.items[0].text, "later");

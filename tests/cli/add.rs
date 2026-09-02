@@ -82,7 +82,7 @@ fn add_stdin_validation_duplicate_and_exact_id() {
         .output()
         .unwrap();
     let first: SuccessEnvelope<AddData> = success(&output);
-    assert_eq!(first.data.record.cut_id(), "bl_edc887c6923d");
+    assert_eq!(first.data.record.cut_id(), "bl_edc887c6923de81fabd7");
     assert_eq!(first.data.record.cut_tags(), ["a", "z"]);
 
     let second: SuccessEnvelope<AddData> = success(
