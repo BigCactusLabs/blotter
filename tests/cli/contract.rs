@@ -352,6 +352,189 @@ fn every_command_success_envelope_deserializes() {
 }
 
 #[test]
+fn auto_is_a_plain_tag_for_every_read_command() {
+    fn assert_no_auto_guidance(warnings: &[String]) {
+        assert!(
+            warnings.iter().all(|warning| {
+                !warning.contains("auto-captured") && !warning.contains("--include-auto")
+            }),
+            "unexpected auto guidance in warnings: {warnings:?}"
+        );
+    }
+
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path().join("repo");
+    make_repo(&repo);
+    let file = repo.join(".blotter.jsonl");
+
+    let auto_cut = add_at(
+        &file,
+        "2026-07-09T17:00:00Z",
+        "Auto lane plain tag fixture",
+        &["auto"],
+    );
+    let auto_id = auto_cut.data.record.cut_id().to_owned();
+    let manual_cut = add_at(
+        &file,
+        "2026-07-09T17:01:00Z",
+        "Manual plain tag fixture",
+        &[],
+    );
+    let manual_id = manual_cut.data.record.cut_id().to_owned();
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
+    assert_eq!(listed.data.count, 2);
+    assert_eq!(listed.data.total, 2);
+    let list_ids = listed
+        .data
+        .items
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(list_ids.contains(&auto_id.as_str()));
+    assert!(list_ids.contains(&manual_id.as_str()));
+    assert_no_auto_guidance(&listed.meta.warnings);
+
+    let tagged: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--tag", "auto"]));
+    assert_eq!(tagged.data.count, 1);
+    assert_eq!(tagged.data.total, 1);
+    assert_eq!(tagged.data.items[0].id, auto_id);
+    assert_no_auto_guidance(&tagged.meta.warnings);
+
+    let clustered_auto_cut = add_at(
+        &file,
+        "2026-07-09T17:02:00Z",
+        "Auto lane plain tag fixture",
+        &["auto"],
+    );
+    let clustered_auto_id = clustered_auto_cut.data.record.cut_id().to_owned();
+    let triage = triage_success(&run_file(&file, &["triage", "--min-count", "2"]), 1);
+    let cluster = triage.data["clusters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|cluster| cluster["text"].as_str() == Some("Auto lane plain tag fixture"))
+        .unwrap();
+    assert_eq!(cluster["count"], 2);
+    let cluster_ids = cluster["ids"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|id| id.as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(cluster_ids.contains(&auto_id.as_str()));
+    assert!(cluster_ids.contains(&clustered_auto_id.as_str()));
+    assert_no_auto_guidance(&triage.meta.warnings);
+
+    let digest: SuccessEnvelope<Value> = success(&run_file(&file, &["digest"]));
+    assert_eq!(digest.data["new_cuts"]["count"], 3);
+    let auto_group = digest.data["new_cuts"]["by_tag"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|group| group["tag"].as_str() == Some("auto"))
+        .unwrap();
+    assert_eq!(auto_group["count"], 2);
+    let digest_auto_ids = auto_group["ids"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|id| id.as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(digest_auto_ids.contains(&auto_id.as_str()));
+    assert_no_auto_guidance(&digest.meta.warnings);
+
+    let anchor = add_at(
+        &file,
+        "2026-07-09T17:03:00Z",
+        "Auto recurrence anchor fixture",
+        &["auto"],
+    );
+    let anchor_id = anchor.data.record.cut_id().to_owned();
+    let _: SuccessEnvelope<ResolveData> = resolve_at(
+        &file,
+        "2026-07-09T17:04:00Z",
+        &anchor_id,
+        &["--agent", "resolver"],
+    );
+    let recurrence = add_at(
+        &file,
+        "2026-07-09T17:05:00Z",
+        "Auto recurrence anchor fixture",
+        &[],
+    );
+    let recurrence_id = recurrence.data.record.cut_id().to_owned();
+
+    let verify = verify_success(&run_file(&file, &["verify"]), 1);
+    assert_eq!(verify.data["count"], 1);
+    let recurrence_group = verify.data["recurrences"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|group| group["resolved_id"].as_str() == Some(anchor_id.as_str()))
+        .unwrap();
+    assert_eq!(recurrence_group["count"], 1);
+    assert_eq!(recurrence_group["recurrence_ids"], json!([recurrence_id]));
+    assert_no_auto_guidance(&verify.meta.warnings);
+
+    let sweep: SuccessEnvelope<Value> =
+        success(&command().arg("sweep").arg(&repo).output().unwrap());
+    assert_eq!(sweep.data["totals"]["open_cuts"], 4);
+    assert_eq!(sweep.data["repos"][0]["counts"]["open_cuts"], 4);
+    let sweep_ids = sweep.data["repos"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(sweep_ids.contains(&auto_id.as_str()));
+    assert_no_auto_guidance(&sweep.meta.warnings);
+
+    let export = command()
+        .arg("--file")
+        .arg(&file)
+        .args(["export", "--format", "otlp-json"])
+        .output()
+        .unwrap();
+    assert!(export.status.success());
+    assert!(export.stderr.is_empty());
+    let exported = String::from_utf8(export.stdout).unwrap();
+    assert!(!exported.contains("auto-captured"));
+    assert!(!exported.contains("--include-auto"));
+    let exported: Value = serde_json::from_str(&exported).unwrap();
+    let records = exported["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
+        .as_array()
+        .unwrap();
+    assert!(records.iter().any(|record| {
+        record["attributes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|attribute| {
+                attribute["key"].as_str() == Some("blotter.friction.id")
+                    && attribute["value"]["stringValue"].as_str() == Some(auto_id.as_str())
+            })
+    }));
+}
+
+#[test]
+fn removed_hook_subcommand_is_rejected_with_an_error_envelope() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let output = command()
+        .arg("--file")
+        .arg(&file)
+        .args(["hook", "exec", "claude-code"])
+        .write_stdin("{}")
+        .output()
+        .unwrap();
+
+    let envelope = error(&output, 2, "invalid_argument");
+    assert!(envelope.error.message.contains("hook"));
+    assert!(!file.exists());
+}
+
+#[test]
 fn since_duration_overflow_returns_invalid_argument_for_read_commands() {
     fn assert_too_large_since(output: &std::process::Output, value: &str) {
         let envelope = error(output, 2, "invalid_argument");
@@ -985,7 +1168,7 @@ fn invalid_since_is_reported_before_the_log_file_for_every_command() {
 
 #[cfg(unix)]
 #[test]
-fn non_utf8_blotter_agent_and_removed_hook_are_rejected_before_filing() {
+fn non_utf8_blotter_agent_is_a_config_error_and_never_files_a_detected_agent() {
     use std::os::unix::ffi::OsStrExt;
 
     let temp = TempDir::new().unwrap();
@@ -1001,21 +1184,5 @@ fn non_utf8_blotter_agent_and_removed_hook_are_rejected_before_filing() {
         .unwrap();
     let envelope = error(&output, 78, "config_error");
     assert!(envelope.error.message.contains("BLOTTER_AGENT"));
-    assert!(!file.exists());
-
-    let hook = command()
-        .env("BLOTTER_AGENT", agent)
-        .arg("--file")
-        .arg(&file)
-        .args(["hook", "exec", "claude-code"])
-        .write_stdin("{}")
-        .output()
-        .unwrap();
-    let stderr = String::from_utf8_lossy(&hook.stderr);
-    assert!(
-        stderr.contains("unrecognized subcommand 'hook'"),
-        "{stderr}"
-    );
-    error(&hook, 2, "invalid_argument");
     assert!(!file.exists());
 }

@@ -18,7 +18,7 @@ It is an agent-only tool by design: JSON envelopes on stdout, structured errors 
 
 The friction-log idea comes from [a tool Steve Ruiz built](https://x.com/steveruizok) for his own repos: once agents had a place to complain, they immediately surfaced real workflow defects — quoting bugs, wrong test working directories, YAML footguns — that they'd been eating silently for months.
 
-This project began as a fork of [treygoff24/papercuts](https://github.com/treygoff24/papercuts) and owes its core design — the append-only journal, the agent-first envelope contract, the concurrency model — to that upstream project. The fork added dogears, structured resolve provenance, and chronic-cut triage with its analysis family, then took the name **blotter** to stand on its own. `cargo install papercuts` still installs the upstream crate, which has none of those additions. Other tools explore the same space with different bets — e.g. wevm's frog takes a remote-canonical approach where blotter stays local and append-only.
+This project began as a fork of [treygoff24/papercuts](https://github.com/treygoff24/papercuts) and owes its core design — the append-only journal, the agent-first envelope contract, the concurrency model — to that upstream project. The fork added dogears, structured resolve provenance, and a Claude Code hook integration (since retired), and chronic-cut triage with its analysis family, then took the name **blotter** to stand on its own. `cargo install papercuts` still installs the upstream crate, which has none of those additions. Other tools explore the same space with different bets — e.g. wevm's frog takes a remote-canonical approach where blotter stays local and append-only.
 
 ## Install
 

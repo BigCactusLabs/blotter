@@ -448,6 +448,8 @@ mod tests {
             vec!["blotter", "verify", "--include-auto"],
             vec!["blotter", "digest", "--include-auto"],
             vec!["blotter", "sweep", "repo", "--include-auto"],
+            vec!["blotter", "hook", "exec", "claude-code"],
+            vec!["blotter", "hook", "install", "claude-code"],
         ] {
             assert!(Cli::try_parse_from(args).is_err());
         }
