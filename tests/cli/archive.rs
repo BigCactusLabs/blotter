@@ -22,15 +22,16 @@ fn archive_jsonl(value: Value) -> Vec<u8> {
 }
 
 fn archive_cut(ts: &str, text: &str) -> (String, Vec<u8>) {
-    let id = compute_id(ts, "archive", text, Severity::Minor, &[]);
+    let id = compute_id(ts, "archive", text, Impact::Low, &[]);
     let line = archive_jsonl(json!({
+        "v": 2,
         "kind": "cut",
         "id": id,
         "ts": ts,
         "agent": "archive",
         "text": text,
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp"
     }));
     (id, line)
@@ -39,6 +40,7 @@ fn archive_cut(ts: &str, text: &str) -> (String, Vec<u8>) {
 fn archive_dogear(ts: &str, text: &str) -> (String, Vec<u8>) {
     let id = compute_dogear_id(ts, "archive", text, &[]);
     let line = archive_jsonl(json!({
+        "v": 2,
         "kind": "dogear",
         "id": id,
         "ts": ts,
@@ -50,8 +52,14 @@ fn archive_dogear(ts: &str, text: &str) -> (String, Vec<u8>) {
     (id, line)
 }
 
+/// A resolve line for the archive fixtures. A resolve targeting a cut must
+/// carry `disposition` and `disposition_ts` or the fold discards it as invalid
+/// and the group never closes, so the helper supplies them for cut IDs. The
+/// three `bl2` digest widths are what tell the kinds apart by ID, and a
+/// non-`bl_` ID is only ever an orphan here, where validity is never evaluated.
 fn archive_resolution(id: &str, ts: &str, dropped: bool, amend: bool) -> Vec<u8> {
-    archive_jsonl(json!({
+    let mut value = json!({
+        "v": 2,
         "kind": "resolve",
         "id": id,
         "ts": ts,
@@ -59,7 +67,12 @@ fn archive_resolution(id: &str, ts: &str, dropped: bool, amend: bool) -> Vec<u8>
         "note": null,
         "dropped": dropped,
         "amend": amend
-    }))
+    });
+    if id.len() != "bl_".len() + 20 {
+        value["disposition"] = json!("fixed");
+        value["disposition_ts"] = json!(ts);
+    }
+    archive_jsonl(value)
 }
 
 fn physical_line_multiset(bytes: &[u8]) -> Vec<Vec<u8>> {
@@ -100,26 +113,27 @@ fn archive_removes_only_closed_wholly_old_current_groups() {
         "2026-07-01T00:00:00Z",
         "archive",
         "cutoff is exclusive",
-        Severity::Minor,
+        Impact::Low,
         &[],
     );
     let cutoff_resolve = archive_resolution(&cutoff_id, cutoff, false, false);
 
     let orphan = archive_resolution("bl_deadbeef0000", "2026-07-01T00:00:00Z", false, false);
     let malformed = b"not json\n".to_vec();
-    let unknown = archive_jsonl(json!({"kind":"future","ts":"2026-07-01T00:00:00Z"}));
-    let legacy = archive_jsonl(json!({
+    let unknown = archive_jsonl(json!({"v":2,"kind":"future","ts":"2026-07-01T00:00:00Z"}));
+    let foreign = archive_jsonl(json!({
+        "v": 2,
         "kind": "cut",
-        "id": "pc_a1b2c3d4e5f6",
+        "id": "zz_a1b2c3d4e5f6",
         "ts": "2026-07-01T00:00:00Z",
-        "agent": "legacy",
-        "text": "legacy closed cut",
+        "agent": "foreign",
+        "text": "foreign-prefix closed cut",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp"
     }));
-    let legacy_resolve =
-        archive_resolution("pc_a1b2c3d4e5f6", "2026-07-02T00:00:00Z", false, false);
+    let foreign_resolve =
+        archive_resolution("zz_a1b2c3d4e5f6", "2026-07-02T00:00:00Z", false, false);
 
     let lines = vec![
         old_cut.clone(),
@@ -137,8 +151,8 @@ fn archive_removes_only_closed_wholly_old_current_groups() {
         orphan,
         malformed,
         unknown,
-        legacy,
-        legacy_resolve,
+        foreign,
+        foreign_resolve,
     ];
     let original = lines.concat();
     std::fs::write(&file, &original).unwrap();
@@ -326,13 +340,14 @@ fn archive_keeps_duplicate_group_when_a_duplicate_is_post_cutoff() {
     let (id, cut) = archive_cut("2026-07-01T00:00:00Z", "duplicate blocks archive");
     let resolve = archive_resolution(&id, "2026-07-02T00:00:00Z", false, false);
     let post_cutoff_duplicate = archive_jsonl(json!({
+        "v": 2,
         "kind": "cut",
         "id": id,
         "ts": "2026-08-02T00:00:00Z",
         "agent": "archive",
         "text": "duplicate blocks archive",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp"
     }));
     let original = [cut, resolve, post_cutoff_duplicate].concat();

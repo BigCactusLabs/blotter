@@ -5,6 +5,7 @@ fn doctor_reports_orphan_amend_for_unknown_record() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
     let orphan_amend = json!({
+        "v": 2,
         "kind": "resolve",
         "id": "bl_deadbeef0000",
         "ts": "2026-07-09T18:30:00.123Z",
@@ -29,7 +30,10 @@ fn doctor_accepts_amend_for_existing_resolved_record() {
     let file = temp.path().join("cuts.jsonl");
     let cut = add(&file, "valid amend fixture");
     let id = cut.data.record.cut_id().to_owned();
-    let _: SuccessEnvelope<ResolveData> = success(&run_file(&file, &["resolve", &id]));
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &["resolve", "--disposition", "fixed", &id],
+    ));
     let _: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
         &["resolve", &id, "--amend", "--note", "corrected"],
@@ -50,12 +54,15 @@ fn doctor_reports_an_amend_whose_record_has_no_base_resolve() {
     let id = cut.data.record.cut_id().to_owned();
     let original = std::fs::read_to_string(&file).unwrap();
     let amend = json!({
+        "v": 2,
         "kind": "resolve",
         "id": id,
         "ts": "2026-07-09T18:30:00.123Z",
         "agent": "fixture",
         "note": "base-missing amend",
-        "amend": true
+        "amend": true,
+        "disposition": "fixed",
+        "disposition_ts": "2026-07-09T18:30:00.123Z"
     });
     std::fs::write(&file, format!("{original}{amend}\n")).unwrap();
 
@@ -81,19 +88,25 @@ fn doctor_accepts_an_amend_that_precedes_its_base_resolve() {
     let id = cut.data.record.cut_id().to_owned();
     let original = std::fs::read_to_string(&file).unwrap();
     let amend = json!({
+        "v": 2,
         "kind": "resolve",
         "id": id,
         "ts": "2026-07-09T18:30:00.123Z",
         "agent": "fixture",
         "note": "amend written first",
-        "amend": true
+        "amend": true,
+        "disposition": "fixed",
+        "disposition_ts": "2026-07-09T18:30:00.123Z"
     });
     let base = json!({
+        "v": 2,
         "kind": "resolve",
         "id": id,
         "ts": "2026-07-09T18:29:00.000Z",
         "agent": "fixture",
-        "note": "base written second"
+        "note": "base written second",
+        "disposition": "fixed",
+        "disposition_ts": "2026-07-09T18:29:00.000Z"
     });
     std::fs::write(&file, format!("{original}{amend}\n{base}\n")).unwrap();
 
@@ -116,11 +129,11 @@ fn doctor_reports_all_core_findings_and_recomputed_ids() {
     let file = temp.path().join("cuts.jsonl");
     let good = add(&file, "valid").data.record;
     let good_line = std::fs::read_to_string(&file).unwrap();
-    let bad_id = json!({"kind":"cut","id":"bl_000000000000","ts":good.cut_ts(),"agent":"tester","text":"bad","tags":[],"severity":"minor","cwd":"/tmp","repo":null});
+    let bad_id = json!({"v":2,"kind":"cut","id":"bl_000000000000","ts":good.cut_ts(),"agent":"tester","text":"bad","tags":[],"impact":"low","cwd":"/tmp","repo":null});
     let mut writer = OpenOptions::new().append(true).open(&file).unwrap();
     writeln!(writer, "{good_line}{}", bad_id).unwrap();
     writeln!(writer, "{{\"kind\":\"future\"}}").unwrap();
-    writeln!(writer, "{{\"kind\":\"resolve\",\"id\":\"bl_deadbeef0000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
+    writeln!(writer, "{{\"v\":2,\"kind\":\"resolve\",\"id\":\"bl_deadbeef0000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
     writeln!(writer, "<<<<<<< HEAD").unwrap();
     write!(writer, "{{\"kind\":").unwrap();
     drop(writer);
@@ -264,20 +277,21 @@ fn doctor_fix_leaves_diagnose_only_findings_unchanged() {
     let good = add(&file, "valid").data.record;
     let good_line = std::fs::read_to_string(&file).unwrap();
     let bad_id = json!({
+        "v": 2,
         "kind": "cut",
         "id": "bl_000000000000",
         "ts": good.cut_ts(),
         "agent": "tester",
         "text": "bad",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp",
         "repo": null
     });
     let mut writer = OpenOptions::new().append(true).open(&file).unwrap();
     writer.write_all(good_line.as_bytes()).unwrap();
     writeln!(writer, "{{\"kind\":\"future\"}}").unwrap();
-    writeln!(writer, "{{\"kind\":\"resolve\",\"id\":\"bl_deadbeef0000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
+    writeln!(writer, "{{\"v\":2,\"kind\":\"resolve\",\"id\":\"bl_deadbeef0000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
     writeln!(writer, "{bad_id}").unwrap();
     drop(writer);
     let before = std::fs::read(&file).unwrap();
@@ -505,13 +519,14 @@ fn doctor_reports_pre_framing_bl_ids_as_conflicts_after_legacy_fallback_removal(
     let file = temp.path().join("legacy-v1.jsonl");
     // Frozen v1 hash for this exact comma-joined, non-deduplicated tag fixture.
     let legacy_cut = json!({
+        "v": 2,
         "kind": "cut",
         "id": "bl_d7e14e635d21",
         "ts": "2026-07-10T00:00:00.000Z",
         "agent": "legacy",
         "text": "legacy v1 cut",
         "tags": ["a", "a", "b"],
-        "severity": "major",
+        "impact": "material",
         "cwd": "/tmp",
         "repo": null
     });
@@ -531,38 +546,35 @@ fn doctor_reports_pre_framing_bl_ids_as_conflicts_after_legacy_fallback_removal(
 fn doctor_finding_counts_match_fold_bytes_warning_counts() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
-    let valid_id = compute_id(
-        "2026-07-09T00:00:00.000Z",
-        "a",
-        "valid",
-        Severity::Minor,
-        &[],
-    );
+    let valid_id = compute_id("2026-07-09T00:00:00.000Z", "a", "valid", Impact::Low, &[]);
     let malformed = json!({
+        "v": 2,
         "kind": "cut",
         "id": "bl_000000000000",
         "ts": "not-a-time",
         "agent": "a",
         "text": "malformed",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp",
         "repo": null
     })
     .to_string();
     let valid = json!({
+        "v": 2,
         "kind": "cut",
         "id": valid_id,
         "ts": "2026-07-09T00:00:00.000Z",
         "agent": "a",
         "text": "valid",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp",
         "repo": null
     })
     .to_string();
     let orphan = json!({
+        "v": 2,
         "kind": "resolve",
         "id": "bl_deadbeef0000",
         "ts": "2026-07-09T00:00:00.000Z",
@@ -570,7 +582,7 @@ fn doctor_finding_counts_match_fold_bytes_warning_counts() {
         "note": null
     })
     .to_string();
-    let unknown = json!({"kind": "future"}).to_string();
+    let unknown = json!({"v":2,"kind": "future"}).to_string();
     let fixture = format!("{malformed}\n{valid}\n{orphan}\n{valid}\n{unknown}\n{{\"kind\":");
     std::fs::write(&file, fixture).unwrap();
 

@@ -82,9 +82,7 @@ fn matches_filters(item: &ListItem, args: &ListArgs, since: Option<&Timestamp>) 
         && status_matches
         && args.agent.as_ref().is_none_or(|agent| &item.agent == agent)
         && args.tag.as_ref().is_none_or(|tag| item.tags.contains(tag))
-        && args
-            .impact
-            .is_none_or(|impact| item.impact == Some(impact))
+        && args.impact.is_none_or(|impact| item.impact == Some(impact))
         && since.is_none_or(|threshold| {
             item.ts
                 .parse::<Timestamp>()

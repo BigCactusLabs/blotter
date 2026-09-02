@@ -6,16 +6,11 @@ fn valid_final_record_without_newline_is_accepted_not_resurrected() {
     let file = temp.path().join("cuts.jsonl");
     // A complete, valid cut record with NO trailing newline: a crash after the
     // object bytes but before the newline. JSON Lines permits this.
-    let id = compute_id(
-        "2026-07-09T00:00:00.000Z",
-        "a",
-        "kept",
-        Severity::Minor,
-        &[],
-    );
+    let id = compute_id("2026-07-09T00:00:00.000Z", "a", "kept", Impact::Low, &[]);
     let record = json!({
+        "v": 2,
         "kind": "cut", "id": id, "ts": "2026-07-09T00:00:00.000Z", "agent": "a",
-        "text": "kept", "tags": [], "severity": "minor", "cwd": "/tmp", "repo": null
+        "text": "kept", "tags": [], "impact": "low", "cwd": "/tmp", "repo": null
     })
     .to_string();
     std::fs::write(&file, &record).unwrap();
@@ -323,8 +318,10 @@ fn eight_way_resolve_race_appends_once() {
             let barrier = Arc::clone(&barrier);
             thread::spawn(move || {
                 barrier.wait();
-                let envelope: SuccessEnvelope<ResolveData> =
-                    success(&run_file(&file, &["resolve", &id, "--agent", "race"]));
+                let envelope: SuccessEnvelope<ResolveData> = success(&run_file(
+                    &file,
+                    &["resolve", "--disposition", "fixed", &id, "--agent", "race"],
+                ));
                 envelope.data.changed
             })
         })
@@ -344,24 +341,24 @@ fn hash_length_prefix_and_tag_sort_are_pinned() {
         "2026-07-09T18:30:00.123Z",
         "tester",
         "ouch",
-        Severity::Major,
+        Impact::Material,
         &["a".into(), "z".into()],
     );
     let b = compute_id(
         "2026-07-09T18:30:00.123Z",
         "tester",
         "ouc",
-        Severity::Major,
+        Impact::Material,
         &["z".into(), "ha".into()],
     );
     let unsorted = compute_id(
         "2026-07-09T18:30:00.123Z",
         "tester",
         "ouch",
-        Severity::Major,
+        Impact::Material,
         &["z".into(), "a".into()],
     );
-    assert_eq!(a, "bl_a43e5b0b30aa");
+    assert_eq!(a, "bl_edc887c6923d");
     assert_eq!(a, unsorted);
     assert_ne!(a, b);
 }

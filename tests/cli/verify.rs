@@ -73,6 +73,7 @@ fn verify_reports_an_exact_title_recurrence_with_the_full_envelope() {
             "data": {
                 "recurrences": [{
                     "resolved_id": resolved.data.record.cut_id(),
+                    "origin": {"type":"agent"},
                     "resolved_text": "Cache configuration missing",
                     "resolution": {
                         "ts": "2026-07-09T18:31:00.000Z",
@@ -133,12 +134,15 @@ fn verify_excludes_a_dropped_resolution_anchor() {
     );
     let original = std::fs::read_to_string(&file).unwrap();
     let dropped = json!({
+        "v": 2,
         "kind": "resolve",
         "id": resolved.data.record.cut_id(),
         "ts": "2026-07-09T18:31:00.000Z",
         "agent": "fixture",
         "note": null,
         "dropped": true,
+        "disposition": "fixed",
+        "disposition_ts": "2026-07-09T18:31:00.000Z",
     });
     std::fs::write(&file, format!("{original}{dropped}\n")).unwrap();
     add_at(
@@ -666,7 +670,8 @@ fn verify_sorts_recurrence_ids_and_anchors_by_first_recurrence() {
         json!([
             {
                 "resolved_id": first_anchor.data.record.cut_id(),
-                "resolved_text": "Cache configuration missing",
+                "origin": {"type":"agent"},
+                    "resolved_text": "Cache configuration missing",
                 "resolution": {"ts": "2026-07-09T18:31:00.000Z"},
                 "recurrence_ids": [first.data.record.cut_id(), late_first.data.record.cut_id()],
                 "count": 2,
@@ -674,7 +679,8 @@ fn verify_sorts_recurrence_ids_and_anchors_by_first_recurrence() {
             },
             {
                 "resolved_id": second_anchor.data.record.cut_id(),
-                "resolved_text": "Build cache checksum mismatch",
+                "origin": {"type":"agent"},
+                    "resolved_text": "Build cache checksum mismatch",
                 "resolution": {"ts": "2026-07-09T18:31:00.000Z"},
                 "recurrence_ids": [second.data.record.cut_id()],
                 "count": 1,
@@ -691,7 +697,7 @@ fn schema_documents_verify() {
     assert!(verify["flags"].get("--include-auto").is_none());
     assert_eq!(
         verify["output"],
-        "{recurrences:[{resolved_id,resolved_text,source?,resolution:{ts,task?,pr?,commit?},recurrence_ids,count,first_recurrence_ts}],count,distinct_recurring_cuts,scanned}"
+        "{recurrences:[{resolved_id,resolved_text,origin?,resolution:{ts,task?,pr?,commit?},recurrence_ids,count,first_recurrence_ts}],count,distinct_recurring_cuts,scanned}"
     );
     assert!(
         verify["semantics"]

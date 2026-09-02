@@ -41,6 +41,7 @@ fn triage_clusters_three_near_duplicate_open_cuts() {
             ],
             "tags": ["api", "tooling"],
             "text": "Cargo test fails because config is missing again",
+            "origin": {"type":"agent"},
             "suggested_action": "graduate",
         }])
     );
@@ -178,6 +179,7 @@ fn triage_surfaces_repeated_normalized_title_occurrences() {
             ],
             "tags": ["build"],
             "text": "Workspace cache missing during build",
+            "origin": {"type":"agent"},
             "suggested_action": "graduate",
         }])
     );
@@ -258,6 +260,7 @@ fn triage_links_identical_titles_with_disjoint_nonempty_tags() {
             ],
             "tags": ["alpha", "beta", "gamma"],
             "text": "Workspace cache missing during build",
+            "origin": {"type":"agent"},
             "suggested_action": "graduate",
         }])
     );
@@ -282,6 +285,7 @@ fn triage_does_not_transitively_merge_an_untagged_similarity_chain() {
             "ids": [first.data.record.cut_id(), bridge.data.record.cut_id()],
             "tags": [],
             "text": "alpha beta gamma delta",
+            "origin": {"type":"agent"},
             "suggested_action": "graduate",
         }])
     );
@@ -342,7 +346,14 @@ fn triage_excludes_resolved_cuts_and_dogears() {
     );
     success::<ResolveData>(&run_file(
         &file,
-        &["resolve", first.data.record.cut_id(), "--agent", "fixer"],
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            first.data.record.cut_id(),
+            "--agent",
+            "fixer",
+        ],
     ));
     let dogear: SuccessEnvelope<Value> = success(
         &command()
@@ -425,6 +436,7 @@ fn triage_min_count_two_flags_a_pair_and_rejects_one() {
             "ids": [first.data.record.cut_id(), second.data.record.cut_id()],
             "tags": [],
             "text": "the command output is missing a summary!",
+            "origin": {"type":"agent"},
             "suggested_action": "graduate",
         })
     );
@@ -446,7 +458,7 @@ fn schema_documents_triage() {
     assert!(triage["flags"].get("--include-auto").is_none());
     assert_eq!(
         triage["output"],
-        "{clusters:[{count,occurrences,ids,tags,text,source?,suggested_action}],count,scanned}"
+        "{clusters:[{count,occurrences,ids,tags,text,origin?,suggested_action}],count,scanned}"
     );
     assert!(
         triage["semantics"]

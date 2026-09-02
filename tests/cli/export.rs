@@ -6,31 +6,39 @@ fn export_otlp_json_golden_maps_all_statuses_without_evidence() {
     let file = temp.path().join("cuts.jsonl");
     let records = [
         json!({
+            "v": 2,
             "kind": "dogear", "id": "bl_72f5a7e2d02e", "ts": "2026-08-18T10:00:00.126Z",
             "agent": "dogear", "text": "idea only", "tags": [], "cwd": "docs",
             "evidence": "dogear evidence must not export"
         }),
         json!({
+            "v": 2,
             "kind": "cut", "id": "bl_839a74dab188", "ts": "2026-08-18T10:00:00.125Z",
-            "agent": "carol", "text": "blocker report", "tags": [], "severity": "blocker",
+            "agent": "carol", "text": "blocker report", "tags": [], "impact": "blocking",
             "cwd": "src/c"
         }),
         json!({
+            "v": 2,
             "kind": "resolve", "id": "bl_839a74dab188", "ts": "2026-08-18T10:06:00.000Z",
-            "agent": "resolver", "note": "private dropped note", "dropped": true
+            "agent": "resolver", "note": "private dropped note", "dropped": true,
+            "disposition": "fixed", "disposition_ts": "2026-08-18T10:06:00.000Z"
         }),
         json!({
+            "v": 2,
             "kind": "cut", "id": "bl_e4189e9ff71d", "ts": "2026-08-18T10:00:00.124Z",
-            "agent": "bob", "text": "major report", "tags": ["release"], "severity": "major",
+            "agent": "bob", "text": "major report", "tags": ["release"], "impact": "material",
             "cwd": "src/b"
         }),
         json!({
+            "v": 2,
             "kind": "resolve", "id": "bl_e4189e9ff71d", "ts": "2026-08-18T10:05:00.000Z",
-            "agent": "resolver", "note": "private resolved note"
+            "agent": "resolver", "note": "private resolved note",
+            "disposition": "fixed", "disposition_ts": "2026-08-18T10:05:00.000Z"
         }),
         json!({
+            "v": 2,
             "kind": "cut", "id": "bl_d39a975de893", "ts": "2026-08-18T10:00:00.123Z",
-            "agent": "alice", "text": "minor report", "tags": ["alpha", "ops"], "severity": "minor",
+            "agent": "alice", "text": "minor report", "tags": ["alpha", "ops"], "impact": "low",
             "cwd": "src/a",
             "evidence": {
                 "cmd": "do-not-export command", "exit": 9,
@@ -211,13 +219,15 @@ fn export_rejects_records_outside_the_otlp_nanosecond_range() {
     let file = temp.path().join("cuts.jsonl");
     let records = [
         json!({
+            "v": 2,
             "kind": "cut", "id": "bl_d39a975de893", "ts": "2026-08-18T10:00:00.123Z",
-            "agent": "alice", "text": "modern report", "tags": [], "severity": "minor",
+            "agent": "alice", "text": "modern report", "tags": [], "impact": "low",
             "cwd": "src/a"
         }),
         json!({
+            "v": 2,
             "kind": "cut", "id": "bl_0ff01ce4a5e5", "ts": "1969-07-20T20:17:00.000Z",
-            "agent": "alice", "text": "pre-epoch report", "tags": [], "severity": "minor",
+            "agent": "alice", "text": "pre-epoch report", "tags": [], "impact": "low",
             "cwd": "src/a"
         }),
     ];

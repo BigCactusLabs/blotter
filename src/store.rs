@@ -710,12 +710,7 @@ fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
 }
 
-pub fn append_json(
-    file: &mut File,
-    path: &Path,
-    prior: &[u8],
-    record: &LogEvent,
-) -> AppResult<()> {
+pub fn append_json(file: &mut File, path: &Path, prior: &[u8], record: &LogEvent) -> AppResult<()> {
     let mut record_bytes = Vec::new();
     serde_json::to_writer(&mut record_bytes, &Stored::new(record))
         .map_err(|error| AppError::internal(error.to_string()))?;

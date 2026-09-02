@@ -57,7 +57,7 @@ fn dogear_kind_add_alias_stdin_dry_run_and_tags() {
     assert_eq!(record["agent"], "researcher");
     assert_eq!(record["tags"], json!(["alpha", "zeta"]));
     assert_eq!(record["evidence"], "benchmark run 42");
-    assert!(record.get("severity").is_none());
+    assert!(record.get("impact").is_none());
     assert!(record.get("cmd").is_none());
 
     let alias: SuccessEnvelope<Value> = success(
@@ -159,7 +159,7 @@ fn dogear_kind_list_resolve_doctor_schema_and_filter_contract() {
     );
 
     error(
-        &run_file(&file, &["list", "--kind", "dogear", "--severity", "minor"]),
+        &run_file(&file, &["list", "--kind", "dogear", "--impact", "low"]),
         2,
         "invalid_argument",
     );
@@ -167,7 +167,7 @@ fn dogear_kind_list_resolve_doctor_schema_and_filter_contract() {
     let malformed = temp.path().join("malformed-dogear.jsonl");
     std::fs::write(
         &malformed,
-        "{\"kind\":\"dogear\",\"id\":\"bl_bad\",\"ts\":\"not-a-time\"}\n",
+        "{\"v\":2,\"kind\":\"dogear\",\"id\":\"bl_bad\",\"ts\":\"not-a-time\"}\n",
     )
     .unwrap();
     let malformed_doctor = run_file(&malformed, &["doctor"]);
@@ -196,8 +196,8 @@ fn dogear_and_cut_ids_are_collision_safe_across_tag_boundaries_and_namespaces() 
     let single = compute_dogear_id(ts, "x", "t", &["a".into()]);
     assert_eq!(deduped, single);
 
-    let cut_two_tags = compute_id(ts, "x", "t", Severity::Minor, &["a".into(), "b".into()]);
-    let cut_one_comma_tag = compute_id(ts, "x", "t", Severity::Minor, &["a,b".into()]);
+    let cut_two_tags = compute_id(ts, "x", "t", Impact::Low, &["a".into(), "b".into()]);
+    let cut_one_comma_tag = compute_id(ts, "x", "t", Impact::Low, &["a,b".into()]);
     assert_ne!(cut_two_tags, cut_one_comma_tag);
 
     // Dogear ids are 80-bit (bl_ + 20 hex) and, being a different length from

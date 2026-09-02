@@ -158,9 +158,7 @@ fn plan_archive(bytes: &[u8], cutoff: Timestamp) -> ArchivePlan {
     let closed_ids = folded
         .items
         .iter()
-        .filter(|item| {
-            item.status == ItemStatus::Resolved && is_bl_id(&item.id)
-        })
+        .filter(|item| item.status == ItemStatus::Resolved && is_bl_id(&item.id))
         .map(|item| item.id.clone())
         .collect::<HashSet<_>>();
 
