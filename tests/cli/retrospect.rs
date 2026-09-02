@@ -255,7 +255,6 @@ fn retrospect_reads_auto_tagged_records_like_any_other() {
             "tags": ["auto", "claude-code"],
             "impact": "low",
             "cwd": ".",
-            "source": "hook",
             "evidence": {"cmd": auto_text}
         })
         .to_string()],

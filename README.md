@@ -55,9 +55,9 @@ blotter add "text"                # file a cut (also: blotter log, or pipe stdin
 blotter add "tool failed" --cmd 'tool --flag' --exit 1 --stderr-file /tmp/stderr
 blotter add "bad response" --evidence 'request_id=abc123'
 blotter dogear "idea worth keeping" --tag research   # file a dogear (also: blotter idea)
-blotter resolve bl_9f2c           # mark one record fixed (unique ID prefix ok)
-blotter resolve bl_9f2c bl_a81e   # resolve several atomically
-blotter resolve <id> --pr <url>   # attach structured graduation provenance
+blotter resolve bl_9f2c --disposition fixed   # resolve one cut (unique ID prefix ok)
+blotter resolve bl_9f2c bl_a81e --disposition fixed   # resolve several atomically
+blotter resolve <id> --disposition promoted --pr <url>   # attach structured graduation provenance
 blotter resolve <id> --amend --note "..."  # correct a resolution you got wrong
 ```
 

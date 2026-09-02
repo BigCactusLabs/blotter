@@ -141,8 +141,12 @@ pub struct VersionProbe {
 /// exact file this probe exists to catch. A log holding no line with a known raw
 /// kind passes.
 pub fn probe_version(bytes: &[u8]) -> Option<VersionProbe> {
-    for scanned in scan(bytes) {
-        let Ok(value) = serde_json::from_slice::<Value>(scanned.raw) else {
+    // Walk the same physical-line segmenter `scan` uses, so `line` is the
+    // number `scan` would report, but parse each line once and read only
+    // `kind` and `v`: the probe runs before the fold on every read, and going
+    // through `scan` here made every read command parse each line twice more.
+    for (line, raw) in physical_lines(bytes).1 {
+        let Ok(value) = serde_json::from_slice::<Value>(raw) else {
             continue;
         };
         let known = value
@@ -158,7 +162,7 @@ pub fn probe_version(bytes: &[u8]) -> Option<VersionProbe> {
             Some(found) if found.as_u64() == Some(RECORD_VERSION) => {}
             found => {
                 return Some(VersionProbe {
-                    line: scanned.line,
+                    line,
                     found_version: found.cloned(),
                 });
             }
@@ -816,41 +820,47 @@ pub(crate) fn is_empty_log(bytes: &[u8]) -> bool {
 /// Scan physical JSONL lines once. A final non-newline line is accepted only
 /// when its decoded JSON carries a recognized kind, so consumers cannot
 /// disagree on torn tails.
-pub(crate) fn scan(bytes: &[u8]) -> impl Iterator<Item = ScannedLine<'_>> + '_ {
-    // A leading empty segment is the terminator of an empty log, not a physical
-    // line: the log was empty or held only "\n" when the record was appended,
-    // and an append-only writer cannot remove the byte that precedes it. An
-    // empty segment after a record is still malformed.
+/// Splits a log into its physical lines, numbered from 1, and reports whether
+/// the final line is newline-terminated. Shared by `scan` and `probe_version`
+/// so both report the same line number for the same bytes.
+///
+/// A leading empty segment is the terminator of an empty log, not a physical
+/// line: the log was empty or held only "\n" when the record was appended,
+/// and an append-only writer cannot remove the byte that precedes it. An
+/// empty segment after a record is still a line, and `scan` reports it as
+/// malformed.
+fn physical_lines(bytes: &[u8]) -> (bool, impl Iterator<Item = (usize, &[u8])> + '_) {
     let terminated = bytes.ends_with(b"\n");
     let body = if terminated {
         &bytes[..bytes.len() - 1]
     } else {
         bytes
     };
-    let line_count = body.split(|byte| *byte == b'\n').count();
-    body.split(|byte| *byte == b'\n')
+    let lines = body
+        .split(|byte| *byte == b'\n')
         .enumerate()
-        .filter_map(move |(index, raw)| {
-            let final_line = index + 1 == line_count;
-            if raw.is_empty() && index == 0 {
-                return None;
+        .filter(|(index, raw)| !(raw.is_empty() && *index == 0))
+        .map(|(index, raw)| (index + 1, raw));
+    (terminated, lines)
+}
+
+pub(crate) fn scan(bytes: &[u8]) -> impl Iterator<Item = ScannedLine<'_>> + '_ {
+    let (terminated, lines) = physical_lines(bytes);
+    let last_line = physical_lines(bytes).1.map(|(line, _)| line).last();
+    lines.map(move |(line, raw)| {
+        let final_line = Some(line) == last_line;
+        let decoded = serde_json::from_slice::<Value>(raw);
+        let known = decoded.as_ref().ok().and_then(known_kind);
+        let event = if final_line && !terminated && known.is_none() {
+            Err(ScanIssue::Torn)
+        } else {
+            match decoded {
+                Ok(value) => parse_event(value, known),
+                Err(_) => Err(ScanIssue::Malformed("line is not valid JSON".into())),
             }
-            let decoded = serde_json::from_slice::<Value>(raw);
-            let known = decoded.as_ref().ok().and_then(known_kind);
-            let event = if final_line && !terminated && known.is_none() {
-                Err(ScanIssue::Torn)
-            } else {
-                match decoded {
-                    Ok(value) => parse_event(value, known),
-                    Err(_) => Err(ScanIssue::Malformed("line is not valid JSON".into())),
-                }
-            };
-            Some(ScannedLine {
-                line: index + 1,
-                raw,
-                event,
-            })
-        })
+        };
+        ScannedLine { line, raw, event }
+    })
 }
 
 fn known_kind(value: &Value) -> Option<&'static str> {

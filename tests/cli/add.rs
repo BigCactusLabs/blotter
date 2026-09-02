@@ -145,7 +145,7 @@ fn fold_deduplicates_tags_from_existing_cut_and_dogear_records() {
     let cut = json!({
         "v": 2,
         "kind": "cut",
-        "id": "pc_a1b2c3d4e5f6",
+        "id": "zz_a1b2c3d4e5f6",
         "ts": "2026-07-09T00:00:00.000Z",
         "agent": "legacy",
         "text": "legacy cut",
@@ -157,7 +157,7 @@ fn fold_deduplicates_tags_from_existing_cut_and_dogear_records() {
     let dogear = json!({
         "v": 2,
         "kind": "dogear",
-        "id": "pc_b1c2d3e4f5a6",
+        "id": "zz_b1c2d3e4f5a6",
         "ts": "2026-07-09T00:00:00.000Z",
         "agent": "legacy",
         "text": "legacy dogear",

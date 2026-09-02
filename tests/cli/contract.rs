@@ -1267,7 +1267,7 @@ fn a_v1_log_is_refused_with_the_full_unsupported_version_shape() {
 /// 2 — `null` included — and omitted only when the key is absent. Absent and
 /// wrong are told apart by key presence, never by null-ness (r50).
 #[test]
-fn found_version_carries_every_wrong_value_verbatim_and_is_absent_when_v_is() {
+fn found_version_carries_every_wrong_value_verbatim() {
     let temp = TempDir::new().unwrap();
     let cases = [
         (json!(1), json!(1)),
@@ -1283,6 +1283,17 @@ fn found_version_carries_every_wrong_value_verbatim_and_is_absent_when_v_is() {
         std::fs::write(&file, format!("{line}\n")).unwrap();
 
         let envelope = error(&run_file(&file, &["list"]), 65, "unsupported_log_version");
+        // Indexing a missing key yields `Null`, so key presence is asserted
+        // separately: for `"v":null` the key must be present with value null.
+        assert!(
+            envelope
+                .error
+                .details
+                .as_object()
+                .unwrap()
+                .contains_key("found_version"),
+            "stored {stored}"
+        );
         assert_eq!(
             envelope.error.details["found_version"], expected,
             "stored {stored}"
