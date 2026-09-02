@@ -1,5 +1,6 @@
 use crate::error::{AppError, AppResult};
 use crate::{ListItem, LogEvent, Resolution, format_timestamp};
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::fs::{self, File, OpenOptions, Permissions};
@@ -99,6 +100,7 @@ struct WarningCounts {
     duplicate_dogears: usize,
     duplicate_resolves: usize,
     orphans: usize,
+    invalid_resolutions: usize,
 }
 
 pub(crate) struct ScannedLine<'a> {
@@ -111,6 +113,92 @@ pub(crate) enum ScanIssue {
     Malformed(String),
     Unknown(Option<String>),
     Torn,
+}
+
+/// The record version every v2 line carries.
+pub const RECORD_VERSION: u64 = 2;
+
+/// The probe's own kind list (r50). It stays at four names even while the fold
+/// knows three: through Phase 3 a `promotion` line is a known raw kind and must
+/// carry `"v":2` even though nothing reads it yet. `known_kind` below is the
+/// scan's list and is deliberately not this one.
+const PROBE_KINDS: [&str; 4] = ["cut", "dogear", "resolve", "promotion"];
+
+/// The first line whose raw JSON names a known kind and does not carry `"v":2`.
+#[derive(Debug, Clone)]
+pub struct VersionProbe {
+    /// 1-based physical line number.
+    pub line: usize,
+    /// The offending `v` verbatim, or `None` when the key was absent. Absent and
+    /// wrong are told apart by this being `None`, never by null-ness: a stored
+    /// `"v":null` reports `Some(Value::Null)`.
+    pub found_version: Option<Value>,
+}
+
+/// Inspect each scanned line's **raw** JSON, before and independently of the
+/// scan's classification (r50): a v1 cut is a record missing required fields,
+/// which the scan calls malformed, so keying on classification would exempt the
+/// exact file this probe exists to catch. A log holding no line with a known raw
+/// kind passes.
+pub fn probe_version(bytes: &[u8]) -> Option<VersionProbe> {
+    for scanned in scan(bytes) {
+        let Ok(value) = serde_json::from_slice::<Value>(scanned.raw) else {
+            continue;
+        };
+        let known = value
+            .get("kind")
+            .and_then(Value::as_str)
+            .is_some_and(|kind| PROBE_KINDS.contains(&kind));
+        if !known {
+            continue;
+        }
+        match value.get("v") {
+            // Only a JSON integer literal whose value is 2: `2.0` and `2e0`
+            // decode as floats and `as_u64` declines them.
+            Some(found) if found.as_u64() == Some(RECORD_VERSION) => {}
+            found => {
+                return Some(VersionProbe {
+                    line: scanned.line,
+                    found_version: found.cloned(),
+                });
+            }
+        }
+    }
+    None
+}
+
+/// The one choke point every read path calls immediately after `read_bytes`,
+/// under the lock it already holds and before the fold, any tear-heal byte, any
+/// append, and any copy-and-swap.
+pub fn check_version(bytes: &[u8], path: &Path) -> AppResult<()> {
+    match probe_version(bytes) {
+        None => Ok(()),
+        Some(probe) => Err(AppError::unsupported_log_version(
+            path,
+            probe.line,
+            probe.found_version.as_ref(),
+        )),
+    }
+}
+
+/// A stored line: `v` first, then the event's own members. `LogEvent` is
+/// internally tagged on `kind`, so serde emits `kind` first for it; `v` belongs
+/// to this write-path-only wrapper rather than to `LogEvent`, which is what
+/// keeps `v` out of every envelope (r50).
+#[derive(Serialize)]
+struct Stored<'a> {
+    v: u64,
+    #[serde(flatten)]
+    event: &'a LogEvent,
+}
+
+impl<'a> Stored<'a> {
+    fn new(event: &'a LogEvent) -> Self {
+        Self {
+            v: RECORD_VERSION,
+            event,
+        }
+    }
 }
 
 pub fn discover(flag: Option<PathBuf>) -> AppResult<ResolvedFile> {
@@ -320,6 +408,7 @@ pub fn load_folded(resolved: &ResolvedFile) -> AppResult<LoadedFold> {
         FoldResult::default,
         |log| {
             let bytes = read_bytes(log, &resolved.path)?;
+            check_version(&bytes, &resolved.path)?;
             Ok(fold_bytes(&bytes))
         },
     )?;
@@ -621,14 +710,14 @@ fn shell_quote(path: &Path) -> String {
     format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
 }
 
-pub fn append_json<T: serde::Serialize>(
+pub fn append_json(
     file: &mut File,
     path: &Path,
     prior: &[u8],
-    record: &T,
+    record: &LogEvent,
 ) -> AppResult<()> {
     let mut record_bytes = Vec::new();
-    serde_json::to_writer(&mut record_bytes, record)
+    serde_json::to_writer(&mut record_bytes, &Stored::new(record))
         .map_err(|error| AppError::internal(error.to_string()))?;
     record_bytes.push(b'\n');
     append_bytes(file, path, prior, &record_bytes)
@@ -646,6 +735,9 @@ pub fn append_unique(path: &Path, record: LogEvent, dry_run: bool) -> AppResult<
     };
     with_exclusive(path, true, |log| {
         let bytes = read_bytes(log, path)?;
+        // Before the fold and before the tear-healing byte `append_bytes` would
+        // add: a refusal writes zero bytes.
+        check_version(&bytes, path)?;
         let records = fold_records(&bytes);
         if let Some(existing) = records.get(&id) {
             return if std::mem::discriminant(&record) == std::mem::discriminant(existing) {
@@ -661,15 +753,15 @@ pub fn append_unique(path: &Path, record: LogEvent, dry_run: bool) -> AppResult<
     })
 }
 
-pub fn append_json_batch<T: serde::Serialize>(
+pub fn append_json_batch(
     file: &mut File,
     path: &Path,
     prior: &[u8],
-    records: &[T],
+    records: &[LogEvent],
 ) -> AppResult<()> {
     let mut record_bytes = Vec::new();
     for record in records {
-        serde_json::to_writer(&mut record_bytes, record)
+        serde_json::to_writer(&mut record_bytes, &Stored::new(record))
             .map_err(|error| AppError::internal(error.to_string()))?;
         record_bytes.push(b'\n');
     }
@@ -829,6 +921,8 @@ fn resolution_from_event(event: &LogEvent) -> Resolution {
         url,
         dropped,
         amend,
+        disposition,
+        disposition_ts,
         ..
     } = event
     else {
@@ -844,7 +938,35 @@ fn resolution_from_event(event: &LogEvent) -> Resolution {
         url: url.clone(),
         dropped: *dropped,
         amended: *amend,
+        disposition: *disposition,
+        disposition_ts: disposition_ts.clone(),
     }
+}
+
+/// The r48 invalid-resolution rules Phase 3 implements, in their permanent
+/// numbering, evaluated only for an event the fold has already joined to its
+/// record. Rules (4)–(6) cover the stored `promotion` field and are Phase 4.
+/// An orphan — a resolve joining to no record — is never evaluated.
+pub(crate) fn broken_resolution_rules(event: &LogEvent, record_kind: &str) -> Vec<&'static str> {
+    let LogEvent::Resolve {
+        disposition,
+        disposition_ts,
+        ..
+    } = event
+    else {
+        unreachable!("only resolve events are validated")
+    };
+    let mut broken = Vec::new();
+    if record_kind == "cut" && disposition.is_none() {
+        broken.push("resolve targets a cut without a disposition");
+    }
+    if record_kind == "dogear" && disposition.is_some() {
+        broken.push("resolve targets a dogear with a disposition");
+    }
+    if disposition.is_some() != disposition_ts.is_some() {
+        broken.push("disposition and disposition_ts must be present together");
+    }
+    broken
 }
 
 /// Records-only fold for the append path. `append_unique` needs one fact — does
@@ -891,6 +1013,7 @@ fn fold_bytes_inner(bytes: &[u8], collect_lines: bool) -> FoldResult {
     // Amends carry their parsed timestamp so the winner is chosen by clock, not
     // by byte position, without reparsing the incumbent for every candidate.
     let mut amends = HashMap::<String, (jiff::Timestamp, LogEvent)>::new();
+    let mut resolve_events = Vec::<LogEvent>::new();
     let mut counts = WarningCounts::default();
     for scanned in scan(bytes) {
         let line = scanned.line;
@@ -934,37 +1057,53 @@ fn fold_bytes_inner(bytes: &[u8], collect_lines: bool) -> FoldResult {
                             counts.duplicate_dogears += 1;
                         }
                     }
-                    LogEvent::Resolve { id, ts, amend, .. } => {
-                        let id = id.clone();
-                        let amend = *amend;
-                        if amend {
-                            let timestamp = ts
-                                .parse::<jiff::Timestamp>()
-                                .expect("parsed resolves have valid RFC3339 timestamps");
-                            match amends.entry(id) {
-                                std::collections::hash_map::Entry::Occupied(mut entry) => {
-                                    // `>=`, not `>`: equal timestamps are reachable
-                                    // under a frozen BLOTTER_NOW, and there the last
-                                    // amend in file order keeps winning.
-                                    if timestamp >= entry.get().0 {
-                                        entry.insert((timestamp, event));
-                                    }
-                                }
-                                std::collections::hash_map::Entry::Vacant(entry) => {
-                                    entry.insert((timestamp, event));
-                                }
-                            }
-                        } else if let std::collections::hash_map::Entry::Vacant(entry) =
-                            resolves.entry(id)
-                        {
-                            entry.insert(event);
-                        } else {
-                            counts.duplicate_resolves += 1;
-                        }
-                    }
+                    // Resolve events are held back: validity is knowable only
+                    // after the join to their record, and r50 requires the
+                    // invalid ones to be discarded *before* winners are chosen,
+                    // so an invalid event cannot occupy the base slot.
+                    LogEvent::Resolve { .. } => resolve_events.push(event),
                     LogEvent::Unknown => counts.unknown += 1,
                 }
             }
+        }
+    }
+
+    for event in resolve_events {
+        let LogEvent::Resolve { id, ts, amend, .. } = &event else {
+            unreachable!("only resolve events are held back")
+        };
+        let id = id.clone();
+        let amend = *amend;
+        if let Some(kind) = records.get(&id).and_then(record_kind)
+            && !broken_resolution_rules(&event, kind).is_empty()
+        {
+            // Discarded entirely: it materializes nothing and is counted only
+            // in `skipped N invalid resolutions`, never as a duplicate or an
+            // orphan.
+            counts.invalid_resolutions += 1;
+            continue;
+        }
+        if amend {
+            let timestamp = ts
+                .parse::<jiff::Timestamp>()
+                .expect("parsed resolves have valid RFC3339 timestamps");
+            match amends.entry(id) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    // `>=`, not `>`: equal timestamps are reachable under a
+                    // frozen BLOTTER_NOW, and there the last amend in file
+                    // order keeps winning.
+                    if timestamp >= entry.get().0 {
+                        entry.insert((timestamp, event));
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert((timestamp, event));
+                }
+            }
+        } else if let std::collections::hash_map::Entry::Vacant(entry) = resolves.entry(id) {
+            entry.insert(event);
+        } else {
+            counts.duplicate_resolves += 1;
         }
     }
 
@@ -1013,10 +1152,10 @@ fn fold_bytes_inner(bytes: &[u8], collect_lines: bool) -> FoldResult {
     items.sort_by(|(left, left_timestamp), (right, right_timestamp)| {
         match (left.kind.as_str(), right.kind.as_str()) {
             ("cut", "cut") => right
-                .severity
-                .expect("cut has severity")
+                .impact
+                .expect("cut has impact")
                 .rank()
-                .cmp(&left.severity.expect("cut has severity").rank())
+                .cmp(&left.impact.expect("cut has impact").rank())
                 .then_with(|| right_timestamp.cmp(left_timestamp))
                 .then_with(|| left.id.cmp(&right.id)),
             ("dogear", "dogear") => right_timestamp
@@ -1041,12 +1180,27 @@ fn fold_bytes_inner(bytes: &[u8], collect_lines: bool) -> FoldResult {
         "duplicate resolve",
     );
     warning(&mut warnings, counts.orphans, "orphan resolve");
+    warning(
+        &mut warnings,
+        counts.invalid_resolutions,
+        "invalid resolution",
+    );
     FoldResult {
         items,
         warnings,
         records,
         winning_amends,
         lines,
+    }
+}
+
+/// The record kind a resolve event joins to, or `None` for an event that is not
+/// an identity-bearing record.
+fn record_kind(event: &LogEvent) -> Option<&'static str> {
+    match event {
+        LogEvent::Cut { .. } => Some("cut"),
+        LogEvent::Dogear { .. } => Some("dogear"),
+        LogEvent::Resolve { .. } | LogEvent::Unknown => None,
     }
 }
 
@@ -1073,7 +1227,7 @@ fn warning(warnings: &mut Vec<String>, count: usize, label: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ItemStatus, Severity, compute_id};
+    use crate::{Impact, ItemStatus, compute_id};
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -1083,8 +1237,8 @@ mod tests {
 
     fn cut_with_text(id: &str, text: &str) -> String {
         serde_json::json!({
-            "kind":"cut", "id":id, "ts":"2026-07-09T00:00:00.000Z",
-            "agent":"a", "text":text, "tags":[], "severity":"minor",
+            "v":2, "kind":"cut", "id":id, "ts":"2026-07-09T00:00:00.000Z",
+            "agent":"a", "text":text, "tags":[], "impact":"low",
             "cwd":"/tmp", "repo":null
         })
         .to_string()
@@ -1092,8 +1246,9 @@ mod tests {
 
     fn resolve(id: &str) -> String {
         serde_json::json!({
-            "kind":"resolve", "id":id, "ts":"2026-07-10T00:00:00.000Z",
-            "agent":"a", "note":null
+            "v":2, "kind":"resolve", "id":id, "ts":"2026-07-10T00:00:00.000Z",
+            "agent":"a", "note":null,
+            "disposition":"fixed", "disposition_ts":"2026-07-10T00:00:00.000Z"
         })
         .to_string()
     }
@@ -1242,7 +1397,7 @@ mod tests {
 
     #[test]
     fn fold_matrix() {
-        let id = compute_id("2026-07-09T00:00:00.000Z", "a", "x", Severity::Minor, &[]);
+        let id = compute_id("2026-07-09T00:00:00.000Z", "a", "x", Impact::Low, &[]);
         let cases = [
             ("cut", format!("{}\n", cut(&id)), 1, ItemStatus::Open, 0),
             (
@@ -1268,7 +1423,7 @@ mod tests {
             (
                 "unknown malformed orphan",
                 format!(
-                    "{{\"kind\":\"future\"}}\nnope\n{}\n{}\n",
+                    "{{\"v\":2,\"kind\":\"future\"}}\nnope\n{}\n{}\n",
                     resolve("bl_deadbeef0000"),
                     cut(&id)
                 ),
@@ -1286,7 +1441,7 @@ mod tests {
             (
                 "all adversarial orderings interleaved",
                 format!(
-                    "{}\n{{\"kind\":\"future\"}}\n{}\n{}\n{}\n{}\n{}\nnope\n{{\"kind\":",
+                    "{}\n{{\"v\":2,\"kind\":\"future\"}}\n{}\n{}\n{}\n{}\n{}\nnope\n{{\"kind\":",
                     resolve(&id),
                     cut(&id),
                     cut(&id),

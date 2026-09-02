@@ -4,8 +4,7 @@ use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use crate::store;
 use crate::{
-    IdNamespace, ItemStatus, ListItem, LogEvent, format_timestamp, id_namespace,
-    resolve_agent_checked,
+    Disposition, ItemStatus, ListItem, LogEvent, format_timestamp, is_bl_id, resolve_agent_checked,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -32,6 +31,7 @@ pub fn run(
         commit,
         url,
         dropped,
+        disposition,
         amend,
         dry_run,
     } = args;
@@ -60,10 +60,11 @@ pub fn run(
         && commit.is_none()
         && url.is_none()
         && !dropped
+        && disposition.is_none()
     {
         return Err(AppError::invalid_input(
             "--amend requires at least one resolution field",
-            "Pass --note, --task, --pr, --commit, --url, or --dropped with --amend.",
+            "Pass --note, --task, --pr, --commit, --url, --dropped, or --disposition with --amend.",
         ));
     }
     // Redact once, ahead of the critical section, so the base and amend paths —
@@ -74,6 +75,7 @@ pub fn run(
     let ts = format_timestamp(now);
     let action = |log: &mut std::fs::File| -> AppResult<(bool, Vec<String>, Vec<ListItem>)> {
         let bytes = store::read_bytes(log, &resolved.path)?;
+        store::check_version(&bytes, &resolved.path)?;
         let folded = store::fold_bytes(&bytes);
         let mut ids = prefixes
             .iter()
@@ -96,6 +98,29 @@ pub fn run(
             return Err(AppError::invalid_argument(
                 "--url and --dropped may only resolve dogear records",
                 "Use --url or --dropped only with dogear IDs, or resolve cuts without those flags.",
+            ));
+        }
+        // Every disposition rule needs the folded kind of each named record, so
+        // all three sit inside the critical section, after ID matching and
+        // before any append. A batch that fails one appends nothing at all.
+        let has_cut = items.iter().any(|item| item.kind == "cut");
+        let has_dogear = items.iter().any(|item| item.kind == "dogear");
+        if has_cut && has_dogear {
+            return Err(AppError::invalid_argument(
+                "a resolve batch cannot name both cut and dogear records",
+                "Resolve cuts and dogears in separate commands; a cut requires --disposition and a dogear rejects it.",
+            ));
+        }
+        if disposition.is_some() && has_dogear {
+            return Err(AppError::invalid_argument(
+                "--disposition may only resolve cut records",
+                "Use --disposition only with cut IDs; a dogear's lifecycle is --url or --dropped.",
+            ));
+        }
+        if disposition.is_none() && has_cut && !amend {
+            return Err(AppError::invalid_argument(
+                "--disposition is required when resolving a cut",
+                "Pass --disposition fixed|promoted|accepted|invalid.",
             ));
         }
         if amend && items.iter().any(|item| item.status != ItemStatus::Resolved) {
@@ -121,6 +146,8 @@ pub fn run(
                 if !amend && item.status == ItemStatus::Resolved {
                     continue;
                 }
+                let (disposition, disposition_ts) =
+                    event_disposition(item, disposition, ts.as_str());
                 events.push(LogEvent::Resolve {
                     id: id.clone(),
                     ts: ts.clone(),
@@ -132,6 +159,8 @@ pub fn run(
                     url: url.clone(),
                     dropped,
                     amend,
+                    disposition,
+                    disposition_ts,
                 });
                 updated_item_indexes.push(item_index);
             }
@@ -150,6 +179,8 @@ pub fn run(
             // an amend backdated behind a stored one does not win.
             for (id, item) in ids.iter().zip(&mut items) {
                 if amend || item.status == ItemStatus::Open {
+                    let (disposition, disposition_ts) =
+                        event_disposition(item, disposition, ts.as_str());
                     let candidate = LogEvent::Resolve {
                         id: id.clone(),
                         ts: ts.clone(),
@@ -161,6 +192,8 @@ pub fn run(
                         url: url.clone(),
                         dropped,
                         amend,
+                        disposition,
+                        disposition_ts,
                     };
                     item.status = ItemStatus::Resolved;
                     item.resolution = Some(folded.materialized_appended_resolution(&candidate));
@@ -206,23 +239,49 @@ pub fn run(
     Ok(0)
 }
 
+/// The disposition an event carries, and the moment that disposition was
+/// decided. An explicit `--disposition` stamps this event's own `ts`; an amend
+/// that omits it copies both from the **pre-append folded winner** — what `list`
+/// shows the instant before this command runs (r50) — so inheritance is visible
+/// in the stored bytes and needs no fold rule to reconstruct.
+fn event_disposition(
+    item: &ListItem,
+    requested: Option<Disposition>,
+    ts: &str,
+) -> (Option<Disposition>, Option<String>) {
+    if item.kind != "cut" {
+        return (None, None);
+    }
+    match requested {
+        Some(disposition) => (Some(disposition), Some(ts.to_owned())),
+        None => {
+            let resolution = item.resolution.as_ref();
+            (
+                resolution.and_then(|resolution| resolution.disposition),
+                resolution.and_then(|resolution| resolution.disposition_ts.clone()),
+            )
+        }
+    }
+}
+
+/// An ID prefix: optional `bl_`, then at least 4 hex digits, matched
+/// case-insensitively against the one `bl2` namespace (r48). No exact-full-ID
+/// precedence: a complete ID that also prefixes a longer one is `ambiguous_id`
+/// (r50).
 #[derive(Debug)]
 struct IdPrefix {
-    namespace: Option<IdNamespace>,
     hex: String,
 }
 
 fn normalize_prefix(input: &str) -> AppResult<IdPrefix> {
-    let namespace = id_namespace(input);
-    let hex = namespace.map_or(input, |_| &input[3..]);
+    let hex = if is_bl_id(input) { &input[3..] } else { input };
     if hex.len() < 4 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(AppError::invalid_argument(
-            format!("invalid cut ID prefix '{input}'"),
-            "Use `blotter list --status all` and pass at least 4 hexadecimal digits, with optional bl_ or pc_ prefix.",
+            format!("invalid record ID prefix '{input}'"),
+            "Use `blotter list --kind all --status all` and pass at least 4 hexadecimal digits, with an optional bl_ prefix.",
         ));
     }
     Ok(IdPrefix {
-        namespace,
         hex: hex.to_ascii_lowercase(),
     })
 }
@@ -232,21 +291,17 @@ fn match_id(prefix: &IdPrefix, items: &[ListItem]) -> AppResult<String> {
         .iter()
         .map(|item| item.id.clone())
         .filter(|id| {
-            id_namespace(id).is_some_and(|namespace| {
-                prefix
-                    .namespace
-                    .is_none_or(|expected| expected == namespace)
-                    && id
-                        .get(3..)
-                        .is_some_and(|hex| hex.to_ascii_lowercase().starts_with(&prefix.hex))
-            })
+            is_bl_id(id)
+                && id
+                    .get(3..)
+                    .is_some_and(|hex| hex.to_ascii_lowercase().starts_with(&prefix.hex))
         })
         .collect();
     candidates.sort();
     match candidates.as_slice() {
         [] => Err(AppError::not_found(
-            format!("no cut matches ID prefix '{}'", prefix.hex),
-            "Run `blotter list --status all` and retry with a listed ID.",
+            format!("no record matches ID prefix '{}'", prefix.hex),
+            "Run `blotter list --kind all --status all` and retry with a listed ID.",
         )),
         [id] => Ok(id.clone()),
         _ => Err(AppError::ambiguous_id(&prefix.hex, candidates)),

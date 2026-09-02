@@ -3,7 +3,7 @@ use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use crate::redact::{evidence_delimiter, rewrite_home_paths};
 use crate::store;
-use crate::{Evidence, LogEvent, compute_id, format_timestamp, resolve_agent_checked};
+use crate::{Evidence, LogEvent, Origin, compute_id, format_timestamp, resolve_agent_checked};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -46,14 +46,14 @@ pub fn run(args: AddArgs, file: Option<PathBuf>, pretty: bool, now: Timestamp) -
     let resolution_text =
         text.trim_start().starts_with("RESOLUTION") || text.trim_start().starts_with("RESOLVED");
     let record = LogEvent::Cut {
-        id: compute_id(&ts, &agent, &text, args.severity, &tags),
+        id: compute_id(&ts, &agent, &text, args.impact, &tags),
         ts,
         agent,
         text,
         tags,
-        severity: args.severity,
+        impact: args.impact,
         cwd: store::record_cwd(&resolved.cwd, resolved.cwd_repo(), home.as_deref()),
-        source: None,
+        origin: Some(Origin::agent()),
         evidence,
     };
     if resolution_text {

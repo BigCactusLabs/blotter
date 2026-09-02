@@ -8,7 +8,7 @@ use crate::cli::{ExportArgs, ExportFormat};
 use crate::error::{AppError, AppResult};
 use crate::output;
 use crate::store;
-use crate::{ListItem, Severity, parse_since};
+use crate::{Impact, ListItem, parse_since};
 use jiff::Timestamp;
 use serde::Serialize;
 use std::io::Write;
@@ -152,12 +152,12 @@ impl LogRecord {
                 "Correct that record's timestamp, or exclude it with --since, then export again.",
             )
         })?;
-        let severity = item.severity.expect("cut items have severity");
-        let (severity_number, severity_text) = severity_fields(severity);
+        let impact = item.impact.expect("cut items have impact");
+        let (severity_number, severity_text) = severity_fields(impact);
         let status = export_status(item);
         let mut attributes = vec![
             string_attribute("blotter.friction.id", &item.id),
-            string_attribute("blotter.friction.severity", severity.as_str()),
+            string_attribute("blotter.friction.impact", impact.as_str()),
             string_attribute("blotter.friction.status", status),
             string_attribute("blotter.friction.agent", &item.agent),
             tags_attribute(&item.tags),
@@ -184,11 +184,11 @@ impl LogRecord {
     }
 }
 
-fn severity_fields(severity: Severity) -> (u8, &'static str) {
-    match severity {
-        Severity::Minor => (9, "INFO"),
-        Severity::Major => (13, "WARN"),
-        Severity::Blocker => (17, "ERROR"),
+fn severity_fields(impact: Impact) -> (u8, &'static str) {
+    match impact {
+        Impact::Low => (9, "INFO"),
+        Impact::Material => (13, "WARN"),
+        Impact::Blocking => (17, "ERROR"),
     }
 }
 

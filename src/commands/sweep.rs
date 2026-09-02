@@ -90,6 +90,7 @@ pub fn run(args: SweepArgs, file: Option<PathBuf>, pretty: bool, now: Timestamp)
     for path in paths {
         match store::with_shared(&path, |file| {
             let bytes = store::read_bytes(file, &path)?;
+            store::check_version(&bytes, &path)?;
             Ok(store::fold_bytes(&bytes))
         }) {
             Ok(folded) => {
