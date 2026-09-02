@@ -6,12 +6,13 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-01 22:26'
+updated_date: '2026-09-02 01:53'
 labels:
   - v2
   - breaking
   - store
-dependencies: []
+dependencies:
+  - TASK-74
 ordinal: 84000
 ---
 

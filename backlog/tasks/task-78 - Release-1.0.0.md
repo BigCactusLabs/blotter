@@ -4,11 +4,12 @@ title: Release 1.0.0
 status: To Do
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-01 22:26'
+updated_date: '2026-09-02 01:53'
 labels:
   - v2
   - release
-dependencies: []
+dependencies:
+  - TASK-77
 ordinal: 87000
 ---
 

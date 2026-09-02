@@ -4,10 +4,11 @@ title: promotion record and blotter promote
 status: To Do
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-01 22:26'
+updated_date: '2026-09-02 01:53'
 labels:
   - v2
-dependencies: []
+dependencies:
+  - TASK-75
 ordinal: 85000
 ---
 

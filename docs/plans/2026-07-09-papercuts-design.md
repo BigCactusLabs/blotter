@@ -693,3 +693,265 @@ L61 and L62 state the already-resolved warning as an exact array: `meta.warnings
 **The rule.** L61 and L62 describe a non-dry-run resolve. On `--dry-run`, an independent `"dry run; no resolve event appended"` warning is always appended after whichever already-resolved warning applies — none, the single-ID/all-already-resolved form, or the mixed count/list form — regardless of how many requested IDs are already resolved. `--amend` cannot produce both warnings together: `--amend` requires every named record to already be resolved and treats that as the operation rather than an idempotent no-op, so the already-resolved ID list is empty on every amend path and only the dry-run warning can appear.
 
 **Compatibility.** None beyond what TASK-67 already shipped. This amendment corrects the design doc's own text to match behavior already in the tree; `data.changed`, `records[]`, and the already-resolved wording and counts L61 and L62 state are exactly as written.
+
+### r48 (2026-09-01, v2: the admission floor, impact, promotion, dispositions, origin, contract 6)
+
+Breaking. Envelope `meta.contract` bumps 5 → 6 and the crate becomes **1.0.0** — the v2 model is the first stable contract. Every rule below supersedes any earlier section or amendment it contradicts.
+
+This amendment lands as one contract number even though four phases build it. Phases 2 through 5 of the v2 plan stack on an integration branch `v2`, each its own reviewed PR into that branch; `meta.contract` becomes 6 on that branch and `v2` merges to `main` exactly once. **Consumers never observe an intermediate 6**: no released binary carries contract 6 with only part of this amendment implemented.
+
+#### Admission: a normative boundary, not a field
+
+Blotter is a selective ledger, not a transcript. Admission — "is this worth retaining?" — is decided **before** a record exists and is decided by the filing agent. It is not stored, not scored, not classified, and no command computes it. Nothing in the tool inspects it, so it is contract only in the sense that `add`'s guidance, `README`, and `schema` state it in one voice.
+
+A cut qualifies when one or more of these is true:
+
+- **Transferable** — another competent agent or user could plausibly hit the same problem.
+- **Consequential** — it caused meaningful delay, incorrect work, multiple retries, a context switch, substantial recovery work, or an inability to proceed.
+- **Recurring** — the same underlying friction has happened more than once.
+- **Misleading** — the system pointed at the wrong cause, hid the real one, behaved contrary to its apparent contract, or produced an error that discouraged the correct fix.
+- **Systemic** — the event reveals a missing affordance, a documentation gap, a brittle interface, a recurring process defect, an unstable workflow, or a reusable footgun.
+
+Stated as one rule: **a cut must be consequential once, or meaningful because it is transferable, recurring, misleading, or systemic.** The five tests are independent grounds; any one of them admits a record, and the short form must not be read as narrowing the list above it.
+
+Ordinarily *not* a cut: typos; shell quoting mistakes; a bad first guess; using the wrong command or API once; a patch missing because context was stale; a linter or compiler correctly rejecting newly written code; a malformed test fixture authored during the task; a one-off broad query returning too much output; any transient tactical mistake specific to the current run. Each crosses into cut territory only when recurrence or system behaviour makes it meaningful.
+
+Why: the v1 log's noise is explained by instructions that encouraged trivial filing, not by a missing mechanism. Policy is fixed before mechanism; an LLM admission classifier and an importance score are both refused (see Non-goals).
+
+#### `severity` becomes `impact`
+
+The field is renamed and revalued: `impact: low|material|blocking`, replacing `severity: minor|major|blocker`. No alias, no map. `--severity` is **removed** and clap rejects it as an unknown argument (`invalid_argument`, exit 2); `--impact` takes its place with default `low`.
+
+- **low** — qualified friction with limited immediate cost.
+- **material** — lost meaningful time, caused incorrect work, or required substantial recovery.
+- **blocking** — the task could not proceed.
+
+**Low impact still means cut-worthy.** It does not mean trivial. This is the whole point of the rename: `severity: minor` read as "this barely mattered", and admission and impact were one overloaded axis. Admission decides entry; impact describes consequence after entry.
+
+Everywhere the field appears:
+
+- Stored cut record: `"impact":"low|material|blocking"`. Dogears and promotions have no impact.
+- `ListItem`: `impact` (omitted for non-cut kinds), replacing `severity`. The full cut-item delta, so an implementer can diff it: `severity` removed, `impact` added, `source` removed, `origin?` added. `v` is **never materialized into any envelope** — it is a storage marker, and the envelope already carries its version as `meta.contract`. Every other cut field (`kind`, `id`, `ts`, `agent`, `text`, `tags`, `cwd`, `evidence?`, `status`, `resolution?`) is unchanged.
+- `list --impact low|material|blocking`, cut-only; passing it with `--kind dogear`, `--kind promotion`, or `--kind all` stays `invalid_argument` (exit 2), exactly as r5 ruled for `--severity`.
+- Normative sort: impact rank (**blocking > material > low**), then `ts` descending, then `id` ascending. The r3/r10 ordering is unchanged in shape.
+- `list --format md` headings become `## Blocking`, `## Material`, `## Low`, in that order.
+- `export --format otlp-json`: the attribute `blotter.friction.severity` becomes `blotter.friction.impact` carrying the impact string, and the OTLP severity mapping is `low → 9/INFO`, `material → 13/WARN`, `blocking → 17/ERROR` — the same three numbers r28 shipped, re-keyed.
+- `triage` and `digest` change vocabulary only; neither computes on the field.
+- `schema` publishes the enum, the flag, the sort, and the OTLP mapping.
+- `impact` is hashed into the cut ID (see Identity), so it is an identity-bearing field exactly as `severity` was.
+
+#### Identity: the `bl2` framing
+
+Supersedes r6, r9, r10 and r12 on record identity. All three record kinds hash under one scheme: SHA-256 over a sequence of fields, each framed as a u32 little-endian UTF-8 byte length followed by the field bytes (the r6/r10 framing, unchanged), with the first field a domain literal.
+
+The domain literal is **`bl2`** for every kind. `bl1` is gone; no v2 record hashes under it and no command recomputes it.
+
+| kind | fields in order | digest | id |
+|---|---|---|---|
+| cut | `bl2`, `cut`, `ts`, `agent`, `text`, `impact`, decimal tag count, each sorted-unique tag as its own field | first 6 bytes | `bl_` + 12 lowercase hex |
+| dogear | `bl2`, `dogear`, `ts`, `agent`, `text`, decimal tag count, each sorted-unique tag as its own field | first 10 bytes | `bl_` + 20 lowercase hex |
+| promotion | `bl2`, `promotion`, `ts`, `agent`, decimal source count, each sorted-unique source id as its own field, `artifact.type`, `artifact.ref` | first 8 bytes | `bl_` + 16 lowercase hex |
+
+Tags are sorted and deduplicated before hashing and are **stored** in that same normalized form (r12). Promotion `sources` are likewise sorted and deduplicated before hashing and stored in that form. "Sorted and deduplicated" is pinned exactly, for both: ascending **raw UTF-8 byte order**, exact-byte equality for deduplication, **case-sensitive**, and **no Unicode normalization** of any form. Two tags that a human would call the same word but that differ by one byte are two tags and hash as two. Promotion sources are canonical lowercase `bl_` IDs by construction, so their byte order is their hex order and the case rule is never load-bearing there; it is stated anyway so the two lists follow one rule. `note` is outside the promotion hash for r34's reason: it is authored commentary on the record, as evidence is on a cut, and a promotion whose note is reworded is the same promotion. The three digest widths (12 / 16 / 20 hex) stay pairwise distinct, which is what keeps the three ID namespaces provably disjoint — the r6 argument, extended rather than weakened. The kind field supplies domain separation on top of it.
+
+`v` and `origin` are **excluded from every hash**. `v` is a format marker and `origin` is provenance; neither changes what the friction is. This is r34's reasoning for keeping evidence out of the ID, applied unchanged: the same friction reported through a different seam is the same friction. Evidence, `cwd`, and resolution fields remain outside every hash as before.
+
+Removed with this scheme: the `pc_` namespace, `IdNamespace`, `accepted_prefixes`, doctor's `pc_` skipping, `archive`'s `pc_` exemption, and **r12's promise that legacy `pc_` records fold, list, and resolve "forever"**. r48 supersedes that promise outright. A v2 log cannot contain a `pc_` record, because it cannot contain a v1 record at all (see below). The ID prefix grammar for `resolve`, `--promotion`, and `promote --source` becomes optional `bl_` plus at least 4 hex digits, matched case-insensitively, against one namespace.
+
+**One prefix-resolution rule, for every ID-accepting flag.** Because all three kinds now share the `bl_` namespace and differ only in digest width, a prefix cannot be scoped to the kind a flag wants: scoping it would let a prefix that is ambiguous in the log resolve "uniquely" for one flag and differently for another. So every ID argument — a `resolve` positional, `--promotion`, and `promote --source` — matches its prefix against the **folded distinct IDs of all three identity-bearing kinds** (cut, dogear, promotion; orphan resolve events are never candidates, as in v1), and then answers on the match set:
+
+- zero matches: `not_found` (exit 66), hint naming `blotter list --kind all --status all`, which under the list contract below shows every folded record of all three kinds;
+- more than one match: `ambiguous_id` (exit 65), listing every matched full ID sorted ascending;
+- exactly one match, of a kind the flag does not accept: `invalid_argument` (exit 2), naming the matched ID and its actual kind;
+- exactly one match of the expected kind: success.
+
+A prefix shorter than 4 hex digits remains `invalid_argument` (exit 2). Ambiguity is decided before kind, so the answer to a given prefix does not depend on which flag asked.
+
+#### `v: 2` and the pre-fold, in-lock version probe
+
+Every record blotter writes — `cut`, `dogear`, `resolve`, `promotion` — carries `"v":2`. JSON Lines has no file header, so a per-record marker is the only version information a log can carry, and it gives the next break a boundary to key on.
+
+**The probe.** On every path that opens a log for read or write, after the bytes are read under the already-held lock (shared for reads, exclusive for mutations) and **before** the fold, before any tear-heal byte, before any append, and before any copy-and-swap, blotter inspects the bytes:
+
+- If any physical line parses as JSON with a **known** `kind` (`cut`, `dogear`, `resolve`, `promotion`) and either lacks `v` or carries a `v` other than `2`, the command fails with the new error code **`unsupported_log_version`**, exit **65**, `retryable:false`. Its `message` names the first offending line and what was found there; its `details` are `{file, line, found_version?}`, where `file` is the resolved log path, `line` is the 1-based physical line number of the first offending record, and `found_version` carries the offending `v` value verbatim and is **omitted when `v` was absent** — absent and wrong are different diagnoses and the envelope must let a consumer tell them apart. Its `suggested_fix` names the resolved log path and instructs the operator to rename it to a path that does not yet exist, then run `blotter add` to create a fresh v2 log. The fix text carries **no literal `mv` command**: a paste-ready rename naming a fixed destination can clobber a file the operator already has, and this is the one error whose whole purpose is to protect bytes.
+- The command writes **zero bytes**: no tear-heal `\n`, no backup, no quarantine, no archive sidecar, no partial fold, no partial append. The file is byte-identical after a refusal.
+- An **empty file** — no bytes, or exactly `"\n"` per r26/r33 — is a fresh v2 log and passes.
+- Lines that do not parse, and lines parsing to an **unknown** `kind`, do not by themselves trigger the refusal. They stay what they already are: malformed or unknown-kind findings and fold warnings. Forward compatibility is preserved; a future kind is not a version break.
+
+`unsupported_log_version` joins `ERROR_CONTRACT` as a distinct code string sharing exit **65** with `invalid_input` and `ambiguous_id`. Sharing an exit code with a distinct code string is existing contract (`ambiguous_id` has done it since v1), and 65 — "invalid input data" — is the right class: the log's bytes are the input and they are the wrong shape. `schema` publishes the new code.
+
+The published exit dictionary must say so. `schema exit-codes` keys by exit code, so three codes now collapse onto 65, and today's entry reads `invalid input data including ambiguous ID` — a string that is true only because `ambiguous_id` happens to be inserted last. It becomes **`invalid input data, including an ambiguous ID or an unsupported log version`**. The rule behind it: where several error codes share one exit code, the published description for that exit code is a **deliberately authored string naming every code that maps to it**, never whichever entry the map happened to insert last. Adding a fourth code to 65 without extending this string is a contract regression, not a cosmetic one.
+
+Per-command consequences:
+
+- `add`, `dogear`, `promote`, `resolve`: refuse, append nothing.
+- `list`, `triage`, `digest`, `verify`, `retrospect`, `export`: refuse; there is no empty-state fallback, because the file exists and is unreadable rather than absent.
+- `doctor`: reports the file as **one** non-fixable finding of kind **`unsupported_version`** on the first offending line, and emits no other findings for that file — the log is not diagnosable under v2 rules. The envelope keeps its current shape exactly: `healthy:false`, `findings` holding that single `{line, kind:"unsupported_version", message, fixable:false}` entry, `checked_lines` counting the file's physical lines under the r26/r33 scan contract (the probe read them all, so the count is honest), and exit **1** — a finding, not an error envelope, because `doctor` is the command whose job is to name what is wrong with a log. Without `--fix` the `fix` object is **absent**, as it is for any diagnose-only run. With `--fix`, apply or `--dry-run`, `fix` is present and inert: `changed:false`, `applied` empty, no `backup`, no `quarantine`, no `restore_hint`, and `dry_run` reflecting the flag. No sidecar file is created on either path.
+- `archive`: refuses the same way, with no backup and no sidecar.
+- `sweep`: names the log in its per-log skip warning list and **keeps exit 0**, as it does for every per-log failure (r13). One v1 log does not abort a multi-log sweep. Concretely, and following the existing skip path exactly: `totals.repos_skipped` increments, **no entry for that log appears in `repos[]`**, `repos_swept` and every count total are untouched, and `meta.warnings` gains exactly one deterministic line in the existing `skipped <path>: <reason>` form, whose reason is the `unsupported_log_version` message — so the warning names both the log path and the offending line number, and two runs over the same inputs produce byte-identical warnings.
+
+Why in-lock and pre-fold: a v1 record is a record missing required fields, which the v1 scan classifies as `Malformed` — a line `append` steps over and `doctor --fix` would happily quarantine. Without the probe, pointing a v2 binary at a 0.15 log would silently mutate it. The probe is the one thing standing between a fresh-ledger break and a corrupted history.
+
+**Scan classification does not move.** The probe is a gate in front of the fold, not a change to it. Which physical lines count as records, which are malformed, which are unknown-kind, and the r6 rule that a complete valid final record without a trailing newline is healthy while an unparseable tail is `torn_line` — all of that is exactly as r6, r15, r26 and r33 left it. The probe reads the same lines the scan produces and answers only the version question about them.
+
+**The residual, stated rather than papered over.** A log holding **no** parseable known-kind record — only malformed lines, a torn tail, unknown kinds, or any mixture — passes the probe, because it holds no v1 record for the probe to find. Tear-heal, `add`, and `doctor --fix` therefore operate on it normally. This is deliberate: the alternative rule, refusing every log the probe cannot positively classify, makes a torn-only or malformed-only log permanently unrepairable by the one command written to repair it, which is a worse outcome than the one it guards against. Nothing v1 is mutated in this case, because there is nothing v1 there; what such a file can lose is bytes that were never records under any version, through the quarantine path r15 already governs.
+
+**Which `--dry-run` paths probe.** A dry run probes exactly when it opens the log, and the commands differ:
+
+- `resolve --dry-run` and `promote --dry-run` **do** open the log and therefore **do** probe. Both must fold to do their work at all — `resolve` to match IDs and apply the r13/r31 winner rule, `promote` to validate that every `--source` resolves to a cut — so both refuse a v1 log with `unsupported_log_version` (exit 65) and write nothing, which they would not have written anyway. Every read command that folds probes for the same reason.
+- `add --dry-run` and `dogear --dry-run` **do not** open the log, do not lock it, and therefore **do not** probe. Both return their would-be record before the append path opens anything, and that is unchanged from v1.
+
+The consequence is stated as an explicit exception to r31's prediction rule, which requires that a plan cannot promise what the apply would not produce: **a successful `add --dry-run` or `dogear --dry-run` is not a prediction that the apply will pass the probe.** Against a v1 log the dry run reports a record and exits 0 while the apply refuses with exit 65. This is accepted rather than fixed by making those dry runs open the log: r3 defines `add --dry-run` as creating no file and no directory, opening the log for a prediction would make a dry run on a discovered-default path behave differently from a dry run on a path that does not exist yet, and the failure it would predict happens exactly once per log, at the version boundary, with a clear error.
+
+#### The `auto` lane is deleted
+
+Supersedes r17 and r32. `auto` is a plain tag with no privileged behaviour anywhere.
+
+Removed: `is_auto_capture` and the partition helper; `--include-auto` on `list`, `triage`, `digest`, `verify`, `sweep`, and `export`, together with their `schema` entries; the `N auto-captured records hidden; use --include-auto to include them` warning; `--tag auto` implying `--include-auto` on `list`; and `retrospect`'s inverted include-by-default from r27. Every read command now sees every record, `auto`-tagged or not, and `--tag auto` is an ordinary tag filter.
+
+The `source` field is removed from the record, from `ListItem`, and from every envelope that carried `source?` (`triage` clusters, `digest` chronic entries, `verify` recurrences). `origin` takes its place (below).
+
+**`hook` is removed entirely, and r32's fail-open promise is superseded.** `hook exec claude-code` — the retired no-op receiver r32 kept precisely so an already-installed harness hook could not fail into its host session — is deleted along with the `hook` subcommand, its schema entry, and `BLOTTER_HOOK_EXPLAIN`. On 1.0.0, an installed hook invoking `blotter hook exec claude-code` is rejected by clap as an unknown subcommand: `invalid_argument`, exit 2, error envelope on stderr.
+
+This is a deliberate reversal, and it costs something r32 refused to spend: a stale hook entry now puts a usage error and a non-zero exit into a host session's hook channel on every failed tool call. It is accepted because keeping a no-op receiver inside a release whose entire purpose is removing dead code preserves the exact artifact being removed. The cost is paid by a **mandatory upgrade step**, carried in the CHANGELOG and the README: *remove the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from your Claude Code settings before upgrading to 1.0.0.* Blotter still never edits another program's configuration.
+
+#### `origin`
+
+`origin` is an optional structured provenance object on `cut`, `dogear`, and `promotion` records. `add`, `dogear`, and `promote` write `{"type":"agent"}`. No command in 1.0.0 sets any other field or any other type; the shape exists so a later release can admit externally detected qualified experience without another record break.
+
+```json
+{"origin":{"type":"agent","provider":"otel","trace_id":"<32 lowercase hex>","span_id":"<16 lowercase hex>","trace_flags":"<2 lowercase hex>"}}
+```
+
+- `type` is required when `origin` is present. `agent` is the only value 1.0.0 writes; an unrecognized `type` on a stored record folds and lists unchanged, carried through as the string it is. The forward-compatibility promise is deliberately narrow: **only the published members — `type`, `provider`, `trace_id`, `span_id`, `trace_flags` — are materialized into any envelope.** An unknown member inside a stored `origin` object survives in the log's bytes, because nothing rewrites a stored record, but it is not carried into `ListItem`, `triage`, `digest`, or `verify` output, and no command round-trips it. A consumer reading an envelope sees the published shape and nothing else.
+- `provider`, `trace_id`, `span_id`, `trace_flags` are all optional and omitted when absent.
+- Widths are validated **when present**: `trace_id` exactly 32 lowercase hex characters, `span_id` exactly 16, `trace_flags` exactly 2. On any write path that sets them, a wrong width or a non-lowercase-hex character is `invalid_input` (exit 65). On read, a stored record that fails the width rule is a malformed line — a fold warning and a `doctor` finding, as any unparseable record is — and never fails the reading command, so a hand-edited or foreign-written record cannot take `list` down. The widths are W3C Trace Context's, and the field names are the OTel Logs Data Model's — the stable spec, deliberately not the provisional GenAI conventions (r28's reasoning for mapping outward from an owned schema stands).
+- The OTel data model states that if `SpanId` is present `TraceId` SHOULD also be present. Blotter makes that a **rejection**: on write, `span_id` without `trace_id` is `invalid_input` (exit 65); on read it is a malformed line under the same rule as a bad width. A span with no trace is unresolvable provenance, and admitting it stores a value nothing can ever join.
+- `origin` is never required for admission and is never part of any ID hash.
+- Carried wherever `source` was carried: `ListItem` (`origin?`), `triage` cluster entries (`origin?`), `digest` chronic entries (`origin?`), `verify` recurrences (`origin?`). `export` does not emit it; trace identity in OTLP output remains deliberately absent (r28).
+- Dogears carry `origin` under the same shape and the same rules. A dogear is authored by the same agents through the same seam, and a provenance field that exists on one authored kind and not the other is an inconsistency with no reason behind it.
+
+#### Resolution dispositions
+
+Supersedes the loose "resolved means something happened" reading. Every resolution of a **cut** carries an explicit disposition:
+
+- **fixed** — the environment or system was changed to remove the friction. A recurrence anchor.
+- **promoted** — the friction was converted into reusable guidance or another durable improvement. A recurrence anchor.
+- **accepted** — the friction is real and intentionally tolerated. Recurrence is expected and is not a failed intervention. Never an anchor.
+- **invalid** — the original cut was incorrect, irrelevant, or not environmental friction. Never an anchor.
+
+Rules:
+
+- `resolve --disposition fixed|promoted|accepted|invalid` is **required** when any named record is a cut. Omitting it is `invalid_argument` (exit 2).
+- `--disposition` is **rejected** for dogears: a dogear is a hypothesis, and its lifecycle is `--url` / `--dropped`, which are unchanged. Passing it with a dogear ID is `invalid_argument` (exit 2).
+- Consequently, a batch naming **both** a cut and a dogear cannot satisfy both rules and is rejected with `invalid_argument` (exit 2) after ID matching inside the exclusive-lock critical section and **before any append** — the same place and the same shape as the r6-addendum mixed-batch rejection for `--url`/`--dropped`. No partial resolution.
+- `--promotion <ID>` is accepted **only** with `--disposition promoted`; with any other disposition it is `invalid_argument` (exit 2). Its value resolves through the single prefix-resolution rule stated in Identity: matched across all three kinds, zero → `not_found` (66), several → `ambiguous_id` (65), one of the wrong kind → `invalid_argument` (2) naming that kind, one promotion → success. Validation happens under the same lock, before any append.
+- **The link must be mutual.** Under that same lock, every cut being resolved with `--promotion P` must already appear in `P.sources`. A cut that does not is `invalid_argument` (exit 2), naming the cut ID and `P`, and it fails the **whole batch before any append** — no partial resolution, the same all-or-nothing shape as the mixed-kind rejection above. Otherwise a resolution could claim a promotion that never cited it, and `retrospect`, `verify` and any consumer walking provenance would read a link that exists in one direction only. The ordering this implies is that the promotion is written first and the resolve second, which is also the order the two acts happen in.
+- The stored `resolve` event and the materialized `Resolution` gain `disposition` (always present for cuts, always absent for dogears), optional `promotion` (omitted when absent), and `disposition_ts` (present exactly where `disposition` is).
+- **`disposition_ts` is when the disposition was decided.** On a base resolve, and on any amend that passes `--disposition` explicitly, it is that event's own `ts`. On an amend that omits `--disposition`, it is **copied from the winning resolution** along with the inherited disposition. So a note-only correction moves the resolution's `ts` — as r13 has always let it — without moving the moment the cut was classified. `digest.accepted` reads `disposition_ts` and nothing else (below).
+
+**Amend.** On `resolve --amend`, `--disposition` is **optional**. When omitted it is **inherited** from the winning resolution rather than cleared: a disposition is a classification of the record, not a note about it, and silently dropping it on a note correction would move a cut out of `verify`'s anchor set as a side effect of fixing a typo. When `--disposition` is given, the amend's value wins.
+
+**Inheritance is a write-time snapshot, and the fold does not change.** r13's fold stays exactly as written — whole-event, latest amend wins the materialized user-set fields — and this amendment adds no per-field merge to it. Instead, **every cut resolve event on disk carries `disposition`, `disposition_ts`, and `promotion` where applicable**, base and amend alike: when `--amend` omits `--disposition`, the command reads the winning resolution under the lock and **copies** its `disposition`, `disposition_ts`, and `promotion` into the event it is about to append; a resolve carries no hash, so the copy is the only transformation before the append. Inheritance is therefore visible in the stored bytes and needs no fold rule to reconstruct, so a later reader, `doctor`, or a third-party parser gets the same answer the writing command gave. This also keeps r31's requirement intact: the appended event and the reported resolution agree, and a `--dry-run` predicts the same bytes.
+
+The `promotion` link follows the disposition it belongs to: an amend **keeps** the existing `promotion` while the winning disposition remains `promoted`, and **clears** it when an amend moves the disposition to `fixed`, `accepted`, or `invalid`. `--amend` still requires at least one resolution field, and `--disposition` counts as one.
+
+**Stored resolve events that contradict these rules.** A resolve event's target kind is knowable only after the fold joins it to its record, so validity is checked **after that join**, not during the scan. Six combinations are invalid, listed here in the order `doctor` reports them: (1) a resolve targeting a **cut** with no `disposition`; (2) a resolve targeting a **dogear** that carries one; (3) a `disposition` without `disposition_ts`, or a `disposition_ts` without `disposition`; (4) a `promotion` field with any disposition other than `promoted`; (5) a `promotion` naming an ID that is not a promotion in this log; (6) a `promotion` whose `sources[]` does not contain the resolved cut — the mutual-link rule, which the CLI enforces on write and this rule enforces on read, so a hand-written one-way link never materializes. Each is handled the same way, and the rule is stated so a hand-edited or foreign-written log has one defined answer rather than an implementation's accident:
+
+- **The fold ignores the offending event** — it does not materialize, so a base resolve of this shape leaves the record open and an amend of this shape leaves the previous winner standing — and counts it in a deterministic warning of the existing form (`skipped N invalid resolutions`).
+- **`doctor` reports exactly one non-fixable finding of kind `invalid_resolution` per invalid event**, on that physical line, naming the record ID and every rule the event breaks, in the numbered order above, so two implementations produce the same message. The fold warning counts events, not rules. It is non-fixable for r15's reason: the repair is a judgement about what the resolver meant, and quarantining a resolve event silently reopens a closed record.
+
+Neither behaviour is reachable from a blotter-written log; both exist so that a log which somehow holds one fails visibly and identically everywhere.
+
+#### The `promotion` record and `blotter promote`
+
+A third first-class kind. The ontology is now: a **cut** is selected experience, a **dogear** is a hypothesis, a **promotion** is durable learning — "these experiences became this artifact".
+
+```json
+{"kind":"promotion","v":2,"id":"bl_<16 lowercase hex>","ts":"2026-09-01T12:00:00.000Z","agent":"claude-code",
+ "sources":["bl_aaaaaaaaaaaa","bl_bbbbbbbbbbbb"],
+ "artifact":{"type":"skill","ref":"skills/testing.md"},
+ "note":"Repeated fixture failures promoted into reusable test-authoring guidance.",
+ "origin":{"type":"agent"},"cwd":"docs"}
+```
+
+- Artifact vocabulary, closed in 1.0.0: **`doc`, `skill`, `guard`, `test`, `tool`, `process`**. An unrecognized `--artifact-type` is `invalid_argument` (exit 2).
+- Command: `blotter promote --source <ID>... --artifact-type <TYPE> --artifact-ref <REF> [--note <TEXT>] [--agent <NAME>] [--dry-run]`. At least one `--source` is required.
+- **Sources are cuts only.** Each `--source` resolves through the single prefix-resolution rule stated in Identity: zero matches is `not_found` (exit 66), several is `ambiguous_id` (exit 65) listing them, and exactly one match that is a dogear or another promotion is `invalid_argument` (exit 2), naming the offending ID and its actual kind. Recursive promotion and dogear promotion are out of scope for 1.0.0 (Non-goals). A source may be open or resolved: promotion records where learning came from, not whether the friction is closed.
+- The stored `sources` array is the sorted, deduplicated set of full canonical IDs.
+- Mechanics mirror `add` exactly: read → fold → validate → append inside **one exclusive-lock critical section**, after the version probe. `--dry-run` performs full discovery, agent resolution, validation and record construction, reports the would-be record with `changed:false`, and creates no file and no directory — but, unlike `add --dry-run`, it **does** read the log, because validating every `--source` requires the fold; against a missing discovered-default log its sources cannot resolve and it answers `not_found` (exit 66).
+- **Duplicates follow the cut and dogear rules exactly, with no new mechanism.** If the computed ID already exists in the log, nothing is appended and the existing record is returned with `changed:false` and the warning `duplicate promotion; existing record returned`, matching the wording `dogear` already uses. In the fold, byte-identical duplicate promotion lines are **first-wins** exactly as duplicate cut and dogear lines are, counted in the existing warning form (`skipped N duplicate promotions`). In `doctor`, a byte-identical duplicate promotion line is a **warning-class finding of kind `duplicate_promotion`**, following `duplicate_cut` and `duplicate_dogear` in both name and treatment — not fixable, because r15 already ruled that first-wins duplicates are not worth a rewrite — while a same-ID line with a **different** payload stays `id_conflict`, as for every kind.
+- Output: `{"changed":bool,"record":{promotion fields}}`, with `meta.file` and `meta.agent_source`.
+- **Redaction and bounds.** `artifact.ref` and `note` are authored free text and go through the same `redact_evidence` pass r34 put on `dogear --evidence` and resolution notes — home rules plus the secret pass — **before hashing and before append**, so the hashed bytes are the stored bytes and `--dry-run` predicts them exactly. Both are bounded at **10,000 bytes** after trailing-newline strip, the same bound `add` applies to cut text; larger is `invalid_input` (exit 65). Both reject empty and whitespace-only values as `invalid_input` (exit 65).
+- **A promotion has no status and no resolution. It is never resolved.** `resolve` never accepts a promotion ID: a prefix resolving to one is `invalid_argument` (exit 2). Promotions are excluded from the resolve candidate set entirely.
+- **`promote` never writes a resolve event.** Promotion and resolution stay separate, explicitly authored events, so provenance and lifecycle stay independently auditable. `resolve --disposition promoted [--promotion <ID>]` is the separate act of naming a cut's fate.
+- `doctor` learns the kind: promotion lines parse as healthy, their IDs are recomputed under the `bl2` promotion framing, and a same-ID-different-payload line is an `id_conflict` as for any kind.
+
+#### Promotions pin their sources
+
+`archive` never removes a resolved cut whose ID appears in any promotion's `sources[]`, however old the group and however old the promotion. Provenance is the reason the promotion record exists, and an archive that severs it turns a durable artifact's justification into a dangling ID. The pin is evaluated in `plan_archive` alongside the existing eligibility rule; a pinned group is simply not eligible, so nothing else about `archive` moves — no new files, no new warnings beyond the existing counts.
+
+Promotions themselves never archive: `archive` removes only groups whose materialized state is closed, and a promotion has no state to close.
+
+`doctor` validates every promotion's `sources[]`: each ID must resolve, in the folded log, to a record of kind `cut`. An ID that resolves to nothing, or to a dogear or a promotion, is a **non-fixable** finding of kind **`dangling_source`** on the promotion's line, naming the promotion ID and the offending source ID. It is non-fixable for r15's reason: only a human knows whether the cut was wrongly archived or the promotion wrongly written.
+
+#### `verify`
+
+Supersedes r16's anchor eligibility. An anchor is a materialized **resolved cut whose winning disposition is `fixed` or `promoted`**. `accepted` and `invalid` are excluded and named as excluded in `schema`. The existing exclusions stand unchanged: dogears, dropped resolutions, and resolved cuts with an empty normalized title. Linkage, the strictly-after timestamp rule, ordering, `count`, `distinct_recurring_cuts`, `scanned`, and the exit convention are exactly as r16 and r45 left them.
+
+Why: `accepted` is a deliberate decision to tolerate friction, so its recurrence is the expected outcome, not a failed intervention; `invalid` says the anchor was never friction at all. Before dispositions, `verify` had to treat every resolve as a claimed fix and reported both as failures.
+
+The `verify` envelope's `resolution{}` gains `disposition`: `{ts,disposition,task?,pr?,commit?}`, and `source?` becomes `origin?`.
+
+#### `retrospect`
+
+Supersedes r27's candidate typing. A candidate's `type` becomes **`pattern`**, drawn from `recurrent_friction|failed_intervention`, and each candidate gains **`suggested: [doc|skill|guard|test|tool|process]`** — the promotion artifact vocabulary, so a candidate names what kind of artifact would answer it. Pattern detection and proposed intervention are now separate axes; r27 conflated them in one solution-shaped enum.
+
+Mapping of r27's three candidate types, which cease to exist:
+
+- `wrapper_alias` → `pattern: "recurrent_friction"`, `suggested: ["tool","guard"]`.
+- `doc_repair` → `pattern: "recurrent_friction"`, `suggested: ["doc"]`.
+- `skill_candidate` → `pattern: "failed_intervention"`, `suggested: ["skill"]`.
+
+The emission rules are otherwise **unchanged**: open-cut clusters use triage's representative linkage and r19/r44 scoring at a two-record threshold, with the shared-failing-program rule taking precedence over the `docs`-tag rule (first match wins, and it now decides `suggested`, not `pattern`); every recurrence of count two or more under verify's rules becomes a `failed_intervention`, and those recurrences read verify's new disposition-filtered anchor set. Bounded evidence, `occurrences`, ordering, the no-window rule, and the exit convention are as r27 left them.
+
+**Two patterns ship, not four.** `repeated_recovery` and `documentation_gap` have no deterministic emission rule in the tree, and a published vocabulary value nothing can emit is a promise, not a contract. Add either when a rule exists to emit it.
+
+#### `digest`
+
+Vocabulary follows `impact`. One field is added: **`accepted`**, an integer count of cuts whose **winning resolution's disposition is `accepted`** and whose **`disposition_ts`** falls inside the inclusive `since`/`until` window. This is the first place `digest` reads resolved items, so the window rule is stated here: the period is judged by `disposition_ts` — the moment the acceptance was decided — never by the cut's `ts`, and never by the winning resolution's `ts`, which a later note-only amend moves without re-deciding anything. Reading the resolution `ts` instead would let a typo correction drag an old acceptance into this week's digest.
+
+One related seam is left where r16 put it: `verify` still measures recurrence from the **winning resolution's `ts`**, so a note-only amend still moves that cutoff. That drift predates this amendment and changing it would change recurrence output for reasons unrelated to dispositions; it is recorded here as a known follow-up, not fixed by r48.
+
+No section, no listing, no md rendering: the JSON envelope gains `accepted:N` and `--format md` is unchanged. `accepted` is the one disposition that hides friction on purpose, and a bare count keeps the hide rate visible for near-zero code. Everything else about `digest` — chronic, `new_cuts`, `open_dogears`, `window`, ordering, exits — is unchanged.
+
+#### `list` and `sweep`
+
+- `list --kind cut|dogear|promotion|all`. The default stays **`cut`**, and cut-only output changes only by the cut-item delta stated under `impact` (`severity` → `impact`, `source` → `origin?`). `--kind promotion` shows promotions only.
+- `items` is a **tagged union** discriminated by the existing `kind` field. A `PromotionItem` carries `kind:"promotion"`, `id`, `ts`, `agent`, `sources`, `artifact{type,ref}`, `note?`, `cwd`, `origin?`, and **no** `status`, `resolution`, `text`, `tags`, `impact`, or `evidence`.
+- Ordering **within** promotions: `ts` descending, then `id` ascending.
+- Ordering **across** kinds under `--kind all`: cuts first (impact rank, then `ts` descending, then `id` ascending), then dogears (`ts` descending, then `id` ascending), then promotions (`ts` descending, then `id` ascending). This extends the r5/v1 block ordering by appending a third block rather than interleaving; a mixed list stays readable as three ordered sections and the existing cut and dogear orderings do not move.
+- Filters against promotions: `--agent` and `--since` (on the promotion's `ts`) apply. `--status` does not select promotions, which have no status. The `open` default applies to cuts and dogears only and never excludes a promotion, so `list --kind all` with no `--status` shows every promotion. `--status all` is not a lifecycle filter: it lifts the `open` default and retains promotions, so `list --kind all --status all` is the one command that shows every folded record of every kind, which is why the prefix-resolution `not_found` hint names it. An **explicitly passed** `--status open|resolved` is a request for lifecycle records: under `--kind all` it selects among cuts and dogears and excludes promotions from the result, and under `--kind promotion` it is `invalid_argument` (exit 2). `--kind promotion --status all` is accepted and is a no-op. The parser must therefore tell an explicit `--status` from the default.
+- `--tag` does not apply to promotions (they carry no tags): under `--kind promotion` it is `invalid_argument` (exit 2), and under `--kind all` it excludes them.
+- `--impact` is cut-only, as above.
+- Empty results stay exit 0 with a hint, and the hint is pinned per kind. The existing three are unchanged — `no cuts matched; try --status all or broader filters`, `no dogears matched; try --status all or broader filters`, `no records matched; try --status all or broader filters` — and `--kind promotion` adds `no promotions matched; try broader filters`, which names no `--status` because promotions have none.
+- `--format md`: promotions render under a `## Promotions` heading after `## Dogears`, one line per promotion — `- [<id>] <artifact.type>: <artifact.ref> — <agent>, <ts>`, with an indented `  - <note>` line when a note is present, collapsed by the same r21 whitespace rule as every other md line.
+- **`sweep` does not gain promotions.** Its `--kind` stays `cut|dogear|all`, where `all` means cuts and dogears; the two `--kind` enums split into separate types so a `promotion` value cannot reach `sweep`. Sweep is a cross-repo open-friction aggregate, and promotions have no open state to aggregate.
+
+#### `schema`
+
+`schema` publishes every rule above that a caller can observe: the `impact` enum and its OTLP mapping; the `bl2` identity table for all three kinds with field orders, framings and widths, including the byte-order and case rule for tags and sources; the single prefix-resolution rule and its four answers; `v:2` and the `unsupported_log_version` code with its `details:{file,line,found_version?}` shape, its exit, and its byte-identical-after-refusal guarantee; the extended exit-65 description naming all three codes that map to it; the `promotion` record and the `promote` command with the artifact vocabulary and the redaction and bound clauses; `origin`'s shape, widths, the `span_id`-requires-`trace_id` rejection, and the narrow published-members-only promise; `disposition`, `disposition_ts`, and the mutual `--promotion` link requirement, with `verify`'s anchor set; `list`'s union, kinds, ordering, filter rejections, and per-kind empty hints; `digest`'s `accepted` field and its `disposition_ts` window rule; `retrospect`'s `pattern` and `suggested` vocabularies; and `doctor`'s new finding kinds — `unsupported_version`, `dangling_source` and `invalid_resolution` as non-fixable, `duplicate_promotion` alongside `duplicate_cut` and `duplicate_dogear`. The `hook` command entry, the `BLOTTER_HOOK_EXPLAIN` env entry, `--include-auto` on all six commands, the `source` field, `accepted_prefixes`, and the `pc_` legacy clauses are all removed from the published contract.
+
+#### Non-goals, carried forward
+
+Explicitly not built in v2: numeric importance, salience, actionability or confidence scores; an LLM admission classifier; a raw `event`/`signal` record kind under any name (auto-capture is not resurrected sideways); telemetry ingestion — `origin` is a seam, not an intake; a generalized promotion plugin framework beyond the six-value artifact vocabulary; promotion of dogears or of other promotions; persisted retrospect patterns, which stay derived views; and any conversion of blotter into task or project management. Blotter records learning provenance; the artifacts themselves stay external and blotter never touches them.
+
+#### Compatibility
+
+**This is a fresh ledger.** A v2 binary reads no v1 record, and there is no upcaster, no legacy parser, and no `migrate` command. A log written by 0.15.0 or earlier is refused whole (see the probe) and left byte-identical.
+
+What an operator does, once, per log: rename the old file out of the discovery path (`mv .blotter.jsonl .blotter.v1.jsonl`), or keep the 0.15 binary and point it at the old file with `--file`/`BLOTTER_FILE` when the history is wanted. The next `blotter add` creates a fresh v2 log at the discovered default. Nothing rewrites the old file, ever.
+
+Why a break rather than an upcaster: event-store practice is unanimous that history is transformed on read and stored bytes stay immutable, and that is right where history is an asset. Blotter's v1 history is the exhaust this amendment exists to stop collecting — 166 cuts filed under instructions that encouraged trivial filing. An upcaster would keep the `bl1` hash, the severity map, the `pc_` namespace, and the `source` fold alive permanently to preserve it: dead code carrying noise. **The dogfood history is accepted as lost to the new binary**, and that is the point rather than the cost.
+
+Also breaking, restated for a consumer's checklist: `meta.contract` 5 → 6; `severity` gone, `impact` in its place with new values; `--severity` removed; `source` gone, `origin` in its place; `--include-auto` removed from six commands and `auto` demoted to a plain tag, so their default reads change for any log holding `auto` records; the `hook` subcommand removed, requiring the settings cleanup above; `disposition` required on every cut resolve; `pc_` IDs no longer accepted anywhere; every record ID changes, because every record hashes under `bl2`.
