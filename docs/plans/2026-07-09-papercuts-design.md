@@ -1040,7 +1040,7 @@ Why. The three widths (12 / 16 / 20 hex) were residue from the r6 era, when widt
 
 A cut written under r48's 6-byte width and a cut written under this rule with the same fields have different IDs. No compatibility rule is needed: no released binary wrote a 12-hex `bl_` cut, and the `v2` integration branch has no consumers.
 
-`schema` publishes the table above, one width for all three kinds, and its record examples read `bl_<20 lowercase hex>` for `cut`, `dogear`, `resolve` and `promotion`. Every fixture, golden file and documentation example in the repository carries 20-hex IDs; a contract test pins the width for the two kinds that exist before Phase 4 and Phase 4's test pins the third.
+`schema` publishes the table above, one width for all three kinds, and its record examples read `bl_<20 lowercase hex>` for `cut`, `dogear`, `resolve` and `promotion`. Every v2 fixture, golden file and documentation example in the repository carries 20-hex IDs (a fixture whose purpose is to be a v1 or pre-framing record keeps its historical width, because the width is what the test is about); a contract test pins the width for the two kinds that exist before Phase 4 and Phase 4's test pins the third.
 
 #### `verify` measures recurrence from `disposition_ts`
 
