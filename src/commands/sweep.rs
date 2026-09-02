@@ -1,4 +1,4 @@
-use crate::cli::{ListKind, SweepArgs};
+use crate::cli::{SweepArgs, SweepKind};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use crate::store;
@@ -175,7 +175,7 @@ fn resolve_log_path(input: &Path) -> Result<PathBuf, String> {
 fn sweep_repo(
     path: PathBuf,
     items: Vec<ListItem>,
-    kind: ListKind,
+    kind: SweepKind,
     since: Option<Timestamp>,
 ) -> SweepRepo {
     let counts = SweepCounts {
@@ -212,11 +212,11 @@ fn sweep_repo(
     }
 }
 
-fn matches_kind(item: &ListItem, kind: ListKind) -> bool {
+fn matches_kind(item: &ListItem, kind: SweepKind) -> bool {
     match kind {
-        ListKind::Cut => item.kind == "cut",
-        ListKind::Dogear => item.kind == "dogear",
-        ListKind::All => true,
+        SweepKind::Cut => item.kind == "cut",
+        SweepKind::Dogear => item.kind == "dogear",
+        SweepKind::All => true,
     }
 }
 

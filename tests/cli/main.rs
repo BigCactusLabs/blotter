@@ -15,6 +15,7 @@ mod dogear;
 mod export;
 mod list;
 mod origin;
+mod promote;
 mod redaction;
 mod resolve;
 mod retrospect;

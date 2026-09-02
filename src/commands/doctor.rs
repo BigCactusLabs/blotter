@@ -2,7 +2,7 @@ use crate::cli::DoctorArgs;
 use crate::error::{AppError, AppResult, unsupported_log_version_message};
 use crate::output::{self, Meta};
 use crate::store;
-use crate::{LogEvent, compute_dogear_id, compute_id};
+use crate::{LogEvent, compute_dogear_id, compute_id, compute_promotion_id, normalized};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -427,6 +427,11 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
     let mut records = HashMap::<String, Vec<u8>>::new();
     let mut record_kinds = HashMap::<String, &'static str>::new();
     let mut resolves = Vec::<(usize, LogEvent)>::new();
+    // The promotion `sources[]` rules (5) and (6) join against, plus the lines
+    // `dangling_source` reports on. Both need the completed `record_kinds`, so
+    // they are decided after the scan.
+    let mut promotion_sources = store::PromotionSources::new();
+    let mut promotion_lines = Vec::<(usize, String, Vec<String>)>::new();
     let mut checked_lines = 0;
     // The version probe outranks every record-model classification for this file
     // (r48/r50): malformed, torn, unknown-kind, duplicate, orphan and
@@ -559,9 +564,74 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
                     // later resolve is judged against is the first one too.
                     record_kinds.entry(id).or_insert("dogear");
                 }
+                LogEvent::Promotion {
+                    id,
+                    ts,
+                    agent,
+                    sources,
+                    artifact,
+                    ..
+                } => {
+                    let sources = normalized(&sources);
+                    if id
+                        .get(..3)
+                        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("bl_"))
+                    {
+                        let expected = compute_promotion_id(
+                            &ts,
+                            &agent,
+                            &sources,
+                            artifact.kind.as_str(),
+                            &artifact.r#ref,
+                        );
+                        if id != expected {
+                            findings.push(finding(
+                                line,
+                                "id_conflict",
+                                format!("promotion ID {id} does not recompute to {expected}"),
+                            ));
+                        }
+                    }
+                    if let Some(first) = records.get(&id) {
+                        let (kind, message) = if first == scanned.raw {
+                            (
+                                "duplicate_promotion",
+                                format!("byte-identical duplicate promotion {id}"),
+                            )
+                        } else {
+                            (
+                                "id_conflict",
+                                format!(
+                                    "promotion {id} has a different payload than its first occurrence"
+                                ),
+                            )
+                        };
+                        findings.push(finding(line, kind, message));
+                    } else {
+                        records.insert(id.clone(), scanned.raw.to_vec());
+                        promotion_sources.insert(id.clone(), sources.clone());
+                        promotion_lines.push((line, id.clone(), sources));
+                    }
+                    record_kinds.entry(id).or_insert("promotion");
+                }
                 LogEvent::Resolve { .. } => resolves.push((line, event)),
                 LogEvent::Unknown => unreachable!("scanner classifies unknown events"),
             },
+        }
+    }
+    // Every source must resolve, in the folded log, to a cut (r48). Non-fixable:
+    // only a human knows whether the cut was wrongly archived or the promotion
+    // wrongly written.
+    for (line, id, sources) in promotion_lines {
+        for source in sources {
+            let message = match record_kinds.get(&source) {
+                Some(&"cut") => continue,
+                Some(kind) => {
+                    format!("promotion {id} names source {source}, which is a {kind}, not a cut")
+                }
+                None => format!("promotion {id} names source {source}, which is in no record"),
+            };
+            findings.push(finding(line, "dangling_source", message));
         }
     }
     // Validity is decided after the join, and an invalid event is discarded
@@ -576,7 +646,7 @@ fn inspect(bytes: &[u8], leak_scan: Option<&LeakScan<'_>>) -> DoctorData {
         // An orphan joins to no record and is therefore never invalid.
         let broken = record_kinds
             .get(id)
-            .map(|kind| store::broken_resolution_rules(&event, kind))
+            .map(|kind| store::broken_resolution_rules(&event, kind, &promotion_sources))
             .unwrap_or_default();
         if broken.is_empty() && !*amend {
             base_resolve_ids.insert(id.clone());

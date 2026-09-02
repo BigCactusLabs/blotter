@@ -625,3 +625,54 @@ fn archive_sole_newline_log_has_zero_physical_lines() {
     assert_eq!(archive.data["kept"], 0);
     assert_eq!(std::fs::read(&file).unwrap(), b"\n");
 }
+
+#[test]
+fn a_resolved_cut_named_by_a_promotion_is_pinned_forever() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let pinned = add_at(&file, "2026-01-01T00:00:00Z", "pinned friction", &[]);
+    let pinned = pinned.data.record.cut_id().to_owned();
+    let free = add_at(&file, "2026-01-01T00:00:00Z", "free friction", &[]);
+    let free = free.data.record.cut_id().to_owned();
+    resolve_at(
+        &file,
+        "2026-01-02T00:00:00Z",
+        &pinned,
+        &["--agent", "fixer"],
+    );
+    resolve_at(&file, "2026-01-02T00:00:00Z", &free, &["--agent", "fixer"]);
+    let promotion: SuccessEnvelope<PromoteData> = success(&promote_at(
+        &file,
+        "2026-01-03T00:00:00Z",
+        &[
+            "--source",
+            &pinned,
+            "--artifact-type",
+            "doc",
+            "--artifact-ref",
+            "docs/x.md",
+        ],
+    ));
+    let promotion = promotion_id(&promotion.data.record);
+
+    // Every line predates the cutoff, so only the pin can keep the group.
+    let archived: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &["archive", "--before", "2026-06-01T00:00:00Z"],
+    ));
+    assert_eq!(archived.data["archived"], 2);
+
+    let remaining: Vec<Value> = std::fs::read_to_string(&file)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let ids: Vec<_> = remaining
+        .iter()
+        .map(|line| line["id"].as_str().unwrap())
+        .collect();
+    // The pinned cut, its resolve, and the promotion itself all stay; the free
+    // group is gone. A promotion has no state to close and never archives.
+    assert_eq!(ids, [pinned.as_str(), pinned.as_str(), promotion.as_str()]);
+    assert!(!ids.contains(&free.as_str()));
+}

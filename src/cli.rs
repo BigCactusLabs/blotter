@@ -1,4 +1,4 @@
-use crate::{Disposition, Impact};
+use crate::{ArtifactType, Disposition, Impact};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
@@ -49,6 +49,7 @@ pub enum Command {
     Add(AddArgs),
     #[command(alias = "idea")]
     Dogear(DogearArgs),
+    Promote(PromoteArgs),
     List(ListArgs),
     Export(ExportArgs),
     Triage(TriageArgs),
@@ -136,6 +137,43 @@ pub struct DogearArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct PromoteArgs {
+    #[arg(
+        long = "source",
+        value_name = "ID",
+        required = true,
+        help = "Cut ID or unique prefix this artifact came from; repeatable"
+    )]
+    pub sources: Vec<String>,
+    #[arg(
+        long = "artifact-type",
+        value_enum,
+        required = true,
+        help = "What the experiences became"
+    )]
+    pub artifact_type: ArtifactType,
+    #[arg(
+        long = "artifact-ref",
+        value_name = "REF",
+        required = true,
+        allow_hyphen_values = true,
+        help = "Where the artifact lives; best-effort redaction"
+    )]
+    pub artifact_ref: String,
+    #[arg(
+        long,
+        allow_hyphen_values = true,
+        value_name = "TEXT",
+        help = "Optional commentary; best-effort redaction; outside the ID hash"
+    )]
+    pub note: Option<String>,
+    #[arg(long, help = "Agent name; overrides BLOTTER_AGENT")]
+    pub agent: Option<String>,
+    #[arg(long, help = "Validate without appending")]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Args)]
 pub struct ListArgs {
     #[arg(
         long,
@@ -144,13 +182,15 @@ pub struct ListArgs {
         help = "Record kind to list"
     )]
     pub kind: ListKind,
+    // An explicit `--status` must be distinguishable from the default (r48):
+    // the default `open` never excludes a promotion, while an explicit
+    // `open`/`resolved` is a request for lifecycle records and does.
     #[arg(
         long,
         value_enum,
-        default_value_t = StatusFilter::Open,
-        help = "Filter by lifecycle status"
+        help = "Filter by lifecycle status; default open, which does not exclude promotions"
     )]
-    pub status: StatusFilter,
+    pub status: Option<StatusFilter>,
     #[arg(long, help = "Filter by agent")]
     pub agent: Option<String>,
     #[arg(long, help = "Filter by tag")]
@@ -264,10 +304,10 @@ pub struct SweepArgs {
     #[arg(
         long,
         value_enum,
-        default_value_t = ListKind::Cut,
+        default_value_t = SweepKind::Cut,
         help = "Record kind to include in items"
     )]
-    pub kind: ListKind,
+    pub kind: SweepKind,
 }
 
 #[derive(Debug, Args)]
@@ -308,6 +348,12 @@ pub struct ResolveArgs {
         help = "How the cut was disposed of; required for cuts, rejected for dogears"
     )]
     pub disposition: Option<Disposition>,
+    #[arg(
+        long,
+        value_name = "ID",
+        help = "Link to an existing promotion; requires --disposition promoted"
+    )]
+    pub promotion: Option<String>,
     #[arg(long, help = "Append a correction to an existing resolved record")]
     pub amend: bool,
     #[arg(long, help = "Validate without appending a resolution")]
@@ -323,6 +369,17 @@ pub enum StatusFilter {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ListKind {
+    Cut,
+    Dogear,
+    Promotion,
+    All,
+}
+
+/// `sweep` stays cut/dogear (r48): it is a cross-repo open-friction aggregate
+/// and a promotion has no open state to aggregate. The two enums are separate
+/// types so a `promotion` value cannot reach `sweep` at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SweepKind {
     Cut,
     Dogear,
     All,
@@ -383,7 +440,7 @@ mod tests {
             panic!("expected list")
         };
         assert_eq!(args.kind, ListKind::Cut);
-        assert_eq!(args.status, StatusFilter::Open);
+        assert_eq!(args.status, None);
         assert_eq!(args.limit, 50);
         assert_eq!(args.format, OutputFormat::Json);
 
@@ -430,7 +487,7 @@ mod tests {
         assert_eq!(args.paths, [PathBuf::from("repo")]);
         assert_eq!(args.registry, Some(PathBuf::from("repos.txt")));
         assert_eq!(args.since.as_deref(), Some("1d"));
-        assert_eq!(args.kind, ListKind::All);
+        assert_eq!(args.kind, SweepKind::All);
     }
 
     #[test]
@@ -438,6 +495,21 @@ mod tests {
         assert!(Cli::try_parse_from(["blotter", "list", "--format", "jsonl"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "digest", "--format", "jsonl"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "sweep", "--kind", "other"]).is_err());
+        assert!(Cli::try_parse_from(["blotter", "sweep", "repo", "--kind", "promotion"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "blotter",
+                "promote",
+                "--source",
+                "abcd",
+                "--artifact-type",
+                "poem",
+                "--artifact-ref",
+                "x"
+            ])
+            .is_err()
+        );
+        assert!(Cli::try_parse_from(["blotter", "promote", "--artifact-type", "doc"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "add", "x", "--impact", "critical"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "add", "x", "--severity", "minor"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "resolve"]).is_err());
@@ -475,6 +547,17 @@ mod tests {
             vec!["blotter", "digest"],
             vec!["blotter", "sweep", "repo"],
             vec!["blotter", "resolve", "abcd"],
+            vec!["blotter", "list", "--kind", "promotion"],
+            vec![
+                "blotter",
+                "promote",
+                "--source",
+                "abcd",
+                "--artifact-type",
+                "skill",
+                "--artifact-ref",
+                "skills/x.md",
+            ],
             vec!["blotter", "archive", "--before", "1d"],
             vec!["blotter", "schema", "record"],
             vec!["blotter", "doctor"],

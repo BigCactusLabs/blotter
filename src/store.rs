@@ -1,5 +1,5 @@
 use crate::error::{AppError, AppResult};
-use crate::{ListItem, LogEvent, Resolution, format_timestamp};
+use crate::{ListItem, LogEvent, PromotionItem, Resolution, format_timestamp, normalized};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
@@ -38,6 +38,11 @@ impl ResolvedFile {
 #[derive(Debug, Default)]
 pub struct FoldResult {
     pub items: Vec<ListItem>,
+    /// Folded promotions, `ts` descending then `id` ascending (r48). They are a
+    /// separate vector rather than a third arm of `items` because every analysis
+    /// command folds over cuts and dogears only; `list` is the one caller that
+    /// joins the two into its tagged union.
+    pub promotions: Vec<PromotionItem>,
     pub warnings: Vec<String>,
     records: BTreeMap<String, LogEvent>,
     winning_amends: HashMap<String, LogEvent>,
@@ -56,6 +61,7 @@ pub struct FoldedLine {
 
 pub struct LoadedFold {
     pub items: Vec<ListItem>,
+    pub promotions: Vec<PromotionItem>,
     pub warnings: Vec<String>,
 }
 
@@ -98,6 +104,7 @@ struct WarningCounts {
     unknown: usize,
     duplicate_cuts: usize,
     duplicate_dogears: usize,
+    duplicate_promotions: usize,
     duplicate_resolves: usize,
     orphans: usize,
     invalid_resolutions: usize,
@@ -419,6 +426,7 @@ pub fn load_folded(resolved: &ResolvedFile) -> AppResult<LoadedFold> {
     warnings.extend(folded.warnings);
     Ok(LoadedFold {
         items: folded.items,
+        promotions: folded.promotions,
         warnings,
     })
 }
@@ -868,6 +876,7 @@ fn known_kind(value: &Value) -> Option<&'static str> {
         Some("cut") => Some("cut"),
         Some("dogear") => Some("dogear"),
         Some("resolve") => Some("resolve"),
+        Some("promotion") => Some("promotion"),
         _ => None,
     }
 }
@@ -880,7 +889,8 @@ fn parse_event(value: Value, known: Option<&'static str>) -> Result<LogEvent, Sc
             let ts = match &event {
                 LogEvent::Cut { ts, .. }
                 | LogEvent::Dogear { ts, .. }
-                | LogEvent::Resolve { ts, .. } => ts,
+                | LogEvent::Resolve { ts, .. }
+                | LogEvent::Promotion { ts, .. } => ts,
                 LogEvent::Unknown => unreachable!("unknown events are classified above"),
             };
             match ts.parse::<jiff::Timestamp>() {
@@ -928,6 +938,7 @@ fn resolution_from_event(event: &LogEvent) -> Resolution {
         amend,
         disposition,
         disposition_ts,
+        promotion,
         ..
     } = event
     else {
@@ -945,17 +956,28 @@ fn resolution_from_event(event: &LogEvent) -> Resolution {
         amended: *amend,
         disposition: *disposition,
         disposition_ts: disposition_ts.clone(),
+        promotion: promotion.clone(),
     }
 }
 
-/// The r48 invalid-resolution rules Phase 3 implements, in their permanent
-/// numbering, evaluated only for an event the fold has already joined to its
-/// record. Rules (4)–(6) cover the stored `promotion` field and are Phase 4.
-/// An orphan — a resolve joining to no record — is never evaluated.
-pub(crate) fn broken_resolution_rules(event: &LogEvent, record_kind: &str) -> Vec<&'static str> {
+/// The `sources[]` of every promotion in a folded log, keyed by promotion ID.
+/// Rules (5) and (6) below join against it, and `doctor` builds the same map
+/// while it scans so both answer a hand-edited log identically.
+pub type PromotionSources = HashMap<String, Vec<String>>;
+
+/// The six r48 invalid-resolution rules, in their permanent numbering, evaluated
+/// only for an event the fold has already joined to its record. An orphan — a
+/// resolve joining to no record — is never evaluated.
+pub(crate) fn broken_resolution_rules(
+    event: &LogEvent,
+    record_kind: &str,
+    promotions: &PromotionSources,
+) -> Vec<&'static str> {
     let LogEvent::Resolve {
+        id,
         disposition,
         disposition_ts,
+        promotion,
         ..
     } = event
     else {
@@ -970,6 +992,20 @@ pub(crate) fn broken_resolution_rules(event: &LogEvent, record_kind: &str) -> Ve
     }
     if disposition.is_some() != disposition_ts.is_some() {
         broken.push("disposition and disposition_ts must be present together");
+    }
+    if let Some(promotion) = promotion {
+        if *disposition != Some(crate::Disposition::Promoted) {
+            broken.push("a promotion link requires disposition promoted");
+        }
+        match promotions.get(promotion) {
+            None => broken.push("promotion link names no promotion in this log"),
+            // The mutual-link rule the CLI enforces on write, enforced here on
+            // read, so a hand-written one-way link never materializes.
+            Some(sources) if !sources.contains(id) => {
+                broken.push("promotion does not name this record as a source");
+            }
+            Some(_) => {}
+        }
     }
     broken
 }
@@ -990,6 +1026,7 @@ fn fold_records(bytes: &[u8]) -> BTreeMap<String, LogEvent> {
                 tags.sort();
                 tags.dedup();
             }
+            LogEvent::Promotion { sources, .. } => *sources = normalized(sources),
             LogEvent::Resolve { .. } | LogEvent::Unknown => continue,
         }
         let id = event.id().expect("parsed records have IDs").to_owned();
@@ -1062,6 +1099,18 @@ fn fold_bytes_inner(bytes: &[u8], collect_lines: bool) -> FoldResult {
                             counts.duplicate_dogears += 1;
                         }
                     }
+                    LogEvent::Promotion { sources, .. } => {
+                        // Sorted-unique on read as tags are, so the fold and the
+                        // hash agree about what the source set is.
+                        *sources = normalized(sources);
+                        let id = event.id().expect("parsed promotions have IDs").to_owned();
+                        if let std::collections::btree_map::Entry::Vacant(entry) = records.entry(id)
+                        {
+                            entry.insert(event);
+                        } else {
+                            counts.duplicate_promotions += 1;
+                        }
+                    }
                     // Resolve events are held back: validity is knowable only
                     // after the join to their record, and r50 requires the
                     // invalid ones to be discarded *before* winners are chosen,
@@ -1073,6 +1122,7 @@ fn fold_bytes_inner(bytes: &[u8], collect_lines: bool) -> FoldResult {
         }
     }
 
+    let promotion_sources = promotion_sources(&records);
     for event in resolve_events {
         let LogEvent::Resolve { id, ts, amend, .. } = &event else {
             unreachable!("only resolve events are held back")
@@ -1080,7 +1130,7 @@ fn fold_bytes_inner(bytes: &[u8], collect_lines: bool) -> FoldResult {
         let id = id.clone();
         let amend = *amend;
         if let Some(kind) = records.get(&id).and_then(record_kind)
-            && !broken_resolution_rules(&event, kind).is_empty()
+            && !broken_resolution_rules(&event, kind, &promotion_sources).is_empty()
         {
             // Discarded entirely: it materializes nothing and is counted only
             // in `skipped N invalid resolutions`, never as a duplicate or an
@@ -1140,6 +1190,7 @@ fn fold_bytes_inner(bytes: &[u8], collect_lines: bool) -> FoldResult {
     }
     let mut items: Vec<_> = records
         .values()
+        .filter(|record| !matches!(record, LogEvent::Promotion { .. }))
         .cloned()
         .map(|record| {
             let resolution = record
@@ -1173,12 +1224,37 @@ fn fold_bytes_inner(bytes: &[u8], collect_lines: bool) -> FoldResult {
     });
     let items = items.into_iter().map(|(item, _)| item).collect();
 
+    // Promotions order by `ts` descending then `id` ascending (r48), the same
+    // rule dogears follow; they are never interleaved with the two kinds above.
+    let mut promotions: Vec<_> = records
+        .values()
+        .filter(|record| matches!(record, LogEvent::Promotion { .. }))
+        .cloned()
+        .map(|record| {
+            let item = PromotionItem::from_record(record);
+            let timestamp = item
+                .ts
+                .parse::<jiff::Timestamp>()
+                .expect("folded promotions have valid RFC3339 timestamps");
+            (item, timestamp)
+        })
+        .collect();
+    promotions.sort_by(|(left, left_ts), (right, right_ts)| {
+        right_ts.cmp(left_ts).then_with(|| left.id.cmp(&right.id))
+    });
+    let promotions = promotions.into_iter().map(|(item, _)| item).collect();
+
     let mut warnings = Vec::new();
     warning(&mut warnings, counts.torn, "torn final line");
     warning(&mut warnings, counts.malformed, "malformed line");
     warning(&mut warnings, counts.unknown, "unknown event");
     warning(&mut warnings, counts.duplicate_cuts, "duplicate cut");
     warning(&mut warnings, counts.duplicate_dogears, "duplicate dogear");
+    warning(
+        &mut warnings,
+        counts.duplicate_promotions,
+        "duplicate promotion",
+    );
     warning(
         &mut warnings,
         counts.duplicate_resolves,
@@ -1192,6 +1268,7 @@ fn fold_bytes_inner(bytes: &[u8], collect_lines: bool) -> FoldResult {
     );
     FoldResult {
         items,
+        promotions,
         warnings,
         records,
         winning_amends,
@@ -1205,17 +1282,30 @@ fn record_kind(event: &LogEvent) -> Option<&'static str> {
     match event {
         LogEvent::Cut { .. } => Some("cut"),
         LogEvent::Dogear { .. } => Some("dogear"),
+        LogEvent::Promotion { .. } => Some("promotion"),
         LogEvent::Resolve { .. } | LogEvent::Unknown => None,
     }
+}
+
+/// The `sources[]` of every folded promotion, for rules (5) and (6).
+fn promotion_sources(records: &BTreeMap<String, LogEvent>) -> PromotionSources {
+    records
+        .iter()
+        .filter_map(|(id, event)| match event {
+            LogEvent::Promotion { sources, .. } => Some((id.clone(), sources.clone())),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The parsed timestamp of a record-carrying event. `parse_event` already
 /// rejected an unparseable one, so `None` only covers `Unknown`.
 fn event_timestamp(event: &LogEvent) -> Option<jiff::Timestamp> {
     match event {
-        LogEvent::Cut { ts, .. } | LogEvent::Dogear { ts, .. } | LogEvent::Resolve { ts, .. } => {
-            ts.parse().ok()
-        }
+        LogEvent::Cut { ts, .. }
+        | LogEvent::Dogear { ts, .. }
+        | LogEvent::Resolve { ts, .. }
+        | LogEvent::Promotion { ts, .. } => ts.parse().ok(),
         LogEvent::Unknown => None,
     }
 }

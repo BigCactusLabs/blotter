@@ -2361,3 +2361,63 @@ fn r42_marker_acceptance_does_not_reach_the_raw_layer() {
     std::fs::write(&file, "{\"kind\":\"cut\" /Users/~-x\n").unwrap();
     assert_eq!(leak_lines(&file, "/Users/alice"), [1]);
 }
+
+#[test]
+fn the_promotion_ref_and_note_are_redacted_before_hashing_and_append() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let home = std::path::PathBuf::from("/private/alice");
+    let home_text = home.to_string_lossy();
+    let cut = add_at(&file, "2026-07-01T00:00:00Z", "friction", &[]);
+    let cut = cut.data.record.cut_id().to_owned();
+
+    let artifact_ref = format!("{home_text}/skills/x.md");
+    let note = format!("token=AbcdEfgh1234IjklMnop5678 at {home_text}/notes");
+    let output = command()
+        .env("BLOTTER_NOW", "2026-07-02T00:00:00Z")
+        .env("HOME", &home)
+        .arg("--file")
+        .arg(&file)
+        .args([
+            "promote",
+            "--source",
+            &cut,
+            "--artifact-type",
+            "skill",
+            "--artifact-ref",
+            &artifact_ref,
+            "--note",
+            &note,
+            "--agent",
+            "tester",
+        ])
+        .output()
+        .unwrap();
+    let envelope: SuccessEnvelope<PromoteData> = success(&output);
+    let LogEvent::Promotion {
+        id,
+        artifact,
+        note: stored_note,
+        ..
+    } = &envelope.data.record
+    else {
+        panic!("promote returns a promotion")
+    };
+    assert_eq!(artifact.r#ref, "~/skills/x.md");
+    assert_eq!(stored_note.as_deref(), Some("<redacted> at ~/notes"));
+
+    // Redacted before the hash, so the ID is over the stored bytes (r48).
+    assert_eq!(
+        *id,
+        compute_promotion_id(
+            "2026-07-02T00:00:00.000Z",
+            "tester",
+            &[cut],
+            "skill",
+            "~/skills/x.md"
+        )
+    );
+    let stored = std::fs::read_to_string(&file).unwrap();
+    assert!(!stored.contains(home_text.as_ref()));
+    assert!(!stored.contains("AbcdEfgh1234IjklMnop5678"));
+}

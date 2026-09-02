@@ -155,7 +155,7 @@ fn dogear_kind_list_resolve_doctor_schema_and_filter_contract() {
         schema.data["commands"]["list"]["flags"]["--kind"]
             .as_str()
             .unwrap()
-            .contains("cut|dogear|all")
+            .contains("cut|dogear|promotion|all")
     );
 
     error(

@@ -5,6 +5,7 @@ pub mod doctor;
 pub mod dogear;
 pub mod export;
 pub mod list;
+pub mod promote;
 pub mod resolve;
 pub mod retrospect;
 pub mod schema;
@@ -30,6 +31,7 @@ pub fn run(cli: Cli, now: Timestamp) -> AppResult<i32> {
     match cli.command {
         Command::Add(args) => add::run(args, cli.file, cli.pretty, now),
         Command::Dogear(args) => dogear::run(args, cli.file, cli.pretty, now),
+        Command::Promote(args) => promote::run(args, cli.file, cli.pretty, now),
         Command::List(args) => list::run(args, cli.file, cli.pretty, now),
         Command::Export(args) => export::run(args, cli.file, cli.pretty, now),
         Command::Triage(args) => triage::run(args, cli.file, cli.pretty),
