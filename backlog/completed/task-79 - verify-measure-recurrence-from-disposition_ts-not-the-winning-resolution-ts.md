@@ -1,10 +1,10 @@
 ---
 id: TASK-79
 title: 'verify: measure recurrence from disposition_ts, not the winning resolution ts'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-02 03:14'
-updated_date: '2026-09-02 15:10'
+updated_date: '2026-09-02 20:38'
 labels:
   - v2
 dependencies: []
@@ -21,4 +21,6 @@ r48 §digest records this as a known follow-up: verify still measures recurrence
 
 <!-- SECTION:NOTES:BEGIN -->
 2026-09-02 progress-review ruling: this is part of the 1.0.0 bar, not a post-1.0 follow-up. It lands inside the TASK-77 (Phase 5) PR as its own commit, under amendment r51: verify partitions later open cuts against the winning resolution's disposition_ts, not its ts, so a note-only --amend never moves the recurrence boundary; and VerifyResolution exposes disposition_ts beside ts, because after a note-only amend a recurrence can legitimately predate the displayed resolution.ts and would otherwise look impossible to a consumer. Test in tests/cli/verify.rs: an amend that changes only the note leaves recurrences byte-identical; an amend that changes the disposition moves them.
+
+2026-09-02: landed separately from TASK-77 as PR #25 into v2 (commit-level: verify partitions on disposition_ts; resolution{} gains disposition and disposition_ts; schema/README/CHANGELOG carry the r52 'no recurrence observed' wording). Anchor eligibility stays with TASK-77.
 <!-- SECTION:NOTES:END -->

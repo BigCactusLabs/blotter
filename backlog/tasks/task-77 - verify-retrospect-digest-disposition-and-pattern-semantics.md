@@ -4,7 +4,7 @@ title: verify/retrospect/digest disposition and pattern semantics
 status: To Do
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-02 20:19'
+updated_date: '2026-09-02 20:38'
 labels:
   - v2
 dependencies:
@@ -33,4 +33,6 @@ r49 review correction: accepted_cuts is shaped {count}, like new_cuts and open_d
 3. TASK-71 is a precision gate, not an open-ended scoring project: after the admission-floor change, rerun the linked-pair measurement across several representative logs (see TASK-71 for the corpus and the v1-log caveat). If unrelated clusters are still produced materially, fix the linkage in this PR under r51's ceiling clause; if not, record the numbers in TASK-71 and close it without a code change. Either way the measurement is written down before Phase 6.
 
 - r52 (2026-09-02): verify's documentation, schema description and --format md text state an empty recurrence set as 'no recurrence observed after disposition_ts' — evidence the intervention held, never 'fixed', 'confirmed' or 'proven'. No envelope change. Land the schema wording in this PR with the disposition_ts boundary. README's retrospect paragraph (line ~182) still uses r27 vocabulary (wrapper_alias/doc_repair/skill_candidate); update it with the pattern/suggested change.
+
+2026-09-02: TASK-79 landed on its own as PR #25 rather than inside this PR. Already done there: disposition_ts boundary, resolution{disposition,disposition_ts}, schema/README verify wording per r52. Still in scope here: anchor eligibility (fixed|promoted only), retrospect pattern/suggested[], digest accepted_cuts, suggested_action removal, TASK-71 gate, README retrospect paragraph.
 <!-- SECTION:NOTES:END -->

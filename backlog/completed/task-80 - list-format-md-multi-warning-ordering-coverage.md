@@ -1,9 +1,10 @@
 ---
 id: TASK-80
 title: 'list --format md: multi-warning ordering coverage'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-02 03:14'
+updated_date: '2026-09-02 20:35'
 labels: []
 dependencies: []
 ordinal: 89000
