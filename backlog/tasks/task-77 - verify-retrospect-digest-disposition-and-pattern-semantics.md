@@ -4,7 +4,7 @@ title: verify/retrospect/digest disposition and pattern semantics
 status: To Do
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-02 02:22'
+updated_date: '2026-09-02 02:30'
 labels:
   - v2
 dependencies:
@@ -22,4 +22,6 @@ Phase 5 of docs/plans/2026-09-01-blotter-v2-plan.md. Last PR into v2 after TASK-
 
 <!-- SECTION:NOTES:BEGIN -->
 r49 (2026-09-01): the digest count field is named accepted_cuts, not accepted.
+
+r49 review correction: accepted_cuts is shaped {count}, like new_cuts and open_dogears.
 <!-- SECTION:NOTES:END -->

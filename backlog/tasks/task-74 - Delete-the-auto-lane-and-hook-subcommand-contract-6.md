@@ -4,7 +4,7 @@ title: Delete the auto lane and hook subcommand (contract 6)
 status: In Progress
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-02 02:22'
+updated_date: '2026-09-02 02:30'
 labels:
   - v2
   - breaking
@@ -24,4 +24,6 @@ Phase 2 of docs/plans/2026-09-01-blotter-v2-plan.md. First PR into the v2 integr
 
 <!-- SECTION:NOTES:BEGIN -->
 r49 (2026-09-01): replace the deleted no-op hook assertion with a test pinning hook exec claude-code → exit 2, empty stdout, clap unrecognized-subcommand stderr.
+
+r49 review correction: the hook test pins invalid_argument + the structured error envelope on stderr (r48 §hook), not bare clap text.
 <!-- SECTION:NOTES:END -->
