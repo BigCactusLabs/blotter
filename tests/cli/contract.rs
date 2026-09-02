@@ -1471,5 +1471,7 @@ fn every_v2_identity_is_twenty_hex() {
         "schema still publishes a 12-hex identity width"
     );
     assert_eq!(schema.data["id"]["cut"]["hex_digits"], 20);
+    assert_eq!(schema.data["id"]["cut"]["hash"], "SHA-256 first 10 bytes");
     assert_eq!(schema.data["id"]["dogear"]["hex_digits"], 20);
+    assert_eq!(schema.data["id"]["dogear"]["hash"], "SHA-256 first 10 bytes");
 }

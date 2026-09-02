@@ -232,9 +232,6 @@ pub fn resolve_at(file: &Path, now: &str, id: &str, args: &[&str]) -> SuccessEnv
     success(&cmd.output().unwrap())
 }
 
-/// A hand-written resolve line. A resolve targeting a cut must carry
-/// `disposition` and `disposition_ts` or the fold discards it as invalid, so the
-/// helper supplies them for cut-width IDs; a dogear-width ID must not carry one.
 /// A resolve line for a **cut**: it carries `disposition` and `disposition_ts`,
 /// without which the fold discards it as invalid. Every v2 identity is one
 /// width (r51), so the kind cannot be read off the ID.
