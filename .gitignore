@@ -3,3 +3,8 @@
 .DS_Store
 /.claude/
 __pycache__/
+
+# Internal working notes: kept locally, not part of the public surface.
+/docs/archive/
+/docs/research/
+/docs/plans/2026-09-01-blotter-v2-plan.md
