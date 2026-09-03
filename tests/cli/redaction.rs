@@ -91,7 +91,7 @@ fn add_text_keeps_secret_shaped_authored_content() {
             record["ts"].as_str().unwrap(),
             "tester",
             text,
-            Severity::Minor,
+            Impact::Low,
             &[]
         )
     );
@@ -196,6 +196,8 @@ fn leading_hyphen_evidence_and_resolve_note_work_through_binary() {
             .arg(&file)
             .args([
                 "resolve",
+                "--disposition",
+                "fixed",
                 added.data.record.cut_id(),
                 "--agent",
                 "fixer",
@@ -340,13 +342,14 @@ fn generic_home_paths_require_a_token_start_in_evidence_and_doctor() {
         .map(|path| {
             let text = format!("path {path}");
             json!({
+                "v": 2,
                 "kind": "cut",
-                "id": compute_id(NOW, "tester", &text, Severity::Minor, &[]),
+                "id": compute_id(NOW, "tester", &text, Impact::Low, &[]),
                 "ts": NOW,
                 "agent": "tester",
                 "text": text,
                 "tags": [],
-                "severity": "minor",
+                "impact": "low",
                 "cwd": "."
             })
             .to_string()
@@ -407,13 +410,14 @@ fn colon_separated_path_lists_rewrite_every_home_in_evidence_and_doctor() {
         .iter()
         .map(|text| {
             json!({
+                "v": 2,
                 "kind": "cut",
-                "id": compute_id(NOW, "tester", text, Severity::Minor, &[]),
+                "id": compute_id(NOW, "tester", text, Impact::Low, &[]),
                 "ts": NOW,
                 "agent": "tester",
                 "text": text,
                 "tags": [],
-                "severity": "minor",
+                "impact": "low",
                 "cwd": "."
             })
             .to_string()
@@ -471,13 +475,14 @@ fn home_forms_nested_in_a_redacted_token_tail_agree_with_doctor() {
         .iter()
         .map(|text| {
             json!({
+                "v": 2,
                 "kind": "cut",
-                "id": compute_id(NOW, "tester", text, Severity::Minor, &[]),
+                "id": compute_id(NOW, "tester", text, Impact::Low, &[]),
                 "ts": NOW,
                 "agent": "tester",
                 "text": text,
                 "tags": [],
-                "severity": "minor",
+                "impact": "low",
                 "cwd": "."
             })
             .to_string()
@@ -823,15 +828,16 @@ fn add_help_describes_stderr_redaction_as_best_effort() {
 fn doctor_leaks_reports_home_paths() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("leaking.jsonl");
-    let id = compute_id(NOW, "tester", "leaking", Severity::Minor, &[]);
+    let id = compute_id(NOW, "tester", "leaking", Impact::Low, &[]);
     let record = json!({
+        "v": 2,
         "kind": "cut",
         "id": id,
         "ts": NOW,
         "agent": "tester",
         "text": "leaking",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/Users/alice/private/repo"
     });
     std::fs::write(&file, format!("{record}\n")).unwrap();
@@ -952,15 +958,16 @@ fn doctor_leaks_still_reports_real_usernames_after_a_generic_home_prefix() {
 }
 
 fn leak_record(cwd: &str) -> serde_json::Value {
-    let id = compute_id(NOW, "tester", cwd, Severity::Minor, &[]);
+    let id = compute_id(NOW, "tester", cwd, Impact::Low, &[]);
     json!({
+        "v": 2,
         "kind": "cut",
         "id": id,
         "ts": NOW,
         "agent": "tester",
         "text": cwd,
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": cwd
     })
 }
@@ -1077,13 +1084,13 @@ fn add_and_dogear_redact_home_text_before_identity_hashing() {
                 add_record["ts"].as_str().unwrap(),
                 "tester",
                 expected,
-                Severity::Minor,
+                Impact::Low,
                 &[]
             )
         );
         let stored_add: Value =
             serde_json::from_str(&std::fs::read_to_string(&add_file).unwrap()).unwrap();
-        assert_eq!(stored_add, add_record);
+        assert_eq!(stored_add, stored_line(&add_record));
 
         let dogear_file = temp.path().join(format!("{name}-dogear.jsonl"));
         let dogear: SuccessEnvelope<Value> = success(
@@ -1108,7 +1115,7 @@ fn add_and_dogear_redact_home_text_before_identity_hashing() {
         );
         let stored_dogear: Value =
             serde_json::from_str(&std::fs::read_to_string(&dogear_file).unwrap()).unwrap();
-        assert_eq!(stored_dogear, dogear_record);
+        assert_eq!(stored_dogear, stored_line(&dogear_record));
     }
 }
 
@@ -1136,7 +1143,7 @@ fn add_and_dogear_preserve_non_home_text_and_identity() {
             add_record["ts"].as_str().unwrap(),
             "tester",
             text,
-            Severity::Minor,
+            Impact::Low,
             &[]
         )
     );
@@ -1227,15 +1234,16 @@ fn doctor_leaks_conflicts_with_fix_modes() {
 fn doctor_leaks_is_clean_without_paths_and_deny_matches_literals() {
     let temp = TempDir::new().unwrap();
     let clean = temp.path().join("clean.jsonl");
-    let clean_id = compute_id(NOW, "tester", "clean", Severity::Minor, &[]);
+    let clean_id = compute_id(NOW, "tester", "clean", Impact::Low, &[]);
     let clean_record = json!({
+        "v": 2,
         "kind": "cut",
         "id": clean_id,
         "ts": NOW,
         "agent": "tester",
         "text": "clean",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "~"
     });
     std::fs::write(&clean, format!("{clean_record}\n")).unwrap();
@@ -1249,15 +1257,16 @@ fn doctor_leaks_is_clean_without_paths_and_deny_matches_literals() {
     assert!(doctor_response(&clean_output, 0).data.findings.is_empty());
 
     let denied = temp.path().join("denied.jsonl");
-    let denied_id = compute_id(NOW, "tester", "literal credential", Severity::Minor, &[]);
+    let denied_id = compute_id(NOW, "tester", "literal credential", Impact::Low, &[]);
     let denied_record = json!({
+        "v": 2,
         "kind": "cut",
         "id": denied_id,
         "ts": NOW,
         "agent": "tester",
         "text": "literal credential",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "~"
     });
     std::fs::write(&denied, format!("{denied_record}\n")).unwrap();
@@ -1470,6 +1479,8 @@ fn dogear_evidence_and_resolve_note_run_the_secret_span_pass() {
             .arg(&file)
             .args([
                 "resolve",
+                "--disposition",
+                "fixed",
                 &id,
                 "--agent",
                 "tester",
@@ -1509,7 +1520,16 @@ fn resolve_dry_run_note_reports_the_same_bytes_an_apply_stores() {
             .env("HOME", home)
             .arg("--file")
             .arg(&file)
-            .args(["resolve", &id, "--agent", "tester", "--dry-run", "--note"])
+            .args([
+                "resolve",
+                "--disposition",
+                "fixed",
+                &id,
+                "--agent",
+                "tester",
+                "--dry-run",
+                "--note",
+            ])
             .arg(&note)
             .output()
             .unwrap(),
@@ -1523,7 +1543,15 @@ fn resolve_dry_run_note_reports_the_same_bytes_an_apply_stores() {
             .env("HOME", home)
             .arg("--file")
             .arg(&file)
-            .args(["resolve", &id, "--agent", "tester", "--note"])
+            .args([
+                "resolve",
+                "--disposition",
+                "fixed",
+                &id,
+                "--agent",
+                "tester",
+                "--note",
+            ])
             .arg(&note)
             .output()
             .unwrap(),
@@ -1555,7 +1583,15 @@ fn resolve_note_is_redacted_in_the_base_event_and_in_an_amend() {
             .env("HOME", home)
             .arg("--file")
             .arg(&file)
-            .args(["resolve", &id, "--agent", "tester", "--note"])
+            .args([
+                "resolve",
+                "--disposition",
+                "fixed",
+                &id,
+                "--agent",
+                "tester",
+                "--note",
+            ])
             .arg(&base_note)
             .output()
             .unwrap(),
@@ -1611,7 +1647,15 @@ fn resolve_note_without_a_home_path_stays_byte_identical() {
             .env("HOME", "/private/alice")
             .arg("--file")
             .arg(&file)
-            .args(["resolve", &id, "--agent", "tester", "--note"])
+            .args([
+                "resolve",
+                "--disposition",
+                "fixed",
+                &id,
+                "--agent",
+                "tester",
+                "--note",
+            ])
             .arg(note)
             .output()
             .unwrap(),
@@ -1968,14 +2012,14 @@ fn doctor_leaks_accepts_a_marker_before_a_generic_dash_prefix() {
 // `\/`, so the decoded value holds a home path that never appears as literal
 // bytes on the physical line. Valid JSON; blotter's own encoder never writes it.
 fn escaped_leak_line(text: &str) -> String {
-    let id = compute_id(NOW, "tester", text, Severity::Minor, &[]);
+    let id = compute_id(NOW, "tester", text, Impact::Low, &[]);
     let escaped = text
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
         .replace('\n', "\\n")
         .replace('/', "\\/");
     format!(
-        "{{\"kind\":\"cut\",\"id\":\"{id}\",\"ts\":\"{NOW}\",\"agent\":\"tester\",\"text\":\"{escaped}\",\"tags\":[],\"severity\":\"minor\",\"cwd\":\"/tmp/x\"}}"
+        "{{\"v\":2,\"kind\":\"cut\",\"id\":\"{id}\",\"ts\":\"{NOW}\",\"agent\":\"tester\",\"text\":\"{escaped}\",\"tags\":[],\"impact\":\"low\",\"cwd\":\"/tmp/x\"}}"
     )
 }
 
@@ -2071,9 +2115,9 @@ fn doctor_leaks_scans_unknown_fields_on_a_valid_line() {
     // r24 has unknown stored values pass through opaquely, so the decoded scan
     // walks the parsed value rather than the typed record: a field a future
     // release adds is covered without a change here.
-    let id = compute_id(NOW, "tester", "note", Severity::Minor, &[]);
+    let id = compute_id(NOW, "tester", "note", Impact::Low, &[]);
     let line = format!(
-        "{{\"kind\":\"cut\",\"id\":\"{id}\",\"ts\":\"{NOW}\",\"agent\":\"tester\",\"text\":\"note\",\"tags\":[],\"severity\":\"minor\",\"cwd\":\"/tmp/x\",\"future_field\":\"\\/Users\\/alice\"}}"
+        "{{\"v\":2,\"kind\":\"cut\",\"id\":\"{id}\",\"ts\":\"{NOW}\",\"agent\":\"tester\",\"text\":\"note\",\"tags\":[],\"impact\":\"low\",\"cwd\":\"/tmp/x\",\"future_field\":\"\\/Users\\/alice\"}}"
     );
     std::fs::write(&file, format!("{line}\n")).unwrap();
     assert_eq!(leak_lines(&file, "/Users/alice"), [1]);
@@ -2293,14 +2337,14 @@ fn doctor_leaks_scans_a_home_path_nested_in_an_unknown_structure() {
     let temp = TempDir::new().unwrap();
     // The decoded walk descends: an unknown field's inner objects, arrays, and
     // object keys are scanned at every depth, not just the line's top level.
-    let id = compute_id(NOW, "tester", "note", Severity::Minor, &[]);
+    let id = compute_id(NOW, "tester", "note", Impact::Low, &[]);
     for (name, field) in [
         ("nested_value", "{\"a\":[{\"b\":\"\\/Users\\/alice\"}]}"),
         ("nested_key", "{\"a\":[{\"\\/Users\\/alice\":\"b\"}]}"),
     ] {
         let file = temp.path().join(format!("{name}.jsonl"));
         let line = format!(
-            "{{\"kind\":\"cut\",\"id\":\"{id}\",\"ts\":\"{NOW}\",\"agent\":\"tester\",\"text\":\"note\",\"tags\":[],\"severity\":\"minor\",\"cwd\":\"/tmp/x\",\"future_field\":{field}}}"
+            "{{\"v\":2,\"kind\":\"cut\",\"id\":\"{id}\",\"ts\":\"{NOW}\",\"agent\":\"tester\",\"text\":\"note\",\"tags\":[],\"impact\":\"low\",\"cwd\":\"/tmp/x\",\"future_field\":{field}}}"
         );
         std::fs::write(&file, format!("{line}\n")).unwrap();
         assert_eq!(leak_lines(&file, "/Users/alice"), [1], "{name}");
@@ -2316,4 +2360,64 @@ fn r42_marker_acceptance_does_not_reach_the_raw_layer() {
     // component still reports on a line that does not parse.
     std::fs::write(&file, "{\"kind\":\"cut\" /Users/~-x\n").unwrap();
     assert_eq!(leak_lines(&file, "/Users/alice"), [1]);
+}
+
+#[test]
+fn the_promotion_ref_and_note_are_redacted_before_hashing_and_append() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let home = std::path::PathBuf::from("/private/alice");
+    let home_text = home.to_string_lossy();
+    let cut = add_at(&file, "2026-07-01T00:00:00Z", "friction", &[]);
+    let cut = cut.data.record.cut_id().to_owned();
+
+    let artifact_ref = format!("{home_text}/skills/x.md");
+    let note = format!("token=AbcdEfgh1234IjklMnop5678 at {home_text}/notes");
+    let output = command()
+        .env("BLOTTER_NOW", "2026-07-02T00:00:00Z")
+        .env("HOME", &home)
+        .arg("--file")
+        .arg(&file)
+        .args([
+            "promote",
+            "--source",
+            &cut,
+            "--artifact-type",
+            "skill",
+            "--artifact-ref",
+            &artifact_ref,
+            "--note",
+            &note,
+            "--agent",
+            "tester",
+        ])
+        .output()
+        .unwrap();
+    let envelope: SuccessEnvelope<PromoteData> = success(&output);
+    let LogEvent::Promotion {
+        id,
+        artifact,
+        note: stored_note,
+        ..
+    } = &envelope.data.record
+    else {
+        panic!("promote returns a promotion")
+    };
+    assert_eq!(artifact.r#ref, "~/skills/x.md");
+    assert_eq!(stored_note.as_deref(), Some("<redacted> at ~/notes"));
+
+    // Redacted before the hash, so the ID is over the stored bytes (r48).
+    assert_eq!(
+        *id,
+        compute_promotion_id(
+            "2026-07-02T00:00:00.000Z",
+            "tester",
+            &[cut],
+            "skill",
+            "~/skills/x.md"
+        )
+    );
+    let stored = std::fs::read_to_string(&file).unwrap();
+    assert!(!stored.contains(home_text.as_ref()));
+    assert!(!stored.contains("AbcdEfgh1234IjklMnop5678"));
 }

@@ -958,7 +958,7 @@ Also breaking, restated for a consumer's checklist: `meta.contract` 5 → 6; `se
 
 ### r49 (2026-09-01, corrective: `origin` trimmed to a seam, `digest.accepted` renamed, the upgrade refusal named as product surface)
 
-Corrective: envelope `meta.contract` stays 6. r48 is unreleased and no binary carries contract 6 yet, so this amends r48 in place before Phase 3 implements the record model. It supersedes r48's `origin` section and r48's `digest` field name; every other r48 rule stands as written. Prompted by the 2026-09-01 progress review (`docs/plans/blotter-v2-progress-review-feedback-2026-09-01.md`, §14–§16).
+Corrective: envelope `meta.contract` stays 6. r48 is unreleased and no binary carries contract 6 yet, so this amends r48 in place before Phase 3 implements the record model. It supersedes r48's `origin` section and r48's `digest` field name; every other r48 rule stands as written. Prompted by the 2026-09-01 progress review (`docs/archive/blotter-v2-progress-review-feedback-2026-09-01.md`, §14–§16).
 
 #### `origin`, restated
 
@@ -1021,3 +1021,99 @@ The "winning resolution" an amend copies `disposition` and `disposition_ts` from
 - **The refusal message.** `message` names the offending line number and what was found; the resolved path lives in `details.file` and in `suggested_fix`. `sweep` prefixes the message with the path itself, and a message that also carried the path would name it twice in that warning.
 - **Digest widths.** r48's sentence that the three digest widths are "what keeps the three ID namespaces provably disjoint" overclaims. Domain separation comes from the `bl2` literal and the kind field inside the hash — the same unambiguous-encoding rationale TupleHash formalizes (NIST SP 800-185 §5.1) and the domain-separation role of a cSHAKE customization string (§3.5); the framing itself is a u32-LE byte-length prefix over SHA-256, not TupleHash. The widths make full IDs unequal by length and nothing more, and a full cut ID can still prefix-match a longer dogear ID, which the r48 prefix rule already answers with `ambiguous_id`. An exact full-ID match takes no precedence: the answer is `ambiguous_id` even for a complete ID, and the affected cut cannot be resolved until the colliding record leaves the log. Recorded for the 48-bit cut ID: the birthday collision expectation is about 2×10⁻⁵ at 10⁵ cuts and about 2×10⁻³ at 10⁶, acceptable for a non-adversarial local ledger and a bounded, stated choice rather than an unstated one.
 - **`origin` mechanism.** The r49 read rules are plain serde behaviour for a typed three-member struct with unknown fields ignored: a `null` optional member reads as absent and a non-string member fails the line. `origin` is **not** modelled as an opaque JSON value, which would carry unknown members into envelopes against the published-members promise, and is **not** flattened into the record. A later amendment that publishes an `origin` member with a shape a plain optional cannot read leniently declares a lenient deserializer for it; r49's read-as-absent rule is the contract, this is how it is met.
+
+### r51 (2026-09-02, corrective: one identity width, recurrence measured from `disposition_ts`, `suggested_action` withdrawn, the linkage ceiling made a gate)
+
+Corrective: envelope `meta.contract` stays 6. r48 is unreleased and no binary carries contract 6, so this amends r48 in place. It supersedes the digest-width column of r48's identity table, r50's 48-bit birthday note, r16's recurrence boundary for `verify`, and the `suggested_action` member of the `triage` and `digest` envelopes. Every other rule of r48, r49 and r50 stands as written. Prompted by the 2026-09-02 progress review of the `v2` tree after Phase 3 landed (recorded in `docs/plans/2026-09-01-blotter-v2-plan.md` §12).
+
+#### Identity: one width
+
+Every v2 identity is the **first 10 bytes** of its `bl2` digest, rendered as **`bl_` + 20 lowercase hex**. The field orders, the u32-LE framing, the `bl2` literal, the kind field and the tag/source normalization rules are exactly as r48 states them; only the digest column changes:
+
+| kind | fields in order | digest | id |
+|---|---|---|---|
+| cut | `bl2`, `cut`, `ts`, `agent`, `text`, `impact`, decimal tag count, each sorted-unique tag as its own field | first 10 bytes | `bl_` + 20 lowercase hex |
+| dogear | `bl2`, `dogear`, `ts`, `agent`, `text`, decimal tag count, each sorted-unique tag as its own field | first 10 bytes | `bl_` + 20 lowercase hex |
+| promotion | `bl2`, `promotion`, `ts`, `agent`, decimal source count, each sorted-unique source id as its own field, `artifact.type`, `artifact.ref` | first 10 bytes | `bl_` + 20 lowercase hex |
+
+The r48 promotion example (`"id":"bl_<16 lowercase hex>"`, 12-hex `sources`) is superseded by this table and reads at 20 hex; Phase 4's `promote` test pins it.
+
+Why. The three widths (12 / 16 / 20 hex) were residue from the r6 era, when width was the mechanism keeping the namespaces disjoint. r50 already withdrew that claim: domain separation comes from the `bl2` literal and the kind field inside the hash, and the widths made full IDs unequal by length and nothing more. What the widths still did was harm: under r48's single prefix-resolution rule, where ambiguity is decided before kind and an exact full ID takes no precedence, a complete 12-hex cut ID could be the prefix of a 20-hex dogear ID, and r50 accepted that the cut then could not be resolved until the colliding record left the log. At one width a full ID is never a proper prefix of another full ID, so that case cannot arise and needs no rule. The collision budget also stops being a stated trade-off: at 80 bits the birthday expectation is about 4×10⁻¹³ at 10⁶ records, so r50's 48-bit note (2×10⁻⁵ at 10⁵, 2×10⁻³ at 10⁶) is withdrawn rather than carried into a deliberate breaking release. Prefix use is unchanged: callers still pass ≥4 hex digits and the rule answers as r48 states.
+
+A cut written under r48's 6-byte width and a cut written under this rule with the same fields have different IDs. No released binary wrote a 12-hex `bl_` cut under the `bl2` framing; the 12-hex `bl_` cuts that 0.13–0.15 wrote are v1 records, which a v2 binary refuses whole (r48), so no compatibility rule is needed. The `v2` integration branch has no consumers.
+
+`schema` publishes the table above, one width for all three kinds, and its record examples read `bl_<20 lowercase hex>` for `cut`, `dogear`, `resolve` and `promotion`. Every v2 fixture, golden file and documentation example in the repository carries 20-hex IDs (a fixture whose purpose is to be a v1 or pre-framing record keeps its historical width, because the width is what the test is about); a contract test pins the width for the two kinds that exist before Phase 4 and Phase 4's test pins the third.
+
+#### `verify` measures recurrence from `disposition_ts`
+
+Supersedes r16's boundary. `verify` partitions later open cuts against the winning resolution's **`disposition_ts`**, not its `ts`. Linkage, the strictly-after rule, ordering, `count`, `distinct_recurring_cuts`, `scanned`, anchor eligibility (r48: winning disposition `fixed` or `promoted`) and the exit convention are unchanged; only the instant the "strictly after" comparison reads moves.
+
+Why. r48 gave every cut resolve event a `disposition_ts`: the instant the disposition was decided, inherited unchanged by an amend that does not re-decide it. A note-only `--amend` therefore changes `ts` and leaves `disposition_ts` where it was. Under r16 that amend moved the recurrence boundary forward, so an open cut logged between the fix and the note stopped counting as a recurrence even though nothing about the fix had changed. `digest.accepted_cuts` already reads `disposition_ts` (r48); this makes `verify` read the same moment, which r48 §digest recorded as the outstanding inconsistency.
+
+The `verify` envelope's `resolution{}` becomes `{ts,disposition,disposition_ts,task?,pr?,commit?}` (r48 added `disposition`; this adds `disposition_ts`). It is exposed because after a note-only amend a recurrence's `first_recurrence_ts` can legitimately precede the displayed `resolution.ts`, and a consumer shown only `ts` would read that as impossible. `schema` names `disposition_ts` as the boundary.
+
+Test shape: an amend that changes only the note leaves the `verify` envelope byte-identical apart from `resolution.ts`; an amend that changes the disposition moves both `disposition_ts` and the recurrence set.
+
+#### `suggested_action` withdrawn
+
+The `triage` cluster and the `digest.chronic` cluster lose `suggested_action`. The cluster shape becomes `{count,occurrences,ids,tags,text,origin?}`. `--format md` prints no action line. No replacement member is added and the value is not renamed to `promote`.
+
+Why. The field carried one constant, `graduate`, from the era when the only imagined response to chronic friction was a hand-off. r48 separates three things that the constant conflated: `triage` detects chronic friction, `retrospect` interprets a pattern and suggests interventions from the artifact vocabulary, and `promote` records a judgment that one was made. A raw triage cluster instructing an agent to institutionalize something skips the two steps in between, and a constant that never varies is not information. Removing it is the same subtraction r48's Non-goals apply elsewhere.
+
+#### The linkage ceiling is a Phase 5 gate
+
+r44's local-rarity ceiling, `max(2, ceil(N / 4))`, stands as normative text (reshaped by r53). Before contract 6 ships, its precision is **measured, not assumed**: linked pairs over several representative logs, after the admission floor, with the count of pairs that share no friction recorded beside the count that do. If unrelated clusters are still produced materially, the ceiling is reshaped by a further amendment in the same release and this clause records the numbers that justified it; if not, the numbers are recorded in TASK-71 and the ceiling stays. The gate exists because `retrospect` consumes the same clustering at a threshold of two linked records, so a false rare-token link is no longer a cosmetic triage defect but an input to the promotion layer. Fixture-scale behaviour is a constraint on any reshaping: the N=2 reworded-repeat case must still link.
+
+### r52 (2026-09-02, design language: promotion is a trust boundary, recurrence is correlated evidence, `verify` reports a negative result)
+
+Design-language amendment: envelope `meta.contract` stays 6, and no record shape, envelope member, exit code or command changes. It adds three rules to the design language that r48 left implicit, so that a later release cannot drift past them without a further amendment. Every rule of r48–r51 stands as written. Prompted by the frontier corroboration pass recorded in `docs/research/2026-09-02-v2-frontier-corroboration.md`, whose sources were verified against their live text before this amendment was written (recorded in `docs/plans/2026-09-01-blotter-v2-plan.md` §13); the note is opinion, and only the rules below survived that check.
+
+#### Promotion is an explicit trust boundary
+
+A derived view may recommend an intervention; nothing in blotter creates durable learning from a derived view. Concretely: `retrospect` and `triage` are read-only and never append a `promotion`; `promote` is the only writer of one; and no blotter command, hook or default calls `promote`. The `sources[]` of a promotion is the provenance of a judgment an agent or user made, never the output of a threshold.
+
+Why. The experience-to-instruction step is where a self-evolving skill system can be poisoned: Chen et al. (arXiv 2608.05563) show that repeated, causally framed, domain-aligned trajectories can satisfy a promotion rule that looks for behaviour that is "causally useful, recurrent, and generalizable", and argue that defenses "should therefore treat evidence promotion as a provenance-sensitive authorization decision"; Ying et al. (arXiv 2608.03509) show that extraction launders detectability (an LLM judge flagged 98.5% of poisoned raw trajectories but 11.4% of the skills extracted from them) and that 80.0% of skill-path attacks still fire after the poisoned trajectories are deleted. r48 already makes `promote` an explicit mutation and pins its sources against `archive`; this rule states why those two choices are load-bearing and forbids the automatic path by name. Automatic promotion, an LLM promotion gate and a promotion confidence score remain Non-goals.
+
+#### Recurrence is evidence, not independent corroboration
+
+A triage cluster or a `retrospect` candidate counts records that share friction; it does not establish that those records are independent. Three cuts induced by one stale instruction, one shared prompt or one agent's narrow context are one observation repeated, and the design treats them as such: recurrence supports promotion only insofar as the judgment behind `promote` finds the evidence independent and generalizable. Nothing in the contract measures that independence, and nothing will for 1.0.0: an independence or provenance-diversity score is a Non-goal, and `sources[]`, `origin`, `agent` and timestamps already carry the provenance a later reader would need.
+
+Why. Qi, Xu and Li (arXiv 2607.02579) name the failure as false promotion from correlated traces, where "the same claim may be copied from a shared source, induced by a shared prompt, stale under a new environment, or valid only in a narrower scope", and answer it with dependency-aware support and a promote / reject / needs-review decision. Blotter's answer is the same decision made by a reader with the provenance in front of them, not a classifier. This is also why r51 made the r44 linkage ceiling a measured gate: a false link at a threshold of two manufactures apparent recurrence, and under this rule that is an input to the trust boundary above.
+
+#### `verify` reports a negative result, not a proof
+
+An anchor with no later linked open cut means no recurrence was observed in the log after `disposition_ts`. It is evidence that the intervention held; it is not proof that the friction is fixed, because the opportunity to meet it again may not have arisen. Documentation, `schema` descriptions and the `--format md` text for `verify` state the result in those terms and never as "fixed", "confirmed" or "proven". The envelope is unchanged: the absence is the empty recurrence set r45 already reports, and no member is added to name it. The `schema` wording landed with r51's `disposition_ts` boundary (TASK-79, PR #25).
+
+Why. Xiong et al. (ACL 2026, `2026.acl-long.27`) find that "future task evaluations can serve as free quality labels for stored memory", which is the role `verify` plays for a promotion — later outcomes are the evidence, and later outcomes are only ever a sample. The ACL result also carries a caution the other way: retained experience steers later behaviour and "inaccuracies in past experiences compound", so a `verify` result read as a proof would itself become the kind of misleading retained experience the admission floor exists to keep out.
+
+#### What this amendment does not change
+
+The admission floor (r48) stands on its policy direction, not on an effect size, and this amendment adds no evidence for its magnitude. The strongest dissent found in the same pass, Databricks' 2026-04-10 memory-scaling result (raw conversation logs filtered by an LLM judge rising past an expert-curated instruction set), still selects — the judge is the admission step — and shows automated admission beating hand curation for a retrieval memory, not unfiltered retention beating either; blotter refuses the automated judge on policy grounds recorded in r48 and Non-goals, and its cuts are claims about a repository, not retrievable task memory. The dissent is recorded so the next reader does not mistake the floor for a settled empirical result.
+
+### r53 (2026-09-02, corrective: the local-rarity ceiling is `max(2, ceil(N / 16))`)
+
+Corrective: envelope `meta.contract` stays 6, and no record shape, envelope member, exit code or command changes. It supersedes the ceiling value in r19 and r44's local-rarity rule and discharges r51's Phase 5 gate. Every other rule of r19, r44 and r48–r52 stands as written. Prompted by the gate measurement recorded in `docs/research/2026-09-02-task71-linkage-precision.md` (TASK-71, TASK-77).
+
+#### The rule
+
+A token is locally rare when it occurs in no more than **`max(2, ceil(N / 16))`** candidates, counted as r19 counts them. Three shared locally rare tokens still link two candidates whose tags match; the overlap-coefficient path, the stopword list, the token filter, the exact-title rule and the tag precondition are unchanged. The floor of 2 stands: a token shared by the two candidates under test always has document frequency at least 2, and below N = 32 the ceiling is the floor, so on a small log a shared token counts only when it occurs in no other open cut.
+
+#### The numbers that justified it
+
+Measured with the contract-5 binary over five v1 logs (the v2 binary refuses them; the linkage rules are identical), every linked pair hand-judged as the same friction or not:
+
+| divisor | linked pairs | related | unrelated | unrelated share | related clusters (of 11): intact / reduced / lost |
+|---|---:|---:|---:|---:|---|
+| 4 (r44) | 71 | 23 | 48 | 67.6% | 11 / 0 / 0 |
+| 8 | 50 | 21 | 29 | 58.0% | 10 / 1 / 0 |
+| **16** | 29 | 19 | 10 | 34.5% | 6 / 2 / 3 |
+| 32 | 15 | 10 | 5 | 33.3% | 3 / 2 / 6 |
+| constant ceiling 2 | 7 | 4 | 3 | 42.9% | 2 / 2 / 7 |
+| constant ceiling 3 | 11 | 6 | 5 | 45.5% | 3 / 3 / 5 |
+| idf-weighted sum, best threshold | 39 | 21 | 18 | 46.2% | 8 / 2 / 1 |
+
+The worst clusters under r44 were same-tag cuts sharing three generic domain tokens (`backlog`/`task`, `clippy`/`gate`/`test`, `test`/`fixture`) that described different defects. Two thirds of what the rule linked was not the same friction, and under r52 a false link at `retrospect`'s two-record threshold is an input to the trust boundary, so the share was material and the ceiling is reshaped rather than kept. Divisor 16 removes 79% of the unrelated pairs for 17% of the related ones. Divisor 32 and the constant ceilings lose half or more of the related clusters for no useful gain in precision. The weighted sum reaches worse precision than divisor 16, needs the candidate index reworked to match it, and is complexity the simplicity bar does not buy for that result. The residual third is same-tag cuts sharing specific domain vocabulary; it is the limit of a lexical rule on logs written before the r48 admission floor, and a v2 log is expected to be cleaner without being clean.
+
+Fixture-scale behaviour is unchanged by construction: the N=2 reworded-repeat case still links under the floor, and no existing test in the tree depends on a ceiling above the floor, which is why a new test pins the value — a corpus where a token occurring in one further open cut was rare under divisor 4 and is not under divisor 16.
+
+`schema`'s `triage` semantics keep stating the rule as "3 shared locally rare tokens"; the README states the ceiling with the new divisor. The gate clause in r51 is discharged and TASK-71 closes with this amendment.

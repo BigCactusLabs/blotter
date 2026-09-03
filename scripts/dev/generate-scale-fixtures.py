@@ -57,16 +57,16 @@ def content_id(fields, digest_bytes):
     return "bl_" + digest.digest()[:digest_bytes].hex()
 
 
-def cut_id(ts, agent, text, severity, tags):
+def cut_id(ts, agent, text, impact, tags):
     tags = normalized_tags(tags)
     return content_id(
-        ["bl1", "cut", ts, agent, text, severity, str(len(tags)), *tags], 6
+        ["bl2", "cut", ts, agent, text, impact, str(len(tags)), *tags], 10
     )
 
 
 def dogear_id(ts, agent, text, tags):
     tags = normalized_tags(tags)
-    return content_id(["bl1", "dogear", ts, agent, text, str(len(tags)), *tags], 10)
+    return content_id(["bl2", "dogear", ts, agent, text, str(len(tags)), *tags], 10)
 
 
 def json_line(record):
@@ -89,14 +89,16 @@ class FixtureBuilder:
         ts = self.next_timestamp()
         tags = normalized_tags(tags)
         record = {
+            "v": 2,
             "kind": "cut",
-            "id": cut_id(ts, AGENT, text, "minor", tags),
+            "id": cut_id(ts, AGENT, text, "low", tags),
             "ts": ts,
             "agent": AGENT,
             "text": text,
             "tags": tags,
-            "severity": "minor",
+            "impact": "low",
             "cwd": ".",
+            "origin": {"type": "agent"},
         }
         self.lines.append(json_line(record))
         self.composition[bucket] += 1
@@ -106,6 +108,7 @@ class FixtureBuilder:
         ts = self.next_timestamp()
         tags = normalized_tags(tags)
         record = {
+            "v": 2,
             "kind": "dogear",
             "id": dogear_id(ts, AGENT, text, tags),
             "ts": ts,
@@ -113,18 +116,23 @@ class FixtureBuilder:
             "text": text,
             "tags": tags,
             "cwd": ".",
+            "origin": {"type": "agent"},
         }
         self.lines.append(json_line(record))
         self.composition["dogear_events"] += 1
         return record
 
     def add_resolve(self, cut, note):
+        ts = self.next_timestamp()
         record = {
+            "v": 2,
             "kind": "resolve",
             "id": cut["id"],
-            "ts": self.next_timestamp(),
+            "ts": ts,
             "agent": AGENT,
             "note": note,
+            "disposition": "fixed",
+            "disposition_ts": ts,
         }
         self.lines.append(json_line(record))
         self.composition["resolve_events"] += 1
@@ -206,9 +214,13 @@ def build_fixture(size):
         builder.add_existing(record, "duplicate_resolve_events")
 
     malformed = (
-        '{"kind":"cut","id":"bl_bad","ts":"not-a-time"}',
-        '{"kind":"resolve","id":42,"ts":"2026-01-15T00:00:00.000Z","agent":"scale-fixture"}',
-        '{"kind":"dogear","id":"bl_bad","ts":"2026-01-15T00:00:00.000Z"}',
+        # Each carries "v":2 so the version probe passes and each line stays
+        # malformed for the reason it was written: a bad ts, a non-string id, a
+        # missing required field. Without the marker the probe would refuse the
+        # whole fixture and every scale run would measure a refusal.
+        '{"v":2,"kind":"cut","id":"bl_bad","ts":"not-a-time"}',
+        '{"v":2,"kind":"resolve","id":42,"ts":"2026-01-15T00:00:00.000Z","agent":"scale-fixture"}',
+        '{"v":2,"kind":"dogear","id":"bl_bad","ts":"2026-01-15T00:00:00.000Z"}',
         '{"kind":"cut"',
         "not-json",
     )

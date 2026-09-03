@@ -22,7 +22,7 @@ pub struct Recurrence {
     pub resolved_id: String,
     pub resolved_text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
+    pub origin: Option<crate::Origin>,
     pub resolution: VerifyResolution,
     pub recurrence_ids: Vec<String>,
     pub count: usize,
@@ -32,6 +32,8 @@ pub struct Recurrence {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct VerifyResolution {
     pub ts: String,
+    pub disposition: crate::Disposition,
+    pub disposition_ts: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,7 +44,7 @@ pub struct VerifyResolution {
 
 struct ResolvedAnchor {
     candidate: Candidate,
-    resolution_timestamp: Timestamp,
+    disposition_timestamp: Timestamp,
 }
 
 pub(crate) struct RecurrenceGroup {
@@ -72,25 +74,25 @@ fn is_verify_eligible(item: &ListItem) -> bool {
                 .resolution
                 .as_ref()
                 .expect("resolved folded items have a resolution");
-            !resolution.dropped && !triage::normalized_title(&item.text).is_empty()
+            // r48/r52: anchors are resolved cuts whose winning disposition is
+            // fixed or promoted. accepted and invalid resolved cuts are never
+            // anchors — accepted tolerates the friction on purpose, and
+            // invalid says it was never friction at all.
+            !resolution.dropped
+                && !triage::normalized_title(&item.text).is_empty()
+                && matches!(
+                    resolution.disposition,
+                    Some(crate::Disposition::Fixed) | Some(crate::Disposition::Promoted)
+                )
         }
     }
 }
 
-pub fn run(args: VerifyArgs, file: Option<PathBuf>, pretty: bool) -> AppResult<i32> {
+pub fn run(_args: VerifyArgs, file: Option<PathBuf>, pretty: bool) -> AppResult<i32> {
     let resolved = store::discover(file)?;
     let store::LoadedFold {
-        items,
-        mut warnings,
+        items, warnings, ..
     } = store::load_folded(&resolved)?;
-    let (items, auto_captures) = crate::partition_auto_captures(items, args.include_auto);
-    let hidden = auto_captures
-        .iter()
-        .filter(|item| is_verify_eligible(item))
-        .count();
-    if hidden > 0 {
-        warnings.push(crate::auto_capture_warning(hidden));
-    }
 
     let data = verify(items);
     let exit = i32::from(!data.recurrences.is_empty());
@@ -158,8 +160,10 @@ pub(crate) fn recurrence_groups(items: Vec<ListItem>) -> RecurrenceAnalysis {
                     .as_ref()
                     .expect("resolved folded items have a resolution");
                 anchors.push(ResolvedAnchor {
-                    resolution_timestamp: resolution
-                        .ts
+                    disposition_timestamp: resolution
+                        .disposition_ts
+                        .as_deref()
+                        .expect("resolved cut anchors carry disposition_ts")
                         .parse()
                         .expect("folded resolutions have valid RFC3339 timestamps"),
                     candidate,
@@ -184,12 +188,12 @@ pub(crate) fn recurrence_groups(items: Vec<ListItem>) -> RecurrenceAnalysis {
     let mut recurrences = Vec::new();
     for anchor in anchors {
         // `open` is sorted by (timestamp, id) and the prefilter returns
-        // positions into it, so the post-resolution cutoff is a floor on the
+        // positions into it, so the disposition_ts cutoff is a floor on the
         // bitset walk rather than a second pass. Triage's
         // `candidate <= representative` self-exclusion has no counterpart: an
         // anchor is never a member of `open`.
         let floor =
-            open.partition_point(|candidate| candidate.timestamp <= anchor.resolution_timestamp);
+            open.partition_point(|candidate| candidate.timestamp <= anchor.disposition_timestamp);
         let recurring: Vec<_> = scratch
             .matching_candidates(&anchor.candidate, &index, &frequencies, floor)
             .indices_from(floor)
@@ -237,9 +241,16 @@ fn materialize_recurrence(group: &RecurrenceGroup) -> Recurrence {
     Recurrence {
         resolved_id: group.anchor.item.id.clone(),
         resolved_text: group.anchor.item.text.clone(),
-        source: group.anchor.item.source.clone(),
+        origin: group.anchor.item.origin.clone(),
         resolution: VerifyResolution {
             ts: resolution.ts.clone(),
+            disposition: resolution
+                .disposition
+                .expect("resolved anchors carry a disposition"),
+            disposition_ts: resolution
+                .disposition_ts
+                .clone()
+                .expect("resolved cut anchors carry disposition_ts"),
             task: resolution.task.clone(),
             pr: resolution.pr.clone(),
             commit: resolution.commit.clone(),

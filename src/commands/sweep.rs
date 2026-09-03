@@ -1,4 +1,4 @@
-use crate::cli::{ListKind, SweepArgs};
+use crate::cli::{SweepArgs, SweepKind};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use crate::store;
@@ -87,23 +87,17 @@ pub fn run(args: SweepArgs, file: Option<PathBuf>, pretty: bool, now: Timestamp)
         open_cuts: 0,
         open_dogears: 0,
     };
-    let mut hidden_auto_captures = 0;
     for path in paths {
         match store::with_shared(&path, |file| {
             let bytes = store::read_bytes(file, &path)?;
+            store::check_version(&bytes, &path)?;
             Ok(store::fold_bytes(&bytes))
         }) {
             Ok(folded) => {
                 for warning in folded.warnings {
                     warnings.push(format!("{}: {warning}", path.display()));
                 }
-                let (items, auto_captures) =
-                    crate::partition_auto_captures(folded.items, args.include_auto);
-                hidden_auto_captures += auto_captures
-                    .iter()
-                    .filter(|item| item.status == ItemStatus::Open)
-                    .count();
-                let repo = sweep_repo(path, items, args.kind, since);
+                let repo = sweep_repo(path, folded.items, args.kind, since);
                 totals.repos_swept += 1;
                 totals.open_cuts += repo.counts.open_cuts;
                 totals.open_dogears += repo.counts.open_dogears;
@@ -121,10 +115,6 @@ pub fn run(args: SweepArgs, file: Option<PathBuf>, pretty: bool, now: Timestamp)
         }
     }
     totals.repos_skipped = repos_skipped;
-    if hidden_auto_captures > 0 {
-        warnings.push(crate::auto_capture_warning(hidden_auto_captures));
-    }
-
     let mut meta = Meta::new();
     meta.warnings = warnings;
     output::write_success(SweepData { repos, totals }, pretty, meta)
@@ -185,7 +175,7 @@ fn resolve_log_path(input: &Path) -> Result<PathBuf, String> {
 fn sweep_repo(
     path: PathBuf,
     items: Vec<ListItem>,
-    kind: ListKind,
+    kind: SweepKind,
     since: Option<Timestamp>,
 ) -> SweepRepo {
     let counts = SweepCounts {
@@ -222,11 +212,11 @@ fn sweep_repo(
     }
 }
 
-fn matches_kind(item: &ListItem, kind: ListKind) -> bool {
+fn matches_kind(item: &ListItem, kind: SweepKind) -> bool {
     match kind {
-        ListKind::Cut => item.kind == "cut",
-        ListKind::Dogear => item.kind == "dogear",
-        ListKind::All => true,
+        SweepKind::Cut => item.kind == "cut",
+        SweepKind::Dogear => item.kind == "dogear",
+        SweepKind::All => true,
     }
 }
 

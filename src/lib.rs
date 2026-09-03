@@ -1,3 +1,11 @@
+//! Implementation of the `blotter` binary.
+//!
+//! This library is not a supported API. Blotter's compatibility promise is the
+//! CLI, the JSON envelopes, the stored JSONL record format, the exit codes, and
+//! `blotter schema` (see `meta.contract`). Every item here is public to
+//! structure the binary and may change in any release without notice.
+//! Integrate through the CLI.
+
 pub mod cli;
 pub mod commands;
 pub mod error;
@@ -13,26 +21,107 @@ use std::fmt::Write as _;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
-pub enum Severity {
-    Minor,
-    Major,
-    Blocker,
+pub enum Impact {
+    Low,
+    Material,
+    Blocking,
 }
 
-impl Severity {
+impl Impact {
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Minor => "minor",
-            Self::Major => "major",
-            Self::Blocker => "blocker",
+            Self::Low => "low",
+            Self::Material => "material",
+            Self::Blocking => "blocking",
         }
     }
 
     pub fn rank(self) -> u8 {
         match self {
-            Self::Minor => 0,
-            Self::Major => 1,
-            Self::Blocker => 2,
+            Self::Low => 0,
+            Self::Material => 1,
+            Self::Blocking => 2,
+        }
+    }
+}
+
+/// How a cut's resolution classifies it (r48). Cuts always carry one; dogears
+/// never do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum Disposition {
+    Fixed,
+    Promoted,
+    Accepted,
+    Invalid,
+}
+
+/// The two `retrospect` candidate patterns (r48/r51). Pattern detection and
+/// suggested intervention are separate axes: a pattern names what was
+/// observed, `suggested` names what kind of artifact might answer it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Pattern {
+    RecurrentFriction,
+    FailedIntervention,
+}
+
+/// The closed promotion artifact vocabulary (r48). An unrecognized
+/// `--artifact-type` is rejected by clap as `invalid_argument`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum ArtifactType {
+    Doc,
+    Skill,
+    Guard,
+    Test,
+    Tool,
+    Process,
+}
+
+impl ArtifactType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Doc => "doc",
+            Self::Skill => "skill",
+            Self::Guard => "guard",
+            Self::Test => "test",
+            Self::Tool => "tool",
+            Self::Process => "process",
+        }
+    }
+}
+
+/// What a promotion says these experiences became.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Artifact {
+    #[serde(rename = "type")]
+    pub kind: ArtifactType,
+    #[serde(rename = "ref")]
+    pub r#ref: String,
+}
+
+/// Structured provenance (r49). A typed three-member struct, never flattened
+/// and never an opaque `Value`: a `null` published member reads as absent, a
+/// non-string one fails the line, and an unknown member survives in the log's
+/// bytes without reaching any envelope.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Origin {
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, rename = "ref", skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<String>,
+}
+
+impl Origin {
+    /// The only origin any 1.0.0 command writes.
+    pub fn agent() -> Self {
+        Self {
+            kind: "agent".into(),
+            provider: None,
+            r#ref: None,
         }
     }
 }
@@ -58,10 +147,10 @@ pub enum LogEvent {
         agent: String,
         text: String,
         tags: Vec<String>,
-        severity: Severity,
+        impact: Impact,
         cwd: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        source: Option<String>,
+        origin: Option<Origin>,
         #[serde(skip_serializing_if = "Option::is_none")]
         evidence: Option<Evidence>,
     },
@@ -74,6 +163,8 @@ pub enum LogEvent {
         #[serde(skip_serializing_if = "Option::is_none")]
         evidence: Option<String>,
         cwd: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<Origin>,
     },
     Resolve {
         id: String,
@@ -92,6 +183,24 @@ pub enum LogEvent {
         dropped: bool,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         amend: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        disposition: Option<Disposition>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        disposition_ts: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        promotion: Option<String>,
+    },
+    Promotion {
+        id: String,
+        ts: String,
+        agent: String,
+        sources: Vec<String>,
+        artifact: Artifact,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<Origin>,
+        cwd: String,
     },
     #[serde(other)]
     Unknown,
@@ -100,7 +209,10 @@ pub enum LogEvent {
 impl LogEvent {
     pub fn id(&self) -> Option<&str> {
         match self {
-            Self::Cut { id, .. } | Self::Dogear { id, .. } | Self::Resolve { id, .. } => Some(id),
+            Self::Cut { id, .. }
+            | Self::Dogear { id, .. }
+            | Self::Resolve { id, .. }
+            | Self::Promotion { id, .. } => Some(id),
             Self::Unknown => None,
         }
     }
@@ -123,6 +235,14 @@ pub struct Resolution {
     pub dropped: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub amended: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disposition: Option<Disposition>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disposition_ts: Option<String>,
+    /// The promotion this resolution links to (r48). Present only under
+    /// `disposition: promoted`, and only when the link is mutual.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub promotion: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,10 +254,10 @@ pub struct ListItem {
     pub text: String,
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub severity: Option<Severity>,
+    pub impact: Option<Impact>,
     pub cwd: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
+    pub origin: Option<Origin>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub evidence: Option<serde_json::Value>,
     pub status: ItemStatus,
@@ -159,9 +279,9 @@ impl ListItem {
                 agent,
                 text,
                 tags,
-                severity,
+                impact,
                 cwd,
-                source,
+                origin,
                 evidence,
             } => Self {
                 kind: "cut".into(),
@@ -170,9 +290,9 @@ impl ListItem {
                 agent,
                 text,
                 tags,
-                severity: Some(severity),
+                impact: Some(impact),
                 cwd,
-                source,
+                origin,
                 evidence: evidence
                     .map(|evidence| serde_json::to_value(evidence).expect("evidence serializes")),
                 status,
@@ -186,6 +306,7 @@ impl ListItem {
                 tags,
                 evidence,
                 cwd,
+                origin,
             } => Self {
                 kind: "dogear".into(),
                 id,
@@ -193,40 +314,65 @@ impl ListItem {
                 agent,
                 text,
                 tags,
-                severity: None,
+                impact: None,
                 cwd,
-                source: None,
+                origin,
                 evidence: evidence.map(serde_json::Value::String),
                 status,
                 resolution,
             },
-            LogEvent::Resolve { .. } | LogEvent::Unknown => {
-                unreachable!("folded records are cut or dogear")
+            LogEvent::Resolve { .. } | LogEvent::Promotion { .. } | LogEvent::Unknown => {
+                unreachable!("folded list items are cut or dogear")
             }
         }
     }
 }
 
-pub fn is_auto_capture(tags: &[String]) -> bool {
-    tags.iter().any(|tag| tag == "auto")
+/// The promotion arm of `list`'s tagged union (r48). It carries no `status`,
+/// `resolution`, `text`, `tags`, `impact`, or `evidence`: a promotion has no
+/// lifecycle to filter and no friction text of its own.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromotionItem {
+    pub kind: String,
+    pub id: String,
+    pub ts: String,
+    pub agent: String,
+    pub sources: Vec<String>,
+    pub artifact: Artifact,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    pub cwd: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<Origin>,
 }
 
-pub(crate) fn partition_auto_captures(
-    items: Vec<ListItem>,
-    include_auto: bool,
-) -> (Vec<ListItem>, Vec<ListItem>) {
-    if include_auto {
-        (items, Vec::new())
-    } else {
-        items
-            .into_iter()
-            .partition(|item| !is_auto_capture(&item.tags))
+impl PromotionItem {
+    pub(crate) fn from_record(event: LogEvent) -> Self {
+        let LogEvent::Promotion {
+            id,
+            ts,
+            agent,
+            sources,
+            artifact,
+            note,
+            origin,
+            cwd,
+        } = event
+        else {
+            unreachable!("only promotion records become promotion items")
+        };
+        Self {
+            kind: "promotion".into(),
+            id,
+            ts,
+            agent,
+            sources,
+            artifact,
+            note,
+            cwd,
+            origin,
+        }
     }
-}
-
-pub(crate) fn auto_capture_warning(count: usize) -> String {
-    let noun = if count == 1 { "record" } else { "records" };
-    format!("{count} auto-captured {noun} hidden; use --include-auto to include them")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -236,18 +382,12 @@ pub enum ItemStatus {
     Resolved,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum IdNamespace {
-    Bl,
-    Pc,
-}
-
-pub(crate) fn id_namespace(id: &str) -> Option<IdNamespace> {
-    match id.get(..3) {
-        Some(prefix) if prefix.eq_ignore_ascii_case("bl_") => Some(IdNamespace::Bl),
-        Some(prefix) if prefix.eq_ignore_ascii_case("pc_") => Some(IdNamespace::Pc),
-        _ => None,
-    }
+/// One ID namespace under `bl2` (r48): every record kind is `bl_` plus lowercase
+/// hex, matched case-insensitively. `pc_` is gone, so this is a plain prefix
+/// predicate rather than a namespace enum.
+pub(crate) fn is_bl_id(id: &str) -> bool {
+    id.get(..3)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("bl_"))
 }
 
 pub fn effective_now() -> AppResult<Timestamp> {
@@ -347,28 +487,22 @@ fn parse_cutoff(flag_name: &str, value: &str, now: Timestamp) -> AppResult<Times
     })
 }
 
-pub fn compute_id(
-    ts: &str,
-    agent: &str,
-    text: &str,
-    severity: Severity,
-    tags: &[String],
-) -> String {
+pub fn compute_id(ts: &str, agent: &str, text: &str, impact: Impact, tags: &[String]) -> String {
     let mut tags = tags.to_vec();
     tags.sort();
     tags.dedup();
     let count = tags.len().to_string();
     let mut fields: Vec<&str> = vec![
-        "bl1",
+        "bl2",
         "cut",
         ts,
         agent,
         text,
-        severity.as_str(),
+        impact.as_str(),
         count.as_str(),
     ];
     fields.extend(tags.iter().map(String::as_str));
-    compute_id_fields_bytes(&fields, 6)
+    compute_id_fields_bytes(&fields, 10)
 }
 
 pub fn compute_dogear_id(ts: &str, agent: &str, text: &str, tags: &[String]) -> String {
@@ -376,13 +510,42 @@ pub fn compute_dogear_id(ts: &str, agent: &str, text: &str, tags: &[String]) -> 
     tags.sort();
     tags.dedup();
     let count = tags.len().to_string();
-    // v1 dogear identity: a version literal and the kind provide domain
+    // bl2 dogear identity: the domain literal and the kind field provide domain
     // separation, and every tag is its own length-prefixed field (TupleHash
     // style) so tag-set boundaries cannot collide (`["a","b"]` != `["a,b"]`).
-    // 80-bit digest; cut IDs use the matching framed scheme at 48 bits.
-    let mut fields: Vec<&str> = vec!["bl1", "dogear", ts, agent, text, count.as_str()];
+    // 80-bit digest; every v2 identity is the same width (r51).
+    let mut fields: Vec<&str> = vec!["bl2", "dogear", ts, agent, text, count.as_str()];
     fields.extend(tags.iter().map(String::as_str));
     compute_id_fields_bytes(&fields, 10)
+}
+
+/// The `bl2` promotion identity (r48, r51): `note` stays outside the hash for
+/// r34's reason — it is authored commentary, and a promotion whose note is
+/// reworded is the same promotion. `sources` are normalized exactly as tags are:
+/// ascending raw UTF-8 byte order, exact-byte deduplication, case-sensitive.
+pub fn compute_promotion_id(
+    ts: &str,
+    agent: &str,
+    sources: &[String],
+    artifact_type: &str,
+    artifact_ref: &str,
+) -> String {
+    let sources = normalized(sources);
+    let count = sources.len().to_string();
+    let mut fields: Vec<&str> = vec!["bl2", "promotion", ts, agent, count.as_str()];
+    fields.extend(sources.iter().map(String::as_str));
+    fields.push(artifact_type);
+    fields.push(artifact_ref);
+    compute_id_fields_bytes(&fields, 10)
+}
+
+/// Ascending raw UTF-8 byte order with exact-byte deduplication (r48). The one
+/// normalization every hashed list — tags and promotion sources — runs through.
+pub fn normalized(values: &[String]) -> Vec<String> {
+    let mut values = values.to_vec();
+    values.sort();
+    values.dedup();
+    values
 }
 
 fn compute_id_fields_bytes(fields: &[&str], bytes: usize) -> String {

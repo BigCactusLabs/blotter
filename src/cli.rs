@@ -1,4 +1,4 @@
-use crate::Severity;
+use crate::{ArtifactType, Disposition, Impact};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
@@ -32,17 +32,6 @@ pub struct Cli {
     pub command: Command,
 }
 
-impl Cli {
-    pub fn is_hook_exec(&self) -> bool {
-        matches!(
-            &self.command,
-            Command::Hook(HookArgs {
-                command: HookCommand::Exec(_)
-            })
-        )
-    }
-}
-
 const ADD_AFTER_HELP: &str = "\
 Admission: file a cut only when at least one of these holds.
   transferable   another agent or user would plausibly hit the same thing
@@ -52,7 +41,7 @@ Admission: file a cut only when at least one of these holds.
   systemic       a missing affordance, a doc gap, a brittle interface, a reusable footgun
 Skip one-off execution slips unless they recur: typos, shell quoting, a bad first guess,
 a patch that missed on stale context, a linter correctly rejecting code you just wrote,
-a malformed fixture you authored. Severity records consequence, not admission.";
+a malformed fixture you authored. Impact records consequence, not admission.";
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
@@ -60,6 +49,7 @@ pub enum Command {
     Add(AddArgs),
     #[command(alias = "idea")]
     Dogear(DogearArgs),
+    Promote(PromoteArgs),
     List(ListArgs),
     Export(ExportArgs),
     Triage(TriageArgs),
@@ -69,7 +59,6 @@ pub enum Command {
     Sweep(SweepArgs),
     Resolve(ResolveArgs),
     Archive(ArchiveArgs),
-    Hook(HookArgs),
     Schema {
         #[arg(
             value_enum,
@@ -95,10 +84,10 @@ pub struct AddArgs {
     #[arg(
         long,
         value_enum,
-        default_value_t = Severity::Minor,
-        help = "Consequence, not admission. blocker: could not proceed; major: lost real time or produced wrong work; minor: limited cost, still worth filing"
+        default_value_t = Impact::Low,
+        help = "Consequence, not admission. blocking: could not proceed; material: lost real time or produced wrong work; low: limited cost, still worth filing"
     )]
-    pub severity: Severity,
+    pub impact: Impact,
     #[arg(
         long,
         allow_hyphen_values = true,
@@ -148,6 +137,43 @@ pub struct DogearArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct PromoteArgs {
+    #[arg(
+        long = "source",
+        value_name = "ID",
+        required = true,
+        help = "Cut ID or unique prefix this artifact came from; repeatable"
+    )]
+    pub sources: Vec<String>,
+    #[arg(
+        long = "artifact-type",
+        value_enum,
+        required = true,
+        help = "What the experiences became"
+    )]
+    pub artifact_type: ArtifactType,
+    #[arg(
+        long = "artifact-ref",
+        value_name = "REF",
+        required = true,
+        allow_hyphen_values = true,
+        help = "Where the artifact lives; best-effort redaction"
+    )]
+    pub artifact_ref: String,
+    #[arg(
+        long,
+        allow_hyphen_values = true,
+        value_name = "TEXT",
+        help = "Optional commentary; best-effort redaction; outside the ID hash"
+    )]
+    pub note: Option<String>,
+    #[arg(long, help = "Agent name; overrides BLOTTER_AGENT")]
+    pub agent: Option<String>,
+    #[arg(long, help = "Validate without appending")]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Args)]
 pub struct ListArgs {
     #[arg(
         long,
@@ -156,21 +182,21 @@ pub struct ListArgs {
         help = "Record kind to list"
     )]
     pub kind: ListKind,
+    // An explicit `--status` must be distinguishable from the default (r48):
+    // the default `open` never excludes a promotion, while an explicit
+    // `open`/`resolved` is a request for lifecycle records and does.
     #[arg(
         long,
         value_enum,
-        default_value_t = StatusFilter::Open,
-        help = "Filter by lifecycle status"
+        help = "Filter by lifecycle status; default open, which does not exclude promotions"
     )]
-    pub status: StatusFilter,
+    pub status: Option<StatusFilter>,
     #[arg(long, help = "Filter by agent")]
     pub agent: Option<String>,
     #[arg(long, help = "Filter by tag")]
     pub tag: Option<String>,
-    #[arg(long, help = "Include records tagged auto")]
-    pub include_auto: bool,
-    #[arg(long, value_enum, help = "Filter cuts by severity")]
-    pub severity: Option<Severity>,
+    #[arg(long, value_enum, help = "Filter cuts by impact")]
+    pub impact: Option<Impact>,
     #[arg(long, help = "Filter since an RFC3339 timestamp or Nd/Nh duration")]
     pub since: Option<String>,
     #[arg(long, default_value_t = 50, help = "Maximum records to return")]
@@ -190,8 +216,6 @@ pub struct ExportArgs {
     pub format: Option<ExportFormat>,
     #[arg(long, help = "Filter since an RFC3339 timestamp or Nd/Nh duration")]
     pub since: Option<String>,
-    #[arg(long, help = "Include records tagged auto")]
-    pub include_auto: bool,
 }
 
 #[derive(Debug, Args)]
@@ -203,15 +227,10 @@ pub struct TriageArgs {
         help = "Minimum similar open cuts per cluster"
     )]
     pub min_count: usize,
-    #[arg(long, help = "Include records tagged auto")]
-    pub include_auto: bool,
 }
 
 #[derive(Debug, Args)]
-pub struct VerifyArgs {
-    #[arg(long, help = "Include records tagged auto")]
-    pub include_auto: bool,
-}
+pub struct VerifyArgs {}
 
 #[derive(Debug, Args)]
 pub struct RetrospectArgs {}
@@ -224,8 +243,6 @@ pub struct DigestArgs {
         help = "Report since an RFC3339 timestamp or Nd/Nh duration"
     )]
     pub since: String,
-    #[arg(long, help = "Include records tagged auto")]
-    pub include_auto: bool,
     #[arg(
         long,
         value_enum,
@@ -287,12 +304,10 @@ pub struct SweepArgs {
     #[arg(
         long,
         value_enum,
-        default_value_t = ListKind::Cut,
+        default_value_t = SweepKind::Cut,
         help = "Record kind to include in items"
     )]
-    pub kind: ListKind,
-    #[arg(long, help = "Include records tagged auto")]
-    pub include_auto: bool,
+    pub kind: SweepKind,
 }
 
 #[derive(Debug, Args)]
@@ -327,36 +342,22 @@ pub struct ResolveArgs {
     pub url: Option<String>,
     #[arg(long, help = "Mark dropped (dogear records only)")]
     pub dropped: bool,
+    #[arg(
+        long,
+        value_enum,
+        help = "How the cut was disposed of; required for cuts, rejected for dogears"
+    )]
+    pub disposition: Option<Disposition>,
+    #[arg(
+        long,
+        value_name = "ID",
+        help = "Link to an existing promotion; requires --disposition promoted"
+    )]
+    pub promotion: Option<String>,
     #[arg(long, help = "Append a correction to an existing resolved record")]
     pub amend: bool,
     #[arg(long, help = "Validate without appending a resolution")]
     pub dry_run: bool,
-}
-
-#[derive(Debug, Args)]
-pub struct HookArgs {
-    #[command(subcommand)]
-    pub command: HookCommand,
-}
-
-#[derive(Debug, Subcommand)]
-pub enum HookCommand {
-    #[command(
-        about = "Retired auto-capture receiver; files nothing; keeps installed hooks fail open",
-        long_about = "Retired auto-capture receiver kept so installed hooks fail open. It files nothing. Global flags such as --file and --pretty are accepted but ignored."
-    )]
-    Exec(HookExecArgs),
-}
-
-#[derive(Debug, Args)]
-pub struct HookExecArgs {
-    #[arg(value_enum, help = "Retired hook integration target; nothing is filed")]
-    pub target: HookTarget,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum HookTarget {
-    ClaudeCode,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -368,6 +369,17 @@ pub enum StatusFilter {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ListKind {
+    Cut,
+    Dogear,
+    Promotion,
+    All,
+}
+
+/// `sweep` stays cut/dogear (r48): it is a cross-repo open-friction aggregate
+/// and a promotion has no open state to aggregate. The two enums are separate
+/// types so a `promotion` value cannot reach `sweep` at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum SweepKind {
     Cut,
     Dogear,
     All,
@@ -421,14 +433,14 @@ mod tests {
             panic!("expected add")
         };
         assert_eq!(args.text.as_deref(), Some("ouch"));
-        assert_eq!(args.severity, Severity::Minor);
+        assert_eq!(args.impact, Impact::Low);
 
         let cli = Cli::try_parse_from(["blotter", "list"]).unwrap();
         let Command::List(args) = cli.command else {
             panic!("expected list")
         };
         assert_eq!(args.kind, ListKind::Cut);
-        assert_eq!(args.status, StatusFilter::Open);
+        assert_eq!(args.status, None);
         assert_eq!(args.limit, 50);
         assert_eq!(args.format, OutputFormat::Json);
 
@@ -475,7 +487,7 @@ mod tests {
         assert_eq!(args.paths, [PathBuf::from("repo")]);
         assert_eq!(args.registry, Some(PathBuf::from("repos.txt")));
         assert_eq!(args.since.as_deref(), Some("1d"));
-        assert_eq!(args.kind, ListKind::All);
+        assert_eq!(args.kind, SweepKind::All);
     }
 
     #[test]
@@ -483,9 +495,43 @@ mod tests {
         assert!(Cli::try_parse_from(["blotter", "list", "--format", "jsonl"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "digest", "--format", "jsonl"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "sweep", "--kind", "other"]).is_err());
-        assert!(Cli::try_parse_from(["blotter", "add", "x", "--severity", "critical"]).is_err());
+        assert!(Cli::try_parse_from(["blotter", "sweep", "repo", "--kind", "promotion"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "blotter",
+                "promote",
+                "--source",
+                "abcd",
+                "--artifact-type",
+                "poem",
+                "--artifact-ref",
+                "x"
+            ])
+            .is_err()
+        );
+        assert!(Cli::try_parse_from(["blotter", "promote", "--artifact-type", "doc"]).is_err());
+        assert!(Cli::try_parse_from(["blotter", "add", "x", "--impact", "critical"]).is_err());
+        assert!(Cli::try_parse_from(["blotter", "add", "x", "--severity", "minor"]).is_err());
         assert!(Cli::try_parse_from(["blotter", "resolve"]).is_err());
         assert!(Cli::try_parse_from(["blotter"]).is_err());
+        for args in [
+            vec!["blotter", "list", "--include-auto"],
+            vec![
+                "blotter",
+                "export",
+                "--format",
+                "otlp-json",
+                "--include-auto",
+            ],
+            vec!["blotter", "triage", "--include-auto"],
+            vec!["blotter", "verify", "--include-auto"],
+            vec!["blotter", "digest", "--include-auto"],
+            vec!["blotter", "sweep", "repo", "--include-auto"],
+            vec!["blotter", "hook", "exec", "claude-code"],
+            vec!["blotter", "hook", "install", "claude-code"],
+        ] {
+            assert!(Cli::try_parse_from(args).is_err());
+        }
     }
 
     #[test]
@@ -501,25 +547,23 @@ mod tests {
             vec!["blotter", "digest"],
             vec!["blotter", "sweep", "repo"],
             vec!["blotter", "resolve", "abcd"],
+            vec!["blotter", "list", "--kind", "promotion"],
+            vec![
+                "blotter",
+                "promote",
+                "--source",
+                "abcd",
+                "--artifact-type",
+                "skill",
+                "--artifact-ref",
+                "skills/x.md",
+            ],
             vec!["blotter", "archive", "--before", "1d"],
-            vec!["blotter", "hook", "exec", "claude-code"],
             vec!["blotter", "schema", "record"],
             vec!["blotter", "doctor"],
         ] {
             assert!(Cli::try_parse_from(args).is_ok());
         }
-    }
-
-    #[test]
-    fn parser_rejects_removed_codex_hook_target() {
-        assert!(Cli::try_parse_from(["blotter", "hook", "exec", "codex"]).is_err());
-    }
-
-    /// r32 retired the auto-capture lane. `hook exec` survives as a no-op for
-    /// already-installed harnesses; the installer that created them does not.
-    #[test]
-    fn parser_rejects_the_retired_hook_installer() {
-        assert!(Cli::try_parse_from(["blotter", "hook", "install", "claude-code"]).is_err());
     }
 
     #[test]

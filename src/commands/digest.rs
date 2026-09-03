@@ -3,7 +3,7 @@ use crate::commands::triage::{self, TriageCluster};
 use crate::error::{AppError, AppResult};
 use crate::output::{self, Meta};
 use crate::store;
-use crate::{ItemStatus, ListItem, format_timestamp, parse_since};
+use crate::{Disposition, ItemStatus, ListItem, format_timestamp, parse_since};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -15,7 +15,13 @@ pub struct DigestData {
     pub chronic: Vec<TriageCluster>,
     pub new_cuts: NewCuts,
     pub open_dogears: OpenDogears,
+    pub accepted_cuts: AcceptedCuts,
     pub window: DigestWindow,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AcceptedCuts {
+    pub count: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -60,17 +66,8 @@ pub fn run(
     let since = parse_since(&args.since, now)?;
     let resolved = store::discover(file)?;
     let store::LoadedFold {
-        items,
-        mut warnings,
+        items, warnings, ..
     } = store::load_folded(&resolved)?;
-    let (items, auto_captures) = crate::partition_auto_captures(items, args.include_auto);
-    let hidden = auto_captures
-        .iter()
-        .filter(|item| item.status == ItemStatus::Open)
-        .count();
-    if hidden > 0 {
-        warnings.push(crate::auto_capture_warning(hidden));
-    }
 
     let data = digest(items, since, now);
     if args.format == OutputFormat::Md {
@@ -90,9 +87,31 @@ fn digest(items: Vec<ListItem>, since: Timestamp, until: Timestamp) -> DigestDat
     let mut tags = BTreeMap::<String, Vec<String>>::new();
     let mut new_cut_count = 0;
     let mut open_dogears = Vec::new();
+    let mut accepted_cut_count = 0;
 
     for item in items {
         if item.status != ItemStatus::Open {
+            if item.kind == "cut" {
+                // accepted_cuts is judged by disposition_ts alone (r48/r49),
+                // never by the cut's ts or the resolution's ts, so a
+                // note-only amend cannot move a cut into or out of the
+                // window.
+                let is_accepted = item.resolution.as_ref().is_some_and(|resolution| {
+                    resolution.disposition == Some(Disposition::Accepted)
+                });
+                if is_accepted {
+                    let disposition_timestamp = item
+                        .resolution
+                        .as_ref()
+                        .and_then(|resolution| resolution.disposition_ts.as_deref())
+                        .expect("accepted resolutions carry disposition_ts")
+                        .parse::<Timestamp>()
+                        .expect("folded resolutions have valid RFC3339 disposition_ts");
+                    if disposition_timestamp >= since && disposition_timestamp <= until {
+                        accepted_cut_count += 1;
+                    }
+                }
+            }
             continue;
         }
         match item.kind.as_str() {
@@ -163,6 +182,9 @@ fn digest(items: Vec<ListItem>, since: Timestamp, until: Timestamp) -> DigestDat
         open_dogears: OpenDogears {
             count: open_dogears.len(),
             items: open_dogears,
+        },
+        accepted_cuts: AcceptedCuts {
+            count: accepted_cut_count,
         },
         window: DigestWindow {
             since: format_timestamp(since),

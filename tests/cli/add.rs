@@ -76,22 +76,13 @@ fn add_stdin_validation_duplicate_and_exact_id() {
         .arg("--file")
         .arg(&file)
         .args([
-            "add",
-            "-",
-            "--agent",
-            "tester",
-            "--severity",
-            "major",
-            "--tag",
-            "z",
-            "--tag",
-            "a",
+            "add", "-", "--agent", "tester", "--impact", "material", "--tag", "z", "--tag", "a",
         ])
         .write_stdin("ouch\n")
         .output()
         .unwrap();
     let first: SuccessEnvelope<AddData> = success(&output);
-    assert_eq!(first.data.record.cut_id(), "bl_a43e5b0b30aa");
+    assert_eq!(first.data.record.cut_id(), "bl_edc887c6923de81fabd7");
     assert_eq!(first.data.record.cut_tags(), ["a", "z"]);
 
     let second: SuccessEnvelope<AddData> = success(
@@ -99,15 +90,7 @@ fn add_stdin_validation_duplicate_and_exact_id() {
             .arg("--file")
             .arg(&file)
             .args([
-                "add",
-                "ouch",
-                "--agent",
-                "tester",
-                "--severity",
-                "major",
-                "--tag",
-                "z",
-                "--tag",
+                "add", "ouch", "--agent", "tester", "--impact", "material", "--tag", "z", "--tag",
                 "a",
             ])
             .output()
@@ -160,19 +143,21 @@ fn fold_deduplicates_tags_from_existing_cut_and_dogear_records() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("legacy-duplicate-tags.jsonl");
     let cut = json!({
+        "v": 2,
         "kind": "cut",
-        "id": "pc_a1b2c3d4e5f6",
+        "id": "zz_a1b2c3d4e5f6",
         "ts": "2026-07-09T00:00:00.000Z",
         "agent": "legacy",
         "text": "legacy cut",
         "tags": ["b", "a", "a"],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp",
         "repo": "/tmp/repo"
     });
     let dogear = json!({
+        "v": 2,
         "kind": "dogear",
-        "id": "pc_b1c2d3e4f5a6",
+        "id": "zz_b1c2d3e4f5a6",
         "ts": "2026-07-09T00:00:00.000Z",
         "agent": "legacy",
         "text": "legacy dogear",
@@ -186,7 +171,13 @@ fn fold_deduplicates_tags_from_existing_cut_and_dogear_records() {
         &file,
         &["list", "--kind", "all", "--status", "all"],
     ));
-    assert!(listed.data.items.iter().all(|item| item.tags == ["a", "b"]));
+    assert!(
+        listed
+            .data
+            .items
+            .iter()
+            .all(|item| item.record().tags == ["a", "b"])
+    );
 }
 
 #[test]
@@ -481,5 +472,5 @@ fn add_help_states_the_admission_floor_and_skip_list() {
         assert!(help.contains(test), "add --help must name the {test} test");
     }
     assert!(help.contains("Skip one-off execution slips"));
-    assert!(help.contains("Severity records consequence, not admission"));
+    assert!(help.contains("Impact records consequence, not admission"));
 }

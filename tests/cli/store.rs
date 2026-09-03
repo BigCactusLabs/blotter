@@ -6,16 +6,11 @@ fn valid_final_record_without_newline_is_accepted_not_resurrected() {
     let file = temp.path().join("cuts.jsonl");
     // A complete, valid cut record with NO trailing newline: a crash after the
     // object bytes but before the newline. JSON Lines permits this.
-    let id = compute_id(
-        "2026-07-09T00:00:00.000Z",
-        "a",
-        "kept",
-        Severity::Minor,
-        &[],
-    );
+    let id = compute_id("2026-07-09T00:00:00.000Z", "a", "kept", Impact::Low, &[]);
     let record = json!({
+        "v": 2,
         "kind": "cut", "id": id, "ts": "2026-07-09T00:00:00.000Z", "agent": "a",
-        "text": "kept", "tags": [], "severity": "minor", "cwd": "/tmp", "repo": null
+        "text": "kept", "tags": [], "impact": "low", "cwd": "/tmp", "repo": null
     })
     .to_string();
     std::fs::write(&file, &record).unwrap();
@@ -23,7 +18,7 @@ fn valid_final_record_without_newline_is_accepted_not_resurrected() {
     // would resurrect), and doctor agrees a valid tail is healthy.
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
     assert_eq!(listed.data.items.len(), 1);
-    assert_eq!(listed.data.items[0].text, "kept");
+    assert_eq!(listed.data.items[0].record().text, "kept");
     let doctor: SuccessEnvelope<DoctorData> =
         serde_json::from_slice(&run_file(&file, &["doctor"]).stdout).unwrap();
     assert!(doctor.data.healthy, "findings: {:?}", doctor.data.findings);
@@ -78,7 +73,7 @@ fn torn_tail_self_heals_on_add() {
     assert_eq!(bytes.split(|byte| *byte == b'\n').count(), 3);
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
     assert_eq!(listed.data.items.len(), 1);
-    assert_eq!(listed.data.items[0].text, "after tear");
+    assert_eq!(listed.data.items[0].record().text, "after tear");
     assert!(
         listed
             .meta
@@ -323,8 +318,10 @@ fn eight_way_resolve_race_appends_once() {
             let barrier = Arc::clone(&barrier);
             thread::spawn(move || {
                 barrier.wait();
-                let envelope: SuccessEnvelope<ResolveData> =
-                    success(&run_file(&file, &["resolve", &id, "--agent", "race"]));
+                let envelope: SuccessEnvelope<ResolveData> = success(&run_file(
+                    &file,
+                    &["resolve", "--disposition", "fixed", &id, "--agent", "race"],
+                ));
                 envelope.data.changed
             })
         })
@@ -344,24 +341,24 @@ fn hash_length_prefix_and_tag_sort_are_pinned() {
         "2026-07-09T18:30:00.123Z",
         "tester",
         "ouch",
-        Severity::Major,
+        Impact::Material,
         &["a".into(), "z".into()],
     );
     let b = compute_id(
         "2026-07-09T18:30:00.123Z",
         "tester",
         "ouc",
-        Severity::Major,
+        Impact::Material,
         &["z".into(), "ha".into()],
     );
     let unsorted = compute_id(
         "2026-07-09T18:30:00.123Z",
         "tester",
         "ouch",
-        Severity::Major,
+        Impact::Material,
         &["z".into(), "a".into()],
     );
-    assert_eq!(a, "bl_a43e5b0b30aa");
+    assert_eq!(a, "bl_edc887c6923de81fabd7");
     assert_eq!(a, unsorted);
     assert_ne!(a, b);
 }
@@ -633,4 +630,87 @@ fn a_directory_log_path_is_rejected_on_read_and_mutation_alike() {
     for (what, args) in non_regular_log_cases() {
         assert_non_regular_log(&run_file(&directory, &args), what);
     }
+}
+
+/// The tear-healing newline is a byte, and a refusal writes none. A v1 log whose
+/// final line is unterminated must come back byte-identical.
+#[test]
+fn a_refused_log_is_not_tear_healed_before_the_probe() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let original = v1_cut_line();
+    assert!(!original.ends_with('\n'));
+    std::fs::write(&file, &original).unwrap();
+
+    error(
+        &run_file(&file, &["add", "new cut", "--agent", "tester"]),
+        65,
+        "unsupported_log_version",
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+}
+
+/// An empty file — no bytes, or the single newline `scan` reads as a terminator
+/// rather than a line (r26/r33) — is a fresh v2 log and passes the probe.
+#[test]
+fn an_empty_log_passes_the_probe() {
+    let temp = TempDir::new().unwrap();
+    for (name, bytes) in [("empty.jsonl", &b""[..]), ("newline.jsonl", &b"\n"[..])] {
+        let file = temp.path().join(name);
+        std::fs::write(&file, bytes).unwrap();
+        let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
+        assert_eq!(listed.data.items.len(), 0, "{name}");
+        let added: SuccessEnvelope<AddData> =
+            success(&run_file(&file, &["add", "fresh", "--agent", "tester"]));
+        assert!(added.data.changed, "{name}");
+    }
+}
+
+/// r50: what passes the probe is a log holding **no line with a known raw
+/// kind** — not-JSON lines, JSON with an unknown `kind`, JSON with no `kind`, a
+/// torn tail, or any mixture. The scan still classifies them exactly as before,
+/// so `doctor --fix` can still repair the one thing it exists to repair.
+#[test]
+fn a_log_without_a_known_kind_passes_the_probe() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    std::fs::write(
+        &file,
+        "not json\n{\"kind\":\"future\"}\n{\"id\":\"bl_aaaaaaaaaaaaaaaaaaaa\"}\n{\"kind\":",
+    )
+    .unwrap();
+
+    let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list"]));
+    assert_eq!(listed.data.items.len(), 0);
+    assert!(
+        listed
+            .meta
+            .warnings
+            .iter()
+            .all(|warning| !warning.contains("version")),
+        "warnings: {:?}",
+        listed.meta.warnings
+    );
+
+    let doctor = doctor_response(&run_file(&file, &["doctor"]), 1);
+    assert!(
+        doctor
+            .data
+            .findings
+            .iter()
+            .all(|finding| finding.kind != "unsupported_version"),
+        "findings: {:?}",
+        doctor.data.findings
+    );
+
+    // The residual r48 states rather than papers over: such a log is repairable
+    // by the one command written to repair it.
+    let fixed = doctor_response(&run_file(&file, &["doctor", "--fix"]), 1);
+    assert!(fixed.data.fix.as_ref().unwrap().changed);
+
+    let added: SuccessEnvelope<AddData> = success(&run_file(
+        &file,
+        &["add", "after repair", "--agent", "tester"],
+    ));
+    assert!(added.data.changed);
 }

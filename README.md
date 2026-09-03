@@ -1,15 +1,16 @@
 # blotter
 
-A tiny Rust CLI that gives AI agents a blotter — a desk pad for the things that don't fit in a commit. Agents jot two kinds of records into one append-only journal:
+A tiny Rust CLI that gives AI agents a blotter — a desk pad for the things that don't fit in a commit. Agents jot three kinds of records into one append-only journal:
 
 - **Cuts** — friction worth keeping. A dead-end tool call, a broken link, a misleading error, a footgun config. Filed at the moment it happens, with optional evidence (the failed command, its exit code, its stderr).
 - **Dogears** — ideas. A surprising measurement, a gap in prior art, a pattern worth writing up. The page-corner you fold to come back to later.
+- **Promotions** — durable learning. "These experiences became this artifact": a doc, a skill, a guard, a test, a tool, or a process change.
 
-Agents hit friction constantly and silently push through; the signal evaporates. They also have ideas mid-task and drop them for the same reason. `blotter` gives both a one-line home, and gives you (or another agent) the commands to review, cluster, and act on the backlog.
+Agents hit friction constantly and silently push through; the signal evaporates. They also have ideas mid-task and drop them for the same reason. `blotter` gives all three a one-line home, and gives you (or another agent) the commands to review, cluster, and act on the backlog.
 
 ```
 $ blotter add "yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web" --tag tooling
-{"ok":true,"data":{"changed":true,"record":{"kind":"cut","id":"bl_9f2c41d0a8b3","ts":"2026-07-09T21:14:03.412Z","agent":"claude-code","text":"yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web","tags":["tooling"],"severity":"minor",...}},"meta":{"contract":5,"file":"/repo/.blotter.jsonl","agent_source":"detected"}}
+{"ok":true,"data":{"changed":true,"record":{"kind":"cut","id":"bl_9f2c41d0a8b39f2c41d0","ts":"2026-07-09T21:14:03.412Z","agent":"claude-code","text":"yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web","tags":["tooling"],"impact":"low","cwd":"apps/web","origin":{"type":"agent"}}},"meta":{"contract":6,"file":"/repo/.blotter.jsonl","agent_source":"detected"}}
 
 $ blotter dogear "The retry-backoff pattern in our fetch helper would make a good standalone write-up" --tag research
 ```
@@ -18,7 +19,7 @@ It is an agent-only tool by design: JSON envelopes on stdout, structured errors 
 
 The friction-log idea comes from [a tool Steve Ruiz built](https://x.com/steveruizok) for his own repos: once agents had a place to complain, they immediately surfaced real workflow defects — quoting bugs, wrong test working directories, YAML footguns — that they'd been eating silently for months.
 
-This project began as a fork of [treygoff24/papercuts](https://github.com/treygoff24/papercuts) and owes its core design — the append-only journal, the agent-first envelope contract, the concurrency model — to that upstream project. The fork added dogears, structured resolve provenance, chronic-cut triage and its analysis family, and a Claude Code hook integration (since retired), then took the name **blotter** to stand on its own. `cargo install papercuts` still installs the upstream crate, which has none of those additions. Other tools explore the same space with different bets — e.g. wevm's frog takes a remote-canonical approach where blotter stays local and append-only.
+This project began as a fork of [treygoff24/papercuts](https://github.com/treygoff24/papercuts) and owes its core design — the append-only journal, the agent-first envelope contract, the concurrency model — to that upstream project. The fork added dogears, structured resolve provenance, and a Claude Code hook integration (since retired), and chronic-cut triage with its analysis family, then took the name **blotter** to stand on its own. `cargo install papercuts` still installs the upstream crate, which has none of those additions. Other tools explore the same space with different bets — e.g. wevm's frog takes a remote-canonical approach where blotter stays local and append-only.
 
 ## Install
 
@@ -28,15 +29,24 @@ cargo install blotter-cli
 
 The crate is named `blotter-cli` (the crates.io name `blotter` is already taken by a placeholder crate), but the installed binary is plain `blotter`. To build from the latest source instead: `cargo install --git https://github.com/BigCactusLabs/blotter blotter-cli`.
 
+## Upgrade to 1.0.0
+
+1.0.0 breaks two things at once, and both need action before the new binary runs in a repo that used 0.15.
+
+1. **Remove the Claude Code hook.** Delete the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from your Claude Code settings. The `hook` subcommand is gone, so otherwise every failed tool call puts an `invalid_argument` error envelope (exit 2, unrecognized subcommand) into the host session: Claude Code shows that stderr to the agent on `PostToolUseFailure` and blocks nothing, but it is noise on every failure.
+2. **Start a fresh ledger.** 1.0.0 refuses a 0.15 log whole (`unsupported_log_version`, exit 65) and leaves it byte-identical. Rename the old `.blotter.jsonl` out of the discovery path to a name that does not exist yet; the next `blotter add` creates a new v2 log beside it. Keep a 0.15 binary (`cargo install blotter-cli --version 0.15.0 --root ~/.blotter-0.15`) and point it at the old file with `--file` when the history is wanted. Nothing rewrites the old file, ever.
+
+The mechanics of the fresh-ledger break are under [Upgrading from 0.15](#upgrading-from-015).
+
 ## How it works
 
 Records live in an **append-only JSONL file** — by default `.blotter.jsonl` at your repo root, so every entry shows up in `git diff` and travels with the repo. No server, no sync, no telemetry. The file is the product.
 
 - **Agent-first contract**: stdout is data only; one JSON envelope per command; structured errors on stderr with stable codes, documented exit codes, and a paste-ready `suggested_fix`. `blotter schema` returns the whole contract.
 - **Concurrency-safe**: multiple agents on one file are fine (advisory locking, atomic appends, self-healing torn lines).
-- **Deterministic**: content-addressed IDs — a cut's identity covers its timestamp, agent, text, severity, and sorted tags, so the same text filed under different tags is a different cut — plus stable sort and a reproducible-clock override for tests.
+- **Deterministic**: content-addressed IDs — a cut's identity covers its timestamp, agent, text, impact, and sorted tags, so the same text filed under different tags is a different cut — plus stable sort and a reproducible-clock override for tests.
 - **Never rewrites history**: `resolve` appends an event; the log is a journal, not a database. The two exceptions, [`archive`](#archive) and [`doctor --fix`](#doctor), never edit in place — each writes a replacement copy and atomically swaps it in, always preserving the original as a timestamped backup.
-- **Evidence is bounded and redacted**: `add` can attach a failed command (`--cmd`), exit status (`--exit`), UTF-8 stderr file (`--stderr-file`), or free-form note (`--evidence`). Redaction covers every authored free-text field, not just `add`: `dogear --evidence` and `resolve --note`/`--amend` go through the same pass at write time. `--stderr-file` rejects non-regular files and inputs over 1 MiB before sanitized stderr is stored up to 4096 UTF-8 bytes; a symlink is followed to its target, which must itself be a regular file. Redaction is best-effort hygiene, not a security boundary; never feed raw environment dumps. Every input lane carries the same 1 MiB read bound — `--stderr-file`, the hook payload, and text piped to `add -` or `dogear -` — and the log file itself must be a regular file, so a `--file` or `BLOTTER_FILE` naming a FIFO, device, or directory is rejected rather than blocking or growing without bound.
+- **Evidence is bounded and redacted**: `add` can attach a failed command (`--cmd`), exit status (`--exit`), UTF-8 stderr file (`--stderr-file`), or free-form note (`--evidence`). Redaction covers every authored free-text field, not just `add`: `dogear --evidence` and `resolve --note`/`--amend` go through the same pass at write time. `--stderr-file` rejects non-regular files and inputs over 1 MiB before sanitized stderr is stored up to 4096 UTF-8 bytes; a symlink is followed to its target, which must itself be a regular file. Redaction is best-effort hygiene, not a security boundary; never feed raw environment dumps. Every input lane carries the same 1 MiB read bound — `--stderr-file` and text piped to `add -` or `dogear -` — and the log file itself must be a regular file, so a `--file` or `BLOTTER_FILE` naming a FIFO, device, or directory is rejected rather than blocking or growing without bound.
 
 Two global flags apply to every subcommand: `--file PATH` overrides log discovery for one invocation (same target as `BLOTTER_FILE`), and `--pretty` indents the JSON envelope for human reading. The one exception is `sweep`, which rejects `--file` because its inputs are its arguments.
 
@@ -51,18 +61,20 @@ blotter add "text"                # file a cut (also: blotter log, or pipe stdin
 blotter add "tool failed" --cmd 'tool --flag' --exit 1 --stderr-file /tmp/stderr
 blotter add "bad response" --evidence 'request_id=abc123'
 blotter dogear "idea worth keeping" --tag research   # file a dogear (also: blotter idea)
-blotter resolve bl_9f2c           # mark one record fixed (unique ID prefix ok)
-blotter resolve bl_9f2c bl_a81e   # resolve several atomically
-blotter resolve <id> --pr <url>   # attach structured graduation provenance
+blotter promote --source bl_9f2c --artifact-type skill --artifact-ref skills/testing.md  # record durable learning
+blotter resolve bl_9f2c --disposition fixed   # resolve one cut (unique ID prefix ok)
+blotter resolve bl_9f2c bl_a81e --disposition fixed   # resolve several atomically
+blotter resolve <id> --disposition promoted --pr <url>   # attach structured graduation provenance
 blotter resolve <id> --amend --note "..."  # correct a resolution you got wrong
 ```
 
 **Read and analyze** — read-only views over the folded log:
 
 ```bash
-blotter list                      # open cuts, severity-first then newest, JSON envelope
+blotter list                      # open cuts, impact-first then newest, JSON envelope
 blotter list --format md          # human review digest
 blotter list --kind dogear        # the idea backlog, newest first
+blotter list --kind promotion     # what friction has already become
 blotter triage                    # identify chronic clusters of similar open cuts
 blotter verify                    # check resolved cuts for later recurrences
 blotter retrospect                # mine chronic signal for typed promotion candidates
@@ -80,7 +92,7 @@ blotter doctor --fix              # quarantine unreadable lines (backup + atomic
 blotter archive --before 180d     # move fully closed, fully old history to a sidecar
 ```
 
-**Integrate** — harness plumbing and the machine contract:
+**Contract** — the machine contract:
 
 ```bash
 blotter schema                    # full machine contract — agents self-orient with this
@@ -88,15 +100,13 @@ blotter schema                    # full machine contract — agents self-orient
 
 One other path appends besides the write commands: `doctor --fix` appends in the course of a repair. `blotter schema` carries the authoritative `read_only`/`appends` annotation for every command.
 
-Six read commands — `list`, `triage`, `verify`, `digest`, `sweep`, and `export` — show hand-filed records by default; pass `--include-auto` to include records tagged `auto`. On `list`, `--tag auto` implies `--include-auto`, so you can ask for auto records by name without the extra flag. Nothing writes an `auto` record any more — see [Hooks](#hooks) — so those flags now reach stored history only.
-
 ## Cuts
 
-A cut is one or two sentences of friction: what you were doing, what got in the way. Not every stumble is a cut. Blotter is a selective ledger, not a transcript, and a cut is a claim that the friction has future value: it is **transferable** (another competent agent or user would plausibly hit it), **consequential** (it cost real time, produced incorrect work, forced retries, or stopped the task), **recurring** (small, but it has happened before, in which case one cut naming the recurrence beats three saying the same thing), **misleading** (the error pointed at the wrong cause or discouraged the correct fix), or **systemic** (a missing affordance, a documentation gap, a brittle interface, a reusable footgun). A cut must be consequential once, or meaningful because it is transferable or recurring.
+A cut is one or two sentences of friction: what you were doing, what got in the way. Not every stumble is a cut. Blotter is a selective ledger, not a transcript, and a cut is a claim that the friction has future value: it is **transferable** (another competent agent or user would plausibly hit it), **consequential** (it cost real time, produced incorrect work, forced retries, or stopped the task), **recurring** (small, but it has happened before, in which case one cut naming the recurrence beats three saying the same thing), **misleading** (the error pointed at the wrong cause or discouraged the correct fix), or **systemic** (a missing affordance, a documentation gap, a brittle interface, a reusable footgun). A cut must be consequential once, or carry knowledge beyond this run: transferable, recurring, misleading, or systemic.
 
 Skip typos, shell quoting mistakes, a bad first guess, using the wrong command or API once, a patch that missed because context was stale, a linter or compiler correctly rejecting code you just wrote, a malformed fixture authored during the task, one broad query that returned too much, and any transient mistake specific to the current run. These are execution events, not knowledge, unless recurrence or system behaviour makes them one.
 
-Severity describes consequence after that decision, not whether to file: `minor` (default) is a qualified cut with limited immediate cost, `major` cost real time or caused incorrect work, `blocker` stopped the task. A minor cut is still a cut. Tags group cuts by area; evidence flags capture the failing command without pasting it into the text.
+Impact describes consequence after that decision, not whether to file: `low` (default) is a qualified cut with limited immediate cost, `material` cost real time or caused incorrect work, `blocking` stopped the task. A low-impact cut is still a cut. Tags group cuts by area; evidence flags capture the failing command without pasting it into the text.
 
 A resolution you got wrong is corrected, not rewritten: `resolve <id> --amend` appends a second resolve event carrying the corrected fields. The first non-amend resolve stays the base event, the latest amend wins the materialized view (`resolution.amended: true`), and every original byte stays in the log. `--amend` needs at least one resolution field and every named record must already be resolved.
 
@@ -112,7 +122,13 @@ The base resolve is still in the log, as always. It is the materialized view tha
 
 `resolve` always returns a `data.records` array, including when only one ID is resolved. New records omit `repo`; their `cwd` is relative to the discovered repository root when possible, and otherwise goes through the same home-path rewrite as evidence — the exact `$HOME`, a generic `/Users/<user>` or `/home/<user>`, and the dash-encoded slug harness scratchpad paths embed all become `~`, so a stored `cwd` does not trip `doctor --leaks`. A resolution `--note` goes through that rewrite too, as does a dogear's `--evidence`, so no field blotter invites you to fill can trip its own gate.
 
-New records carry `bl_`-prefixed IDs. Legacy `pc_` records remain readable as opaque historical data: existing logs fold and list normally, and `resolve` accepts explicit `pc_` IDs or prefixes. New records never use the prefix.
+Every record carries a `bl_`-prefixed ID under the one `bl2` namespace — `bl_` plus 20 lowercase hex, one width for every record kind — and an ID argument is an optional `bl_` plus at least four hexadecimal digits, matched case-insensitively. A prefix that matches nothing is `not_found`; one that matches several records is `ambiguous_id` listing every match, with no exact-full-ID precedence.
+
+Every resolution of a cut also names its fate: `--disposition fixed|promoted|accepted|invalid` is required for a cut and rejected for a dogear, so a batch naming both is rejected before anything is appended. `fixed` and `promoted` are recurrence anchors; `accepted` is friction deliberately tolerated and `invalid` says the cut was never friction. An `--amend` may change the disposition and otherwise inherits it, along with `disposition_ts` — the moment the classification was made, which a note-only correction does not move.
+
+### Upgrading from 0.15
+
+1.0.0 is a fresh ledger. Every record carries `"v":2` as its first member, and a log holding any record without it is refused whole with `unsupported_log_version` (exit 65) and left byte-identical — no partial fold, no repair, no backup. Rename the old file out of the discovery path to a name that does not exist yet, and the next `blotter add` creates a fresh v2 log beside it; keep the 0.15 binary and point it at the old file with `--file` when the history is wanted. Nothing rewrites the old file, ever. Record IDs all change, because every record now hashes under `bl2`.
 
 ## Dogears
 
@@ -123,16 +139,32 @@ blotter dogear "The retry-backoff pattern in our fetch helper would make a good 
 blotter idea - --tag blog-post    # pipe a dogear from stdin
 blotter list --kind dogear         # dogear backlog, newest first
 blotter list --kind all --format md
-blotter resolve bl_9f2c           # promoted to writing work, or dropped
+blotter resolve bl_9f2c           # graduated to writing work
 blotter resolve <id> --url <url>  # dogear published at a URL
 blotter resolve <id> --dropped    # dogear intentionally dropped
 ```
 
-Dogears use the same append-only journal, agent resolution, tags, dry-run, deterministic clock override, and resolve events as cuts. `resolve --task`, `--pr`, and `--commit` work for either kind. `--url` and `--dropped` are dogear-only, conflict with each other, and reject a mixed cut/dogear batch before anything is appended. Dogears have no severity or failure-command fields; `list --severity` is therefore accepted only with the default `--kind cut`.
+Dogears use the same append-only journal, agent resolution, tags, dry-run, deterministic clock override, and resolve events as cuts. `resolve --task`, `--pr`, and `--commit` work for either kind. `--url` and `--dropped` are dogear-only, conflict with each other, and reject a mixed cut/dogear batch before anything is appended. Dogears have no impact or failure-command fields; `list --impact` is therefore accepted only with the default `--kind cut`.
+
+## Promotions
+
+A promotion is the third record kind: durable learning, recorded as "these experiences became this artifact". It names one or more source **cuts**, an artifact type from the closed vocabulary `doc|skill|guard|test|tool|process`, and a reference to where the artifact lives.
+
+```bash
+blotter promote --source bl_9f2c --source bl_a81e \
+  --artifact-type skill --artifact-ref skills/testing.md \
+  --note "Repeated fixture failures promoted into reusable test-authoring guidance."
+blotter list --kind promotion             # every promotion, newest first
+blotter resolve bl_9f2c --disposition promoted --promotion <promotion id>
+```
+
+Sources are cuts only, open or resolved — a promotion records where learning came from, not whether the friction is closed. A dogear or another promotion as a `--source` is rejected. `--artifact-ref` and `--note` are redacted before hashing and before the append, so the hashed bytes are the stored bytes; the note is deliberately outside the ID hash, so rewording it does not make a different promotion.
+
+`promote` never writes a resolve event, and a promotion is never resolved. Naming a cut's fate stays a separate act: `resolve --disposition promoted --promotion <id>`, whose link must be mutual — the promotion must already list that cut in its `sources`, or the whole resolve batch is refused before anything is appended.
 
 ## Triage
 
-`triage` is a read-only scan of open cuts. Cuts whose normalized titles are identical always link, regardless of tags. Otherwise, cuts must share a tag (or both be untagged), then link from filtered tokens: 80% overlap with the shorter token set, or at least three shared tokens that appear in no more than `max(2, ceil(scanned / 4))` open cuts. Filtering removes tokens of two characters or fewer, the Snowball English stopword list normalized the same way tokens are, and four retained filler words the Snowball list omits: `need`, `one`, `use`, `uses`. Only clusters that meet the threshold are reported; resolved cuts and dogears are excluded. Each cluster carries `occurrences` — how many open cuts share the normalized title of the cluster's displayed `text`. The JSON output suggests `graduate` for each chronic cluster, and exit 1 means at least one was found. Records tagged `auto` are excluded by default; pass `--include-auto` to include them.
+`triage` is a read-only scan of open cuts. Cuts whose normalized titles are identical always link, regardless of tags. Otherwise, cuts must share a tag (or both be untagged), then link from filtered tokens: 80% overlap with the shorter token set, or at least three shared tokens that appear in no more than `max(2, ceil(scanned / 16))` open cuts. At or below 32 scanned cuts the ceiling is the floor of 2, so a shared token counts only when no other open cut carries it. Filtering removes tokens of two characters or fewer, the Snowball English stopword list normalized the same way tokens are, and four retained filler words the Snowball list omits: `need`, `one`, `use`, `uses`. Only clusters that meet the threshold are reported; resolved cuts and dogears are excluded. Each cluster carries `occurrences` — how many open cuts share the normalized title of the cluster's displayed `text`. Exit 1 means at least one was found.
 
 ```bash
 blotter triage --min-count 3
@@ -142,23 +174,25 @@ blotter triage --min-count 3
 
 ## Verify
 
-`verify` is a read-only check for cuts that reappear after they were resolved. Each eligible resolved cut is an anchor. A later open cut recurs when it matches under the same exact-title, tag, and filtered-token linkage rules as `triage`. Dogears, dropped resolutions, and blank normalized resolved titles are ignored. One open cut can be reported against more than one resolved anchor. Records tagged `auto` are excluded by default; pass `--include-auto` to include them.
+`verify` is a read-only check for cuts that reappear after they were resolved. An anchor is a resolved cut whose winning disposition is `fixed` or `promoted`: `accepted` is excluded because tolerating the friction was the deliberate decision, not a claimed fix, and `invalid` is excluded because it says the anchor was never friction at all. A later open cut recurs when it matches under the same exact-title, tag, and filtered-token linkage rules as `triage`. Dogears, dropped resolutions, and blank normalized resolved titles are ignored. One open cut can be reported against more than one resolved anchor.
 
 ```bash
 blotter verify
 ```
 
-The JSON envelope includes each anchor's resolution timestamp and optional task, pull request, and commit provenance, plus the later recurrence IDs. The top-level `count` is the number of matched anchors, not the number of live problems — a single recurring cut resembling three resolved anchors reports `count: 3` and `distinct_recurring_cuts: 1`. Exit 1 means one or more recurrences were found; no recurrences is exit 0.
+The JSON envelope includes each anchor's resolution timestamp, disposition, and optional task, pull request, and commit provenance, plus the later recurrence IDs. The top-level `count` is the number of matched anchors, not the number of live problems — a single recurring cut resembling three resolved anchors reports `count: 3` and `distinct_recurring_cuts: 1`. Exit 1 means one or more recurrences were found; no recurrences is exit 0.
+
+The "later" boundary is the winning resolution's `disposition_ts` — the moment the disposition was decided — not its `ts`, so a note-only `--amend` never moves it. An empty result means no recurrence was observed in this log after `disposition_ts`; it is evidence the intervention held, not proof that the friction is fixed.
 
 ## Retrospect
 
-`retrospect` is a read-only mining pass over one log. It asks a different question than `triage`: not "what keeps hurting" but "what has hurt often enough to be worth building something for". It reuses triage's clustering and verify's recurrence rules unchanged, then types the result by evidence shape. A chronic cluster becomes a `wrapper_alias` candidate when half or more of its members share one failing leading program, or a `doc_repair` candidate when half or more are tagged `docs` or `documentation`; the wrapper type wins when both match. Every recurrence group of two or more members becomes a `skill_candidate`, because a cut that was resolved and came back is a recovery worth capturing. A cluster that matches no rule emits nothing and stays an ordinary cut.
+`retrospect` is a read-only mining pass over one log. It asks a different question than `triage`: not "what keeps hurting" but "what has hurt often enough to be worth building something for". It reuses triage's clustering and verify's recurrence rules unchanged, then judges each result on two separate axes: what `pattern` the evidence shows, and what kind of artifact is `suggested` to answer it. A chronic cluster is a `recurrent_friction` pattern; within it, a cluster where half or more of its members share one failing leading program suggests `["tool","guard"]`, and one where half or more are tagged `docs` or `documentation` suggests `["doc"]` — the program rule wins when both match, deciding what is suggested, not the pattern. Every recurrence group of two or more members under verify's anchor rules is a `failed_intervention` pattern, suggesting `["skill"]`, because a cut that was resolved and came back is a recovery worth capturing. Only these two patterns ship. A cluster that matches no rule emits nothing and stays an ordinary cut.
 
 ```bash
 blotter retrospect
 ```
 
-Retrospect takes no window and no flags: chronic signal is long-horizon, so a window would hide the evidence it looks for. It also **includes auto-captured records by default**, inverting the rule the other read commands follow — the repeated-command-failure signal behind `wrapper_alias` lives in the `auto` lane, so excluding it would remove the point of the command. That lane is [retired](#hooks) and no longer grows, so this default now reaches stored history only.
+Retrospect takes no window and no flags: chronic signal is long-horizon, so a window would hide the evidence it looks for.
 
 Each candidate carries its record IDs, first and last timestamps, and bounded evidence: at most 10 member texts and 5 resolution notes, never a record's evidence command, stderr, or note. `occurrences` counts each distinct normalized title in the candidate once, so members that share a title do not multiply the count. Exit 1 means candidates were found, exit 0 means none.
 
@@ -166,7 +200,7 @@ Retrospect never writes anything — no doc, no skill, no alias, and no record i
 
 ## Digest
 
-`digest` is the periodic read-only report: what keeps recurring, what is new, and what ideas are waiting. It combines three views — chronic clusters (the triage analysis at a threshold of 2), open cuts filed inside the window grouped by tag, and all open dogears. Records tagged `auto` are excluded by default; pass `--include-auto` to include them.
+`digest` is the periodic read-only report: what keeps recurring, what is new, and what ideas are waiting. It combines three views — chronic clusters (the triage analysis at a threshold of 2), open cuts filed inside the window grouped by tag, and all open dogears. The JSON envelope also carries `accepted_cuts: {count}` — cuts whose winning disposition is `accepted` and whose `disposition_ts` falls inside the window. `--format md` renders nothing for it; `accepted` is the one disposition that hides friction on purpose, and a bare count keeps that hide rate visible.
 
 ```bash
 blotter digest --since 7d              # JSON envelope, default window
@@ -186,7 +220,7 @@ blotter sweep --registry ~/.config/blotter-repos.txt --since 14d --kind all
 
 Each path is a repository directory or a direct JSONL log. A **repository directory** means a directory inside a git working tree: sweep walks up to the nearest `.git` and reads `<repo root>/.blotter.jsonl`. A directory that holds a `.blotter.jsonl` but is not under git is skipped with `not a repository directory` — point sweep at the log file itself in that case. A registry is a plain text file you own with one path per line; blank lines and `#` comments are ignored, and relative paths resolve from the registry file's own directory. Like `--file`, it must name a regular file: a directory, or bytes that are not UTF-8, is `invalid_input` (exit 65) rather than a generic I/O failure, and a missing registry is `not_found` (exit 66). `blotter` never creates or looks for a registry on its own — there is no blotter-owned config file.
 
-Sweep reads one log at a time under a shared lock and never writes. `BLOTTER_FILE` is ignored and the global `--file` flag is rejected, because sweep's inputs are its arguments. A path that is locked, unreadable, or not a repository directory becomes a skip warning and does not fail the run: sweep exits 0 with `totals.repos_skipped` set, deliberately unlike the exit-75 lock-timeout rule elsewhere. Check `totals.repos_swept` against the number of paths you passed — an all-skipped run still exits 0. Records tagged `auto` are excluded by default; pass `--include-auto` to include them.
+Sweep reads one log at a time under a shared lock and never writes. `BLOTTER_FILE` is ignored and the global `--file` flag is rejected, because sweep's inputs are its arguments. A path that is locked, unreadable, or not a repository directory becomes a skip warning and does not fail the run: sweep exits 0 with `totals.repos_skipped` set, deliberately unlike the exit-75 lock-timeout rule elsewhere. Check `totals.repos_swept` against the number of paths you passed — an all-skipped run still exits 0.
 
 ## Export
 
@@ -197,23 +231,13 @@ blotter export --format otlp-json
 blotter export --format otlp-json --since 30d > friction.otlp.json
 ```
 
-`--format otlp-json` is required: a bare `export` is `invalid_argument`, reported before the clock is read. `--since` takes a full RFC3339 timestamp or an `Nd`/`Nh` duration. Records tagged `auto` are excluded by default; pass `--include-auto` to include them. Only cuts are exported — dogears are out of scope.
+`--format otlp-json` is required: a bare `export` is `invalid_argument`, reported before the clock is read. `--since` takes a full RFC3339 timestamp or an `Nd`/`Nh` duration. Only cuts are exported — dogears are out of scope.
 
-Cuts of every status are exported, and the status travels as the `blotter.friction.status` attribute (`open`, `resolved`, or `dropped`) rather than as a selector: there is no flag to export one status. Each cut becomes a log record with `eventName` `blotter.friction.reported`, a decimal-string `timeUnixNano`, the cut text as the body, severity mapped to OTLP (`minor`/`major`/`blocker` → `INFO`/`WARN`/`ERROR`), and `blotter.friction.*` attributes for id, severity, status, agent, tags, and `cwd`; a resolved cut also carries `blotter.friction.resolved_ts`.
+Cuts of every status are exported, and the status travels as the `blotter.friction.status` attribute (`open`, `resolved`, or `dropped`) rather than as a selector: there is no flag to export one status. Each cut becomes a log record with `eventName` `blotter.friction.reported`, a decimal-string `timeUnixNano`, the cut text as the body, impact mapped to OTLP (`low`/`material`/`blocking` → `INFO`/`WARN`/`ERROR`), and `blotter.friction.*` attributes for id, impact, status, agent, tags, and `cwd`; a resolved cut also carries `blotter.friction.resolved_ts`.
 
 Evidence fields are never exported. A failed command, its stderr, and free-form evidence notes are the parts of a cut most likely to hold local paths or secrets, so the outward mapping leaves them in the log. Trace and span identity is absent for the same reason — the bridge reports friction, it does not join your traces — and so is `schemaUrl`.
 
 Output is deterministic: records sort by timestamp, then by id, and an empty selection is a stable empty record list at exit 0. OTLP types `timeUnixNano` as an unsigned 64-bit value, so a selected record whose timestamp falls outside that range (pre-1970, or past the ceiling) rejects the **whole** export with `invalid_input` (exit 65), naming the offending record and timestamp. There is no partial output and no silently skipped record; correct that record, or exclude it with `--since`, then export again.
-
-## Hooks
-
-**The Claude Code auto-capture lane is retired.** `blotter hook install claude-code` no longer exists, and `blotter hook exec claude-code` files nothing.
-
-It used to auto-file a minor `auto`-tagged cut for every failed Bash tool call. Ten days of dogfooding produced 27 such records and no reader: they were hidden from every read command by default, and what they stored was a failed command line with no statement of why the failure mattered. A non-zero exit is not a claim that something got in the way, and successive gates narrowed the lane without ever making a captured record worth reading. File friction by hand with `blotter add` — one or two sentences saying what you were doing and what got in the way. That is the channel.
-
-Records already tagged `auto` stay in the log, because the log is append-only. They remain hidden from `list`, `triage`, `digest`, `verify`, `sweep`, and `export` by default; pass `--include-auto` to read them. `retrospect` still includes them without a flag.
-
-`blotter hook exec claude-code` survives as a no-op receiver so a settings file installed against an older binary cannot break the session it was meant to observe: it reads and discards stdin, resolves no clock, opens no log, keeps stdout empty, and always exits 0. `BLOTTER_HOOK_EXPLAIN=1` makes it write one stderr line naming the retirement; any other value keeps it silent. Delete the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from your Claude Code settings — blotter no longer writes another program's configuration at all.
 
 ## Doctor
 
@@ -223,9 +247,12 @@ Records already tagged `auto` stay in the log, because the log is append-only. T
 |---|---|---|
 | `torn_line`, `malformed`, `conflict_marker` | yes | Run `blotter doctor --fix`. Removed lines are quarantined verbatim. |
 | `id_conflict` | no | A record's ID does not recompute from its payload, usually because it was written before an ID-format change. Leave it — see below. |
-| `duplicate_cut`, `duplicate_dogear` | no | First-wins fold warnings. Harmless — compaction is not worth a rewrite. |
+| `duplicate_cut`, `duplicate_dogear`, `duplicate_promotion` | no | First-wins fold warnings. Harmless — compaction is not worth a rewrite. |
+| `dangling_source` | no | A promotion names a source that resolves to nothing, or to a dogear or a promotion, in this log. Only a human knows whether the cut was wrongly archived or the promotion wrongly written. |
 | `orphan_resolve` | no | Either a resolve event whose ID matches no record — often merge ordering, harmless to the fold — or an amend for a known record that has no base resolve anywhere in the log. The second cannot come from merge ordering, so it points at a truncated or hand-edited log; append the missing base resolve. One finding per orphan line. |
 | `unknown_kind` | no | A record kind this build does not know. Left alone for forward compatibility. |
+| `invalid_resolution` | no | A resolve event that breaks a rule of the resolution contract (a disposition on a dogear, none on a cut, a `--promotion` link that is not mutual). The fold skips it; the message names the record and every rule broken. Re-resolve the record with a valid event. |
+| `unsupported_version` | no | The log was written by 0.15 or earlier. Nothing in it is diagnosed under 1.0.0 rules and nothing is changed. See [Upgrade to 1.0.0](#upgrade-to-100). |
 | `gitignored` | no | Fix `.gitignore`, not the log. |
 
 `doctor --fix` repairs unreadable lines by writing a repaired copy and atomically swapping it in — the original is kept as a timestamped backup and every removed line is preserved verbatim in `<log>.quarantine.jsonl`. `--dry-run` plans the repairs without writing.
@@ -236,7 +263,7 @@ An unhealthy report is therefore not always something to repair. `id_conflict` i
 
 ## Archive
 
-`archive` is the retention command: it retires history that is finished and old, and leaves everything else alone. A record group is removed only when **both** conditions hold — its materialized state is resolved or dropped, and every event in the group (the record and its resolves) is older than `--before`. An open cut, or a closed cut whose resolve landed after the cutoff, stays. So do orphan resolves, malformed lines, unknown record kinds, and legacy `pc_` records: only `bl_` groups are eligible.
+`archive` is the retention command: it retires history that is finished and old, and leaves everything else alone. A record group is removed only when **both** conditions hold — its materialized state is resolved or dropped, and every event in the group (the record and its resolves) is older than `--before`. An open cut, or a closed cut whose resolve landed after the cutoff, stays. So do orphan resolves, malformed lines, unknown record kinds, and any record whose ID does not start with `bl_`: only `bl_` groups are eligible. A resolved cut named in any promotion's `sources` is pinned and never archived, however old the group or the promotion — severing that link would turn a durable artifact's justification into a dangling ID. Promotions have no state to close and never archive.
 
 ```bash
 blotter archive --before 180d --dry-run   # plan only, writes nothing
@@ -275,9 +302,9 @@ it the same way:
 
     blotter dogear "<the idea>" --tag <area>
 
-Don't stop working; file it and push through. Severity is consequence, not
-admission: blocker if you could not proceed, major if you lost real time or
-did wrong work, minor (default) for a qualified cut with limited cost. Run
+Don't stop working; file it and push through. Impact is consequence, not
+admission: blocking if you could not proceed, material if you lost real time or
+did wrong work, low (default) for a qualified cut with limited cost. Run
 `blotter schema` once if you need the full contract. Attach `--cmd`, `--exit`,
 or `--stderr-file` when filing tool failures; never feed raw environment dumps.
 ```
@@ -296,13 +323,15 @@ Duplicate lines after a merge are harmless — the fold is first-wins and `blott
 
 **Private.** Prefer not to commit them? `echo .blotter.jsonl >> .gitignore`, or point `BLOTTER_FILE` somewhere else entirely. Outside a git repo, records go to `~/.blotter/log.jsonl`.
 
-**Historical papercuts migration.** Earlier releases instructed users to run `mv .papercuts.jsonl .blotter.jsonl` (and update `.gitignore`/`.gitattributes`); a rename preserves every byte. Current releases neither discover `.papercuts.jsonl` nor emit migration warnings. Existing records remain readable after that cutoff.
+**Historical papercuts migration.** Earlier releases instructed users to run `mv .papercuts.jsonl .blotter.jsonl` (and update `.gitignore`/`.gitattributes`); a rename preserves every byte. Current releases neither discover `.papercuts.jsonl` nor emit migration warnings, and 1.0.0 refuses any log written before it: those records stay on disk untouched, and the 0.15 binary is the last one that reads them. See [Upgrade to 1.0.0](#upgrade-to-100).
 
 ## Contract
 
-Everything an agent needs is in `blotter schema`: commands and flags with read-only/appends annotations, env vars (`BLOTTER_FILE`, `BLOTTER_AGENT`, `BLOTTER_NOW`, `BLOTTER_HOOK_EXPLAIN`), record shapes, error codes, and the exit-code dictionary (0 success · 1 command findings · 2 usage · 65 bad input · 66 not found · 70 internal · 74 I/O · 75 lock timeout, retryable · 77 permission denied · 78 config). Empty results are exit 0, never errors.
+Everything an agent needs is in `blotter schema`: commands and flags with read-only/appends annotations, env vars (`BLOTTER_FILE`, `BLOTTER_AGENT`, `BLOTTER_NOW`), record shapes, error codes, and the exit-code dictionary (0 success · 1 command findings · 2 usage · 65 bad input · 66 not found · 70 internal · 74 I/O · 75 lock timeout, retryable · 77 permission denied · 78 config). Empty results are exit 0, never errors.
 
 Exit 1 is not an error — it is a finding count. `doctor` returns it for an unhealthy log, `triage` for at least one chronic cluster, `verify` for at least one recurrence, and `retrospect` for at least one promotion candidate. Each command's own `exit_codes` entry in `blotter schema` says which meaning applies.
+
+**What is stable.** The 1.x compatibility promise covers the CLI (commands, flags, env vars), the JSON envelopes, the stored JSONL record format, the exit codes, and `blotter schema`; a change to any of them is a `meta.contract` bump. The Rust library the crate also builds (`blotter::*`) is the binary's implementation, not a supported integration API: its items are public to structure the binary and may change in any release without notice. Integrate through the CLI.
 
 ## License
 

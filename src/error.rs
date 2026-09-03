@@ -23,6 +23,13 @@ pub struct ErrorContract {
     pub description: &'static str,
 }
 
+/// The published description for exit 65. Three codes map to it, so the string
+/// is authored to name all three rather than left to whichever `ERROR_CONTRACT`
+/// entry `exit_code_map` happens to insert last (r48). Every 65 entry carries
+/// it, so the map cannot drift with the table's order.
+pub const EXIT_65_DESCRIPTION: &str =
+    "invalid input data, including an ambiguous ID or an unsupported log version";
+
 pub const ERROR_CONTRACT: &[ErrorContract] = &[
     ErrorContract {
         code: "invalid_argument",
@@ -32,7 +39,7 @@ pub const ERROR_CONTRACT: &[ErrorContract] = &[
     ErrorContract {
         code: "invalid_input",
         exit_code: 65,
-        description: "invalid input data",
+        description: EXIT_65_DESCRIPTION,
     },
     ErrorContract {
         code: "not_found",
@@ -42,7 +49,12 @@ pub const ERROR_CONTRACT: &[ErrorContract] = &[
     ErrorContract {
         code: "ambiguous_id",
         exit_code: 65,
-        description: "invalid input data including ambiguous ID",
+        description: EXIT_65_DESCRIPTION,
+    },
+    ErrorContract {
+        code: "unsupported_log_version",
+        exit_code: 65,
+        description: EXIT_65_DESCRIPTION,
     },
     ErrorContract {
         code: "io_error",
@@ -70,6 +82,17 @@ pub const ERROR_CONTRACT: &[ErrorContract] = &[
         description: "internal error",
     },
 ];
+
+/// The refusal text, shared by the error envelope and `doctor`'s
+/// `unsupported_version` finding so the two cannot drift. It names the offending
+/// line and what was found there, never the path.
+pub fn unsupported_log_version_message(line: usize, found_version: Option<&Value>) -> String {
+    let found = match found_version {
+        Some(value) => format!("found v {value}"),
+        None => "record has no v field".to_owned(),
+    };
+    format!("unsupported log version on line {line}: {found}")
+}
 
 pub fn exit_code_for(code: &str) -> i32 {
     ERROR_CONTRACT
@@ -111,11 +134,39 @@ impl AppError {
     pub fn ambiguous_id(prefix: &str, candidates: Vec<String>) -> Self {
         let mut error = Self::new(
             "ambiguous_id",
-            format!("ID prefix '{prefix}' matches multiple cuts"),
+            format!("ID prefix '{prefix}' matches multiple records"),
             false,
             "Use one of the full IDs listed in error.details.candidates.",
         );
         error.details = json!({ "candidates": candidates });
+        error
+    }
+
+    /// The 0.15 → 1.0.0 upgrade refusal (r48, r49, r50). The message names the
+    /// offending line and what was found there and never the path: `sweep`
+    /// prefixes its warning with the path, and the resolved path is carried in
+    /// `details.file` and in `suggested_fix`. `found_version` is present
+    /// verbatim for any `v` other than the integer 2 — `null` included — and
+    /// omitted only when the key was absent, so absent and wrong are told apart
+    /// by key presence.
+    pub fn unsupported_log_version(
+        path: &std::path::Path,
+        line: usize,
+        found_version: Option<&Value>,
+    ) -> Self {
+        let mut error = Self::new(
+            "unsupported_log_version",
+            unsupported_log_version_message(line, found_version),
+            false,
+            format!(
+                "Rename {} to a path that does not yet exist, then run `blotter add` to create a fresh v2 log.",
+                path.display()
+            ),
+        );
+        error.details = json!({ "file": path.to_string_lossy(), "line": line });
+        if let Some(value) = found_version {
+            error.details["found_version"] = value.clone();
+        }
         error
     }
 

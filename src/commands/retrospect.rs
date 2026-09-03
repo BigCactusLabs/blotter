@@ -44,8 +44,8 @@ pub struct RetrospectData {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RetrospectCandidate {
-    #[serde(rename = "type")]
-    pub candidate_type: String,
+    pub pattern: crate::Pattern,
+    pub suggested: Vec<crate::ArtifactType>,
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub program: Option<String>,
@@ -71,10 +71,9 @@ struct OrderedCandidate {
 
 pub fn run(_args: RetrospectArgs, file: Option<PathBuf>, pretty: bool) -> AppResult<i32> {
     let resolved = store::discover(file)?;
-    let store::LoadedFold { items, warnings } = store::load_folded(&resolved)?;
-    // Retrospect intentionally does not partition auto-captures. Promotion
-    // mining needs the hook's repeated-command-failure signal alongside
-    // hand-filed narration.
+    let store::LoadedFold {
+        items, warnings, ..
+    } = store::load_folded(&resolved)?;
     let data = retrospect(items);
     let exit = i32::from(!data.candidates.is_empty());
     let mut meta = Meta::new();
@@ -99,10 +98,28 @@ fn retrospect(items: Vec<crate::ListItem>) -> RetrospectData {
         .chain(recurrences.recurrences.iter().filter_map(skill_candidate))
         .collect();
     candidates.sort_by(|left, right| {
+        // Same comparator as before the pattern/suggested rename (r48): the
+        // tie-break that used to run on `candidate_type` now runs on
+        // `pattern` then `suggested`, so a fixture whose old type collapsed
+        // two candidates onto one tie-break value can now separate them
+        // (or vice versa) purely from the renamed axis, never from new data.
         left.first_timestamp
             .cmp(&right.first_timestamp)
             .then_with(|| left.data.title.cmp(&right.data.title))
-            .then_with(|| left.data.candidate_type.cmp(&right.data.candidate_type))
+            .then_with(|| (left.data.pattern as u8).cmp(&(right.data.pattern as u8)))
+            .then_with(|| {
+                left.data
+                    .suggested
+                    .iter()
+                    .map(|artifact| artifact.as_str())
+                    .cmp(
+                        right
+                            .data
+                            .suggested
+                            .iter()
+                            .map(|artifact| artifact.as_str()),
+                    )
+            })
             .then_with(|| left.data.record_ids.cmp(&right.data.record_ids))
             .then_with(|| {
                 left.data
@@ -125,10 +142,13 @@ fn retrospect(items: Vec<crate::ListItem>) -> RetrospectData {
 fn cluster_candidate(cluster: &ChronicCluster) -> Option<OrderedCandidate> {
     let members = &cluster.members;
     let program = shared_program(members);
-    let candidate_type = if program.is_some() {
-        "wrapper_alias"
+    // r48: the shared-failing-program rule takes precedence over the
+    // docs-tag rule (first match wins); it now decides `suggested`, not
+    // `pattern` — both mappings land on the same recurrent_friction pattern.
+    let suggested: Vec<crate::ArtifactType> = if program.is_some() {
+        vec![crate::ArtifactType::Tool, crate::ArtifactType::Guard]
     } else if docs_member_count(members) >= members.len().div_ceil(2) {
-        "doc_repair"
+        vec![crate::ArtifactType::Doc]
     } else {
         return None;
     };
@@ -138,7 +158,8 @@ fn cluster_candidate(cluster: &ChronicCluster) -> Option<OrderedCandidate> {
     Some(OrderedCandidate {
         first_timestamp: first.timestamp,
         data: RetrospectCandidate {
-            candidate_type: candidate_type.into(),
+            pattern: crate::Pattern::RecurrentFriction,
+            suggested,
             // Triage's first member is the stable representative. Its raw
             // text is the promotion title, matching triage's cluster text
             // and the resolved-anchor titles below.
@@ -246,7 +267,8 @@ fn skill_candidate(group: &RecurrenceGroup) -> Option<OrderedCandidate> {
     Some(OrderedCandidate {
         first_timestamp: first.timestamp,
         data: RetrospectCandidate {
-            candidate_type: "skill_candidate".into(),
+            pattern: crate::Pattern::FailedIntervention,
+            suggested: vec![crate::ArtifactType::Skill],
             title: group.anchor.item.text.clone(),
             program: None,
             record_ids: group

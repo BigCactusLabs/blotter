@@ -22,15 +22,16 @@ fn archive_jsonl(value: Value) -> Vec<u8> {
 }
 
 fn archive_cut(ts: &str, text: &str) -> (String, Vec<u8>) {
-    let id = compute_id(ts, "archive", text, Severity::Minor, &[]);
+    let id = compute_id(ts, "archive", text, Impact::Low, &[]);
     let line = archive_jsonl(json!({
+        "v": 2,
         "kind": "cut",
         "id": id,
         "ts": ts,
         "agent": "archive",
         "text": text,
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp"
     }));
     (id, line)
@@ -39,6 +40,7 @@ fn archive_cut(ts: &str, text: &str) -> (String, Vec<u8>) {
 fn archive_dogear(ts: &str, text: &str) -> (String, Vec<u8>) {
     let id = compute_dogear_id(ts, "archive", text, &[]);
     let line = archive_jsonl(json!({
+        "v": 2,
         "kind": "dogear",
         "id": id,
         "ts": ts,
@@ -50,8 +52,29 @@ fn archive_dogear(ts: &str, text: &str) -> (String, Vec<u8>) {
     (id, line)
 }
 
+/// A resolve line for the archive fixtures. A resolve targeting a cut must
+/// carry `disposition` and `disposition_ts` or the fold discards it as invalid
+/// and the group never closes; a resolve targeting a dogear must carry neither.
+/// Every v2 identity is one width (r51), so the kind cannot be read off the ID
+/// and the caller states it. A non-`bl_` ID is only ever an orphan here, where
+/// validity is never evaluated.
 fn archive_resolution(id: &str, ts: &str, dropped: bool, amend: bool) -> Vec<u8> {
-    archive_jsonl(json!({
+    archive_resolution_of(id, ts, dropped, amend, true)
+}
+
+fn archive_dogear_resolution(id: &str, ts: &str, dropped: bool, amend: bool) -> Vec<u8> {
+    archive_resolution_of(id, ts, dropped, amend, false)
+}
+
+fn archive_resolution_of(
+    id: &str,
+    ts: &str,
+    dropped: bool,
+    amend: bool,
+    disposition: bool,
+) -> Vec<u8> {
+    let mut value = json!({
+        "v": 2,
         "kind": "resolve",
         "id": id,
         "ts": ts,
@@ -59,7 +82,12 @@ fn archive_resolution(id: &str, ts: &str, dropped: bool, amend: bool) -> Vec<u8>
         "note": null,
         "dropped": dropped,
         "amend": amend
-    }))
+    });
+    if disposition {
+        value["disposition"] = json!("fixed");
+        value["disposition_ts"] = json!(ts);
+    }
+    archive_jsonl(value)
 }
 
 fn physical_line_multiset(bytes: &[u8]) -> Vec<Vec<u8>> {
@@ -93,33 +121,39 @@ fn archive_removes_only_closed_wholly_old_current_groups() {
     let (_, old_open_cut) = archive_cut("2026-07-01T00:00:00Z", "old open cut");
 
     let (old_dogear_id, old_dogear) = archive_dogear("2026-07-01T00:00:00Z", "old resolved dogear");
-    let old_drop = archive_resolution(&old_dogear_id, "2026-07-02T00:00:00Z", false, false);
+    let old_drop = archive_dogear_resolution(&old_dogear_id, "2026-07-02T00:00:00Z", false, false);
 
     let (_, cutoff_cut) = archive_cut("2026-07-01T00:00:00Z", "cutoff is exclusive");
     let cutoff_id = compute_id(
         "2026-07-01T00:00:00Z",
         "archive",
         "cutoff is exclusive",
-        Severity::Minor,
+        Impact::Low,
         &[],
     );
     let cutoff_resolve = archive_resolution(&cutoff_id, cutoff, false, false);
 
-    let orphan = archive_resolution("bl_deadbeef0000", "2026-07-01T00:00:00Z", false, false);
+    let orphan = archive_resolution(
+        "bl_deadbeef000000000000",
+        "2026-07-01T00:00:00Z",
+        false,
+        false,
+    );
     let malformed = b"not json\n".to_vec();
-    let unknown = archive_jsonl(json!({"kind":"future","ts":"2026-07-01T00:00:00Z"}));
-    let legacy = archive_jsonl(json!({
+    let unknown = archive_jsonl(json!({"v":2,"kind":"future","ts":"2026-07-01T00:00:00Z"}));
+    let foreign = archive_jsonl(json!({
+        "v": 2,
         "kind": "cut",
-        "id": "pc_a1b2c3d4e5f6",
+        "id": "zz_a1b2c3d4e5f6",
         "ts": "2026-07-01T00:00:00Z",
-        "agent": "legacy",
-        "text": "legacy closed cut",
+        "agent": "foreign",
+        "text": "foreign-prefix closed cut",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp"
     }));
-    let legacy_resolve =
-        archive_resolution("pc_a1b2c3d4e5f6", "2026-07-02T00:00:00Z", false, false);
+    let foreign_resolve =
+        archive_resolution("zz_a1b2c3d4e5f6", "2026-07-02T00:00:00Z", false, false);
 
     let lines = vec![
         old_cut.clone(),
@@ -137,8 +171,8 @@ fn archive_removes_only_closed_wholly_old_current_groups() {
         orphan,
         malformed,
         unknown,
-        legacy,
-        legacy_resolve,
+        foreign,
+        foreign_resolve,
     ];
     let original = lines.concat();
     std::fs::write(&file, &original).unwrap();
@@ -326,13 +360,14 @@ fn archive_keeps_duplicate_group_when_a_duplicate_is_post_cutoff() {
     let (id, cut) = archive_cut("2026-07-01T00:00:00Z", "duplicate blocks archive");
     let resolve = archive_resolution(&id, "2026-07-02T00:00:00Z", false, false);
     let post_cutoff_duplicate = archive_jsonl(json!({
+        "v": 2,
         "kind": "cut",
         "id": id,
         "ts": "2026-08-02T00:00:00Z",
         "agent": "archive",
         "text": "duplicate blocks archive",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp"
     }));
     let original = [cut, resolve, post_cutoff_duplicate].concat();
@@ -589,4 +624,55 @@ fn archive_sole_newline_log_has_zero_physical_lines() {
     assert_eq!(archive.data["archived"], 0);
     assert_eq!(archive.data["kept"], 0);
     assert_eq!(std::fs::read(&file).unwrap(), b"\n");
+}
+
+#[test]
+fn a_resolved_cut_named_by_a_promotion_is_pinned_forever() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let pinned = add_at(&file, "2026-01-01T00:00:00Z", "pinned friction", &[]);
+    let pinned = pinned.data.record.cut_id().to_owned();
+    let free = add_at(&file, "2026-01-01T00:00:00Z", "free friction", &[]);
+    let free = free.data.record.cut_id().to_owned();
+    resolve_at(
+        &file,
+        "2026-01-02T00:00:00Z",
+        &pinned,
+        &["--agent", "fixer"],
+    );
+    resolve_at(&file, "2026-01-02T00:00:00Z", &free, &["--agent", "fixer"]);
+    let promotion: SuccessEnvelope<PromoteData> = success(&promote_at(
+        &file,
+        "2026-01-03T00:00:00Z",
+        &[
+            "--source",
+            &pinned,
+            "--artifact-type",
+            "doc",
+            "--artifact-ref",
+            "docs/x.md",
+        ],
+    ));
+    let promotion = promotion_id(&promotion.data.record);
+
+    // Every line predates the cutoff, so only the pin can keep the group.
+    let archived: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &["archive", "--before", "2026-06-01T00:00:00Z"],
+    ));
+    assert_eq!(archived.data["archived"], 2);
+
+    let remaining: Vec<Value> = std::fs::read_to_string(&file)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let ids: Vec<_> = remaining
+        .iter()
+        .map(|line| line["id"].as_str().unwrap())
+        .collect();
+    // The pinned cut, its resolve, and the promotion itself all stay; the free
+    // group is gone. A promotion has no state to close and never archives.
+    assert_eq!(ids, [pinned.as_str(), pinned.as_str(), promotion.as_str()]);
+    assert!(!ids.contains(&free.as_str()));
 }

@@ -1,7 +1,7 @@
 # Blotter Checkpoint — Higher Signal Floor + v2 Learning Architecture
 
 **Date:** 2026-09-01  
-**Status:** Design checkpoint  
+**Status:** Design checkpoint. Archived 2026-09-02 — superseded by docs/plans/2026-09-01-blotter-v2-plan.md and the design doc's amendments from r48 on; kept for provenance.  
 **Project:** Blotter  
 **Theme:** Raise the cut floor, simplify the product, and clarify Blotter as a selective experiential learning system.
 

@@ -5,8 +5,9 @@ fn doctor_reports_orphan_amend_for_unknown_record() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
     let orphan_amend = json!({
+        "v": 2,
         "kind": "resolve",
-        "id": "bl_deadbeef0000",
+        "id": "bl_deadbeef000000000000",
         "ts": "2026-07-09T18:30:00.123Z",
         "agent": "fixture",
         "note": "unknown record amend",
@@ -29,7 +30,10 @@ fn doctor_accepts_amend_for_existing_resolved_record() {
     let file = temp.path().join("cuts.jsonl");
     let cut = add(&file, "valid amend fixture");
     let id = cut.data.record.cut_id().to_owned();
-    let _: SuccessEnvelope<ResolveData> = success(&run_file(&file, &["resolve", &id]));
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &["resolve", "--disposition", "fixed", &id],
+    ));
     let _: SuccessEnvelope<ResolveData> = success(&run_file(
         &file,
         &["resolve", &id, "--amend", "--note", "corrected"],
@@ -37,6 +41,38 @@ fn doctor_accepts_amend_for_existing_resolved_record() {
 
     let doctor: SuccessEnvelope<DoctorData> = success(&run_file(&file, &["doctor"]));
     assert!(doctor.data.healthy);
+}
+
+/// A resolve is judged against the kind of the **first** record carrying its
+/// ID, because that is the record the fold materializes. A later same-ID
+/// record of the other kind is an `id_conflict`, never a reason to call a
+/// valid resolution invalid.
+#[test]
+fn doctor_judges_a_resolve_against_the_first_record_kind() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "first record wins");
+    let id = cut.data.record.cut_id().to_owned();
+    let dogear = format!(
+        "{{\"v\":2,\"kind\":\"dogear\",\"id\":\"{id}\",\"ts\":\"2026-09-02T00:00:00.000Z\",\"agent\":\"tester\",\"text\":\"same id, other kind\",\"tags\":[],\"cwd\":\".\"}}"
+    );
+    append_lines(&file, &[dogear]);
+    let _: SuccessEnvelope<ResolveData> = success(&run_file(
+        &file,
+        &["resolve", "--disposition", "fixed", &id],
+    ));
+
+    let output = run_file(&file, &["doctor"]);
+    assert_eq!(output.status.code(), Some(1));
+    let doctor: SuccessEnvelope<DoctorData> = serde_json::from_slice(&output.stdout).unwrap();
+    let kinds: Vec<&str> = doctor
+        .data
+        .findings
+        .iter()
+        .map(|f| f.kind.as_str())
+        .collect();
+    assert!(kinds.contains(&"id_conflict"), "{kinds:?}");
+    assert!(!kinds.contains(&"invalid_resolution"), "{kinds:?}");
 }
 
 /// The two halves of design doc r36: an amend with no base resolve anywhere in
@@ -50,12 +86,15 @@ fn doctor_reports_an_amend_whose_record_has_no_base_resolve() {
     let id = cut.data.record.cut_id().to_owned();
     let original = std::fs::read_to_string(&file).unwrap();
     let amend = json!({
+        "v": 2,
         "kind": "resolve",
         "id": id,
         "ts": "2026-07-09T18:30:00.123Z",
         "agent": "fixture",
         "note": "base-missing amend",
-        "amend": true
+        "amend": true,
+        "disposition": "fixed",
+        "disposition_ts": "2026-07-09T18:30:00.123Z"
     });
     std::fs::write(&file, format!("{original}{amend}\n")).unwrap();
 
@@ -81,19 +120,25 @@ fn doctor_accepts_an_amend_that_precedes_its_base_resolve() {
     let id = cut.data.record.cut_id().to_owned();
     let original = std::fs::read_to_string(&file).unwrap();
     let amend = json!({
+        "v": 2,
         "kind": "resolve",
         "id": id,
         "ts": "2026-07-09T18:30:00.123Z",
         "agent": "fixture",
         "note": "amend written first",
-        "amend": true
+        "amend": true,
+        "disposition": "fixed",
+        "disposition_ts": "2026-07-09T18:30:00.123Z"
     });
     let base = json!({
+        "v": 2,
         "kind": "resolve",
         "id": id,
         "ts": "2026-07-09T18:29:00.000Z",
         "agent": "fixture",
-        "note": "base written second"
+        "note": "base written second",
+        "disposition": "fixed",
+        "disposition_ts": "2026-07-09T18:29:00.000Z"
     });
     std::fs::write(&file, format!("{original}{amend}\n{base}\n")).unwrap();
 
@@ -102,7 +147,7 @@ fn doctor_accepts_an_amend_that_precedes_its_base_resolve() {
 
     // Doctor and the fold agree in this direction too: no orphan warning.
     let listed: SuccessEnvelope<ListData> = success(&run_file(&file, &["list", "--status", "all"]));
-    assert_eq!(listed.data.items[0].status, ItemStatus::Resolved);
+    assert_eq!(listed.data.items[0].record().status, ItemStatus::Resolved);
     assert!(
         listed.meta.warnings.is_empty(),
         "warnings: {:?}",
@@ -116,11 +161,11 @@ fn doctor_reports_all_core_findings_and_recomputed_ids() {
     let file = temp.path().join("cuts.jsonl");
     let good = add(&file, "valid").data.record;
     let good_line = std::fs::read_to_string(&file).unwrap();
-    let bad_id = json!({"kind":"cut","id":"bl_000000000000","ts":good.cut_ts(),"agent":"tester","text":"bad","tags":[],"severity":"minor","cwd":"/tmp","repo":null});
+    let bad_id = json!({"v":2,"kind":"cut","id":"bl_00000000000000000000","ts":good.cut_ts(),"agent":"tester","text":"bad","tags":[],"impact":"low","cwd":"/tmp","repo":null});
     let mut writer = OpenOptions::new().append(true).open(&file).unwrap();
     writeln!(writer, "{good_line}{}", bad_id).unwrap();
     writeln!(writer, "{{\"kind\":\"future\"}}").unwrap();
-    writeln!(writer, "{{\"kind\":\"resolve\",\"id\":\"bl_deadbeef0000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
+    writeln!(writer, "{{\"v\":2,\"kind\":\"resolve\",\"id\":\"bl_deadbeef000000000000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
     writeln!(writer, "<<<<<<< HEAD").unwrap();
     write!(writer, "{{\"kind\":").unwrap();
     drop(writer);
@@ -264,20 +309,21 @@ fn doctor_fix_leaves_diagnose_only_findings_unchanged() {
     let good = add(&file, "valid").data.record;
     let good_line = std::fs::read_to_string(&file).unwrap();
     let bad_id = json!({
+        "v": 2,
         "kind": "cut",
-        "id": "bl_000000000000",
+        "id": "bl_00000000000000000000",
         "ts": good.cut_ts(),
         "agent": "tester",
         "text": "bad",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp",
         "repo": null
     });
     let mut writer = OpenOptions::new().append(true).open(&file).unwrap();
     writer.write_all(good_line.as_bytes()).unwrap();
     writeln!(writer, "{{\"kind\":\"future\"}}").unwrap();
-    writeln!(writer, "{{\"kind\":\"resolve\",\"id\":\"bl_deadbeef0000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
+    writeln!(writer, "{{\"v\":2,\"kind\":\"resolve\",\"id\":\"bl_deadbeef000000000000\",\"ts\":\"2026-07-09T00:00:00.000Z\",\"agent\":\"a\",\"note\":null}}").unwrap();
     writeln!(writer, "{bad_id}").unwrap();
     drop(writer);
     let before = std::fs::read(&file).unwrap();
@@ -490,7 +536,7 @@ fn plain_doctor_healthy_output_remains_byte_identical() {
     let mut expected = serde_json::to_vec(&json!({
         "ok": true,
         "data": {"healthy": true, "findings": [], "checked_lines": 1},
-        "meta": {"contract": 5, "file": file.to_string_lossy()},
+        "meta": {"contract": 6, "file": file.to_string_lossy()},
     }))
     .unwrap();
     expected.push(b'\n');
@@ -505,13 +551,14 @@ fn doctor_reports_pre_framing_bl_ids_as_conflicts_after_legacy_fallback_removal(
     let file = temp.path().join("legacy-v1.jsonl");
     // Frozen v1 hash for this exact comma-joined, non-deduplicated tag fixture.
     let legacy_cut = json!({
+        "v": 2,
         "kind": "cut",
         "id": "bl_d7e14e635d21",
         "ts": "2026-07-10T00:00:00.000Z",
         "agent": "legacy",
         "text": "legacy v1 cut",
         "tags": ["a", "a", "b"],
-        "severity": "major",
+        "impact": "material",
         "cwd": "/tmp",
         "repo": null
     });
@@ -531,46 +578,43 @@ fn doctor_reports_pre_framing_bl_ids_as_conflicts_after_legacy_fallback_removal(
 fn doctor_finding_counts_match_fold_bytes_warning_counts() {
     let temp = TempDir::new().unwrap();
     let file = temp.path().join("cuts.jsonl");
-    let valid_id = compute_id(
-        "2026-07-09T00:00:00.000Z",
-        "a",
-        "valid",
-        Severity::Minor,
-        &[],
-    );
+    let valid_id = compute_id("2026-07-09T00:00:00.000Z", "a", "valid", Impact::Low, &[]);
     let malformed = json!({
+        "v": 2,
         "kind": "cut",
-        "id": "bl_000000000000",
+        "id": "bl_00000000000000000000",
         "ts": "not-a-time",
         "agent": "a",
         "text": "malformed",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp",
         "repo": null
     })
     .to_string();
     let valid = json!({
+        "v": 2,
         "kind": "cut",
         "id": valid_id,
         "ts": "2026-07-09T00:00:00.000Z",
         "agent": "a",
         "text": "valid",
         "tags": [],
-        "severity": "minor",
+        "impact": "low",
         "cwd": "/tmp",
         "repo": null
     })
     .to_string();
     let orphan = json!({
+        "v": 2,
         "kind": "resolve",
-        "id": "bl_deadbeef0000",
+        "id": "bl_deadbeef000000000000",
         "ts": "2026-07-09T00:00:00.000Z",
         "agent": "a",
         "note": null
     })
     .to_string();
-    let unknown = json!({"kind": "future"}).to_string();
+    let unknown = json!({"v":2,"kind": "future"}).to_string();
     let fixture = format!("{malformed}\n{valid}\n{orphan}\n{valid}\n{unknown}\n{{\"kind\":");
     std::fs::write(&file, fixture).unwrap();
 
@@ -734,4 +778,370 @@ fn doctor_fix_resolves_symlinked_log_and_preserves_the_link() {
             .is_symlink()
     );
     assert_eq!(std::fs::read(&target).unwrap(), complete);
+}
+
+/// r48: on a v1 log `doctor` reports the file as one non-fixable
+/// `unsupported_version` finding on the first offending line and emits no other
+/// record-model finding — the log is not diagnosable under v2 rules. The
+/// envelope keeps its shape: `healthy:false`, honest `checked_lines`, exit 1,
+/// and `fix` absent on a diagnose-only run.
+#[test]
+fn doctor_reports_a_v1_log_as_one_unsupported_version_finding() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    // Three physical lines, two of which the v2 scan would otherwise call
+    // malformed or unknown, so an honest count is distinguishable from one.
+    std::fs::write(
+        &file,
+        format!("not json\n{}\n{{\"kind\":\"future\"}}\n", v1_cut_line()),
+    )
+    .unwrap();
+
+    let doctor = doctor_response(&run_file(&file, &["doctor"]), 1);
+    assert!(!doctor.data.healthy);
+    assert_eq!(doctor.data.findings.len(), 1);
+    let finding = &doctor.data.findings[0];
+    assert_eq!(finding.kind, "unsupported_version");
+    assert_eq!(finding.line, 2);
+    assert!(!finding.fixable);
+    assert_eq!(
+        finding.message,
+        "unsupported log version on line 2: record has no v field"
+    );
+    // The probe read every physical line, so the count is honest.
+    assert_eq!(doctor.data.checked_lines, 3);
+    assert!(doctor.data.fix.is_none());
+}
+
+/// `--fix` needs no special case: one non-fixable finding plans nothing, so the
+/// `fix` object is present and inert on both the apply and the dry-run path, and
+/// neither creates a sidecar.
+#[test]
+fn doctor_fix_is_inert_on_a_v1_log_and_creates_no_sidecar() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let original = format!("{}\n", v1_cut_line());
+    std::fs::write(&file, &original).unwrap();
+
+    for args in [
+        &["doctor", "--fix"][..],
+        &["doctor", "--fix", "--dry-run"][..],
+    ] {
+        let doctor = doctor_response(&run_file(&file, args), 1);
+        let fix = doctor
+            .data
+            .fix
+            .as_ref()
+            .expect("--fix reports a fix object");
+        assert!(!fix.changed, "{args:?}");
+        assert!(fix.applied.is_empty(), "{args:?}");
+        assert!(fix.backup.is_none(), "{args:?}");
+        assert!(fix.quarantine.is_none(), "{args:?}");
+        assert!(fix.restore_hint.is_none(), "{args:?}");
+        assert_eq!(fix.dry_run, args.contains(&"--dry-run"), "{args:?}");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            original,
+            "{args:?}"
+        );
+        assert_eq!(directory_entries(temp.path()), ["cuts.jsonl"], "{args:?}");
+    }
+}
+
+/// r50 supersedes r48's "that single entry": "no other findings" means no
+/// finding that classifies a record under the v2 record model. `gitignored` is
+/// about version-control status and `--leaks` is a byte-level privacy audit, so
+/// both survive the version refusal, ordered `unsupported_version`, then leak
+/// findings in line order, then `gitignored`.
+#[test]
+fn doctor_keeps_gitignored_and_leak_findings_on_a_refused_log() {
+    let git_available = std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success());
+    if !git_available {
+        return;
+    }
+    let temp = TempDir::new().unwrap();
+    let repo = temp.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    assert!(
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&repo)
+            .arg("init")
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    std::fs::write(repo.join(".gitignore"), ".blotter.jsonl\n").unwrap();
+    std::fs::write(repo.join(".blotter.jsonl"), format!("{}\n", v1_cut_line())).unwrap();
+
+    let doctor: SuccessEnvelope<DoctorData> = serde_json::from_slice(
+        &command()
+            .current_dir(&repo)
+            .arg("doctor")
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    assert!(!doctor.data.healthy);
+    assert_eq!(
+        doctor
+            .data
+            .findings
+            .iter()
+            .map(|finding| finding.kind.as_str())
+            .collect::<Vec<_>>(),
+        ["unsupported_version", "gitignored"]
+    );
+
+    // The same file with a deny pattern: the leak finding sits between them.
+    let leaks: SuccessEnvelope<DoctorData> = serde_json::from_slice(
+        &command()
+            .current_dir(&repo)
+            .args(["doctor", "--leaks", "--deny", "legacy"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    assert_eq!(
+        leaks
+            .data
+            .findings
+            .iter()
+            .map(|finding| finding.kind.as_str())
+            .collect::<Vec<_>>(),
+        ["unsupported_version", "leak", "gitignored"]
+    );
+}
+
+/// r48 rules (1)-(3), which Phase 3 implements: one non-fixable
+/// `invalid_resolution` finding per invalid event, naming the record ID and
+/// every rule the event breaks in the numbered order.
+#[test]
+fn doctor_reports_invalid_resolutions_for_rules_one_to_three() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let cut = add(&file, "invalid resolution fixture");
+    let cut_id = cut.data.record.cut_id().to_owned();
+    let dogear: SuccessEnvelope<Value> = success(&run_file(
+        &file,
+        &["dogear", "invalid resolution dogear", "--agent", "tester"],
+    ));
+    let dogear_id = dogear.data["record"]["id"].as_str().unwrap().to_owned();
+    let original = std::fs::read_to_string(&file).unwrap();
+
+    // (1) a cut resolve with no disposition.
+    let no_disposition = json!({
+        "v": 2, "kind": "resolve", "id": cut_id,
+        "ts": "2026-07-09T18:31:00.000Z", "agent": "fixture", "note": null
+    });
+    // (2) a dogear resolve that carries one, which also breaks nothing else.
+    let dogear_disposition = json!({
+        "v": 2, "kind": "resolve", "id": dogear_id,
+        "ts": "2026-07-09T18:32:00.000Z", "agent": "fixture", "note": null,
+        "disposition": "fixed", "disposition_ts": "2026-07-09T18:32:00.000Z"
+    });
+    // (3) a disposition with no disposition_ts. The cut arm of (1) is satisfied,
+    // so this event breaks exactly one rule.
+    let half_disposition = json!({
+        "v": 2, "kind": "resolve", "id": cut_id,
+        "ts": "2026-07-09T18:33:00.000Z", "agent": "fixture", "note": null,
+        "disposition": "fixed"
+    });
+    std::fs::write(
+        &file,
+        format!("{original}{no_disposition}\n{dogear_disposition}\n{half_disposition}\n"),
+    )
+    .unwrap();
+
+    let doctor = doctor_response(&run_file(&file, &["doctor"]), 1);
+    let findings = &doctor.data.findings;
+    assert_eq!(findings.len(), 3, "findings: {findings:?}");
+    assert!(
+        findings
+            .iter()
+            .all(|finding| finding.kind == "invalid_resolution")
+    );
+    assert!(findings.iter().all(|finding| !finding.fixable));
+    assert_eq!(
+        findings[0].message,
+        format!("invalid resolution for {cut_id}: resolve targets a cut without a disposition")
+    );
+    assert_eq!(
+        findings[1].message,
+        format!("invalid resolution for {dogear_id}: resolve targets a dogear with a disposition")
+    );
+    assert_eq!(
+        findings[2].message,
+        format!(
+            "invalid resolution for {cut_id}: disposition and disposition_ts must be present together"
+        )
+    );
+    assert_eq!(
+        findings
+            .iter()
+            .map(|finding| finding.line)
+            .collect::<Vec<_>>(),
+        [3, 4, 5]
+    );
+
+    // The fold discards all three, so both records read open and the warning
+    // counts events, not rules.
+    let listed: SuccessEnvelope<ListData> = success(&run_file(
+        &file,
+        &["list", "--kind", "all", "--status", "all"],
+    ));
+    assert!(
+        listed
+            .data
+            .items
+            .iter()
+            .all(|item| item.record().status == ItemStatus::Open)
+    );
+    assert_eq!(listed.meta.warnings, ["skipped 3 invalid resolutions"]);
+}
+
+#[test]
+fn promotion_lines_are_healthy_and_their_ids_recompute() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let cut = add_at(&file, "2026-07-01T00:00:00Z", "friction", &[]);
+    let cut = cut.data.record.cut_id().to_owned();
+    success::<PromoteData>(&promote_at(
+        &file,
+        "2026-07-02T00:00:00Z",
+        &[
+            "--source",
+            &cut,
+            "--artifact-type",
+            "doc",
+            "--artifact-ref",
+            "docs/x.md",
+        ],
+    ));
+
+    let healthy: SuccessEnvelope<DoctorData> = doctor_response(&run_file(&file, &["doctor"]), 0);
+    assert!(healthy.data.healthy);
+    assert_eq!(healthy.data.checked_lines, 2);
+
+    // A byte-identical repeat is a warning-class duplicate; a same-ID line with
+    // a different payload stays id_conflict, as for every kind.
+    let stored = std::fs::read_to_string(&file).unwrap();
+    let promotion_line = stored.lines().next_back().unwrap().to_owned();
+    let mut altered: Value = serde_json::from_str(&promotion_line).unwrap();
+    altered["note"] = json!("rewritten");
+    append_lines(&file, &[promotion_line, altered.to_string()]);
+
+    let report: SuccessEnvelope<DoctorData> = doctor_response(&run_file(&file, &["doctor"]), 1);
+    let kinds: Vec<_> = report
+        .data
+        .findings
+        .iter()
+        .map(|finding| (finding.line, finding.kind.as_str(), finding.fixable))
+        .collect();
+    assert_eq!(
+        kinds,
+        [(3, "duplicate_promotion", false), (4, "id_conflict", false)]
+    );
+}
+
+#[test]
+fn a_promotion_naming_a_source_that_is_not_a_cut_is_a_dangling_source() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let cut = add_at(&file, "2026-07-01T00:00:00Z", "friction", &[]);
+    let cut = cut.data.record.cut_id().to_owned();
+    let dogear: SuccessEnvelope<Value> = dogear_at(&file, "2026-07-02T00:00:00Z", "idea", &[]);
+    let dogear = dogear.data["record"]["id"].as_str().unwrap().to_owned();
+    let missing = "bl_00000000000000000000";
+    // Hand-written: the CLI refuses a non-cut source, so only a foreign writer
+    // can produce this.
+    let ts = "2026-07-03T00:00:00.000Z";
+    let mut sources = vec![cut.clone(), dogear.clone(), missing.to_owned()];
+    sources.sort();
+    let id = compute_promotion_id(ts, "hand", &sources, "doc", "docs/x.md");
+    append_lines(
+        &file,
+        &[
+            json!({"v":2,"kind":"promotion","id":id,"ts":ts,"agent":"hand",
+                 "sources":sources,"artifact":{"type":"doc","ref":"docs/x.md"},"cwd":"."})
+            .to_string(),
+        ],
+    );
+
+    let report: SuccessEnvelope<DoctorData> = doctor_response(&run_file(&file, &["doctor"]), 1);
+    let dangling: Vec<_> = report
+        .data
+        .findings
+        .iter()
+        .filter(|finding| finding.kind == "dangling_source")
+        .collect();
+    assert_eq!(dangling.len(), 2);
+    assert!(dangling.iter().all(|finding| finding.line == 3));
+    assert!(dangling.iter().all(|finding| !finding.fixable));
+    assert!(dangling.iter().all(|finding| finding.message.contains(&id)));
+    assert!(
+        dangling
+            .iter()
+            .any(|finding| finding.message.contains(&dogear) && finding.message.contains("dogear"))
+    );
+    assert!(dangling.iter().any(
+        |finding| finding.message.contains(missing) && finding.message.contains("in no record")
+    ));
+
+    // The promotion still folds and lists; a dangling source is a diagnosis.
+    let listed: SuccessEnvelope<ListData> =
+        success(&run_file(&file, &["list", "--kind", "promotion"]));
+    assert_eq!(listed.data.count, 1);
+}
+
+#[test]
+fn doctor_fix_never_repairs_a_promotion_finding() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("log.jsonl");
+    let cut = add_at(&file, "2026-07-01T00:00:00Z", "friction", &[]);
+    let cut = cut.data.record.cut_id().to_owned();
+    success::<PromoteData>(&promote_at(
+        &file,
+        "2026-07-02T00:00:00Z",
+        &[
+            "--source",
+            &cut,
+            "--artifact-type",
+            "doc",
+            "--artifact-ref",
+            "docs/x.md",
+        ],
+    ));
+    let stored = std::fs::read_to_string(&file).unwrap();
+    append_lines(&file, &[stored.lines().next_back().unwrap().to_owned()]);
+    let before = std::fs::read(&file).unwrap();
+
+    let fixed: SuccessEnvelope<DoctorData> =
+        doctor_response(&run_file(&file, &["doctor", "--fix"]), 1);
+    let fix = fixed.data.fix.as_ref().unwrap();
+    assert!(!fix.changed);
+    assert!(fix.applied.is_empty());
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
+
+#[test]
+fn schema_documents_the_promotion_doctor_findings() {
+    let schema: SuccessEnvelope<Value> = success(&run(&["schema"]));
+    let kinds = schema.data["commands"]["doctor"]["finding_kinds"]
+        .as_str()
+        .unwrap();
+    assert!(kinds.contains("duplicate_promotion"));
+    assert!(kinds.contains("dangling_source"));
+    // Both sit on the not-fixable side of the sentence.
+    let (fixable, not_fixable) = kinds.split_once("(fixable);").unwrap();
+    assert!(!fixable.contains("duplicate_promotion"));
+    assert!(!fixable.contains("dangling_source"));
+    assert!(not_fixable.contains("duplicate_promotion"));
+    assert!(not_fixable.contains("dangling_source"));
 }

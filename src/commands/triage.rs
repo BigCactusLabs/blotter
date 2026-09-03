@@ -23,8 +23,7 @@ pub struct TriageCluster {
     pub tags: Vec<String>,
     pub text: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<String>,
-    pub suggested_action: String,
+    pub origin: Option<crate::Origin>,
 }
 
 #[derive(Clone)]
@@ -440,17 +439,8 @@ pub fn run(args: TriageArgs, file: Option<PathBuf>, pretty: bool) -> AppResult<i
 
     let resolved = store::discover(file)?;
     let store::LoadedFold {
-        items,
-        mut warnings,
+        items, warnings, ..
     } = store::load_folded(&resolved)?;
-    let (items, auto_captures) = crate::partition_auto_captures(items, args.include_auto);
-    let hidden = auto_captures
-        .iter()
-        .filter(|item| is_open_cut(item))
-        .count();
-    if hidden > 0 {
-        warnings.push(crate::auto_capture_warning(hidden));
-    }
 
     let data = triage(items, args.min_count);
     let exit = i32::from(!data.clusters.is_empty());
@@ -496,7 +486,7 @@ pub(crate) fn chronic_clusters(items: Vec<ListItem>, min_count: usize) -> Chroni
     let scanned = candidates.len();
     let frequencies = corpus_frequencies(candidates.iter());
     // Count every folded open cut by title. This is a recurrence signal, not
-    // an ID deduplication pass, so independently materialized pc_/bl_ records
+    // an ID deduplication pass, so two independently materialized records
     // both contribute when their normalized titles match.
     let mut title_occurrences = BTreeMap::new();
     for candidate in &candidates {
@@ -606,12 +596,12 @@ pub(crate) fn normalized_title(text: &str) -> String {
 /// dropped as dead weight — a two-character token never reaches this check.
 ///
 /// Frequency cannot do this job at fixture scale. `is_rare` accepts
-/// `df <= max(2, ceil(N/4))`, a token shared by the two candidates under test
+/// `df <= max(2, ceil(N/16))`, a token shared by the two candidates under test
 /// always has `df >= 2`, and the floor of 2 exists because a lower floor would
 /// make no shared token rare and retire the path. In a four-candidate analysis
 /// every shared token is rare, so no ratio separates filler from content there.
 /// A common English word is removable as a word at every scale, and as a
-/// frequency only at some. See design doc r44.
+/// frequency only at some. See design doc r44, superseded on the divisor by r53.
 ///
 /// Sorted and unique; `scoring_tokens` binary-searches it.
 const STOPWORDS: &[&str] = &[
@@ -799,7 +789,7 @@ impl CorpusFrequencies {
     }
 
     fn is_rare(&self, token: &str) -> bool {
-        let rare_limit = self.candidate_count.div_ceil(4).max(2);
+        let rare_limit = self.candidate_count.div_ceil(16).max(2);
         self.token_counts
             .get(token)
             .copied()
@@ -907,15 +897,14 @@ fn materialize_cluster(cluster: &ChronicCluster) -> TriageCluster {
             .collect(),
         tags: tags.into_iter().collect(),
         text: latest.item.text.clone(),
-        source: latest.item.source.clone(),
-        suggested_action: "graduate".into(),
+        origin: latest.item.origin.clone(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Severity;
+    use crate::Impact;
 
     #[test]
     fn stopwords_are_sorted_and_unique_for_binary_search() {
@@ -962,14 +951,14 @@ mod tests {
         let normalized_title = normalized_title(text);
         let item = ListItem {
             kind: "cut".into(),
-            id: format!("bl_{index:012x}"),
+            id: format!("bl_{index:020x}"),
             ts: timestamp.clone(),
             agent: "test".into(),
             text: text.into(),
             tags: tags.iter().map(|tag| (*tag).into()).collect(),
-            severity: Some(Severity::Minor),
+            impact: Some(Impact::Low),
             cwd: ".".into(),
-            source: None,
+            origin: None,
             evidence: None,
             status: ItemStatus::Open,
             resolution: None,

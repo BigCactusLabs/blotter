@@ -19,9 +19,6 @@ fn main() {
             }
         },
     };
-    if cli.is_hook_exec() {
-        std::process::exit(blotter::commands::run_hook_exec(cli));
-    }
     let code = if let Command::Schema { target } = &cli.command {
         blotter::commands::run_schema(*target, cli.pretty)
     } else {

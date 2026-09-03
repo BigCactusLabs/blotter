@@ -41,8 +41,43 @@ fn triage_clusters_three_near_duplicate_open_cuts() {
             ],
             "tags": ["api", "tooling"],
             "text": "Cargo test fails because config is missing again",
-            "suggested_action": "graduate",
+            "origin": {"type":"agent"},
         }])
+    );
+}
+
+#[test]
+fn triage_cluster_carries_no_suggested_action() {
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "Cargo test fails because config is missing",
+        &["api", "tooling"],
+    );
+    add_at(
+        &file,
+        "2026-07-09T18:31:00Z",
+        "cargo-test fails because config is missing!",
+        &["tooling"],
+    );
+    add_at(
+        &file,
+        "2026-07-09T18:32:00Z",
+        "Cargo test fails because config is missing again",
+        &["api"],
+    );
+
+    let triage = triage_success(&run_file(&file, &["triage"]), 1);
+    let cluster = &triage.data["clusters"][0];
+    assert!(
+        cluster
+            .as_object()
+            .unwrap()
+            .get("suggested_action")
+            .is_none(),
+        "suggested_action was withdrawn (r51) and must not appear on a triage cluster"
     );
 }
 
@@ -73,6 +108,102 @@ fn triage_clusters_reworded_repeats_with_rare_shared_tokens() {
     assert_eq!(
         triage.data["clusters"][0]["ids"],
         json!([first.data.record.cut_id(), second.data.record.cut_id()])
+    );
+}
+
+/// Pins r53: the local-rarity ceiling is `max(2, ceil(N / 16))`, not
+/// `max(2, ceil(N / 4))`. Both corpora scan N = 16 open cuts, so the ceiling
+/// is 4 under the retired divisor and 2 under r53. Two target cuts share
+/// exactly three non-stopword tokens (`frobnicator`, `gadget`, `timeout`)
+/// that fail the overlap-coefficient path (3 shared of 5 tokens each is
+/// below 80%) and so depend entirely on the rare-token path, which needs
+/// `MIN_RARE_SHARED_TOKENS = 3`.
+///
+/// In the first corpus a third, differently-tagged cut also carries all
+/// three tokens, so their document frequency is 3: rare under divisor 4
+/// (3 <= 4) but not under divisor 16 (3 > 2), so the targets must not link.
+/// In the second corpus that third cut is replaced by a token-disjoint filler
+/// (keeping N = 16), so the shared tokens' document frequency drops to 2 and
+/// they are rare under both floors — the targets link, showing this is a
+/// boundary case rather than an absence of clustering altogether.
+#[test]
+fn triage_rare_ceiling_is_one_sixteenth_of_scanned_cuts() {
+    fn padding_cuts(file: &std::path::Path, start_minute: u32, count: u32) {
+        for i in 0..count {
+            add_at(
+                file,
+                &format!("2026-07-09T19:{:02}:00Z", start_minute + i),
+                &format!("padding filler note paddertoken{i} notetoken{i}"),
+                &[],
+            );
+        }
+    }
+
+    // First corpus: the shared tokens also occur in a third, off-tag cut, so
+    // their document frequency is 3.
+    let temp = TempDir::new().unwrap();
+    let file = temp.path().join("cuts.jsonl");
+    let first = add_at(
+        &file,
+        "2026-07-09T18:30:00Z",
+        "frobnicator gadget timeout alpha1token beta1token",
+        &["tooling"],
+    );
+    let second = add_at(
+        &file,
+        "2026-07-09T18:31:00Z",
+        "frobnicator gadget timeout gamma2token delta2token",
+        &["tooling"],
+    );
+    add_at(
+        &file,
+        "2026-07-09T18:32:00Z",
+        "frobnicator gadget timeout epsilon3token zeta3token",
+        &["other"],
+    );
+    padding_cuts(&file, 0, 13);
+
+    let not_linked = triage_success(&run_file(&file, &["triage", "--min-count", "2"]), 0);
+    assert_eq!(not_linked.data["scanned"], 16);
+    let has_both_targets = not_linked.data["clusters"]
+        .as_array()
+        .expect("clusters is an array")
+        .iter()
+        .any(|cluster| {
+            let ids = cluster["ids"].as_array().expect("ids is an array");
+            ids.contains(&json!(first.data.record.cut_id()))
+                && ids.contains(&json!(second.data.record.cut_id()))
+        });
+    assert!(
+        !has_both_targets,
+        "targets must not cluster while the shared tokens' df is 3: {:?}",
+        not_linked.data["clusters"]
+    );
+
+    // Second corpus: same N and same targets, but the shared tokens occur in
+    // no other cut, so their document frequency is 2 and they clear the r53
+    // floor as well as the retired ceiling.
+    let temp2 = TempDir::new().unwrap();
+    let file2 = temp2.path().join("cuts.jsonl");
+    let first2 = add_at(
+        &file2,
+        "2026-07-09T18:30:00Z",
+        "frobnicator gadget timeout alpha1token beta1token",
+        &["tooling"],
+    );
+    let second2 = add_at(
+        &file2,
+        "2026-07-09T18:31:00Z",
+        "frobnicator gadget timeout gamma2token delta2token",
+        &["tooling"],
+    );
+    padding_cuts(&file2, 0, 14);
+
+    let linked = triage_success(&run_file(&file2, &["triage", "--min-count", "2"]), 1);
+    assert_eq!(linked.data["scanned"], 16);
+    assert_eq!(
+        linked.data["clusters"][0]["ids"],
+        json!([first2.data.record.cut_id(), second2.data.record.cut_id()])
     );
 }
 
@@ -178,7 +309,7 @@ fn triage_surfaces_repeated_normalized_title_occurrences() {
             ],
             "tags": ["build"],
             "text": "Workspace cache missing during build",
-            "suggested_action": "graduate",
+            "origin": {"type":"agent"},
         }])
     );
 }
@@ -258,7 +389,7 @@ fn triage_links_identical_titles_with_disjoint_nonempty_tags() {
             ],
             "tags": ["alpha", "beta", "gamma"],
             "text": "Workspace cache missing during build",
-            "suggested_action": "graduate",
+            "origin": {"type":"agent"},
         }])
     );
 }
@@ -282,7 +413,7 @@ fn triage_does_not_transitively_merge_an_untagged_similarity_chain() {
             "ids": [first.data.record.cut_id(), bridge.data.record.cut_id()],
             "tags": [],
             "text": "alpha beta gamma delta",
-            "suggested_action": "graduate",
+            "origin": {"type":"agent"},
         }])
     );
     assert!(
@@ -342,7 +473,14 @@ fn triage_excludes_resolved_cuts_and_dogears() {
     );
     success::<ResolveData>(&run_file(
         &file,
-        &["resolve", first.data.record.cut_id(), "--agent", "fixer"],
+        &[
+            "resolve",
+            "--disposition",
+            "fixed",
+            first.data.record.cut_id(),
+            "--agent",
+            "fixer",
+        ],
     ));
     let dogear: SuccessEnvelope<Value> = success(
         &command()
@@ -425,7 +563,7 @@ fn triage_min_count_two_flags_a_pair_and_rejects_one() {
             "ids": [first.data.record.cut_id(), second.data.record.cut_id()],
             "tags": [],
             "text": "the command output is missing a summary!",
-            "suggested_action": "graduate",
+            "origin": {"type":"agent"},
         })
     );
     error(
@@ -443,15 +581,10 @@ fn schema_documents_triage() {
         triage["flags"]["--min-count"],
         "N; default 3; must be at least 2"
     );
-    assert!(
-        triage["flags"]["--include-auto"]
-            .as_str()
-            .unwrap()
-            .contains("include records tagged auto")
-    );
+    assert!(triage["flags"].get("--include-auto").is_none());
     assert_eq!(
         triage["output"],
-        "{clusters:[{count,occurrences,ids,tags,text,source?,suggested_action}],count,scanned}"
+        "{clusters:[{count,occurrences,ids,tags,text,origin?}],count,scanned}"
     );
     assert!(
         triage["semantics"]
