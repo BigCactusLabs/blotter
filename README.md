@@ -1,12 +1,14 @@
 # blotter
 
-A tiny Rust CLI that gives AI agents a blotter — a desk pad for the things that don't fit in a commit. Agents jot three kinds of records into one append-only journal:
+**Your agents have complaints. Give them somewhere to write them down.**
+
+A tiny Rust CLI that gives AI agents a blotter — the pad on the desk where you note the thing before it's gone. Nothing on it is a commit, a ticket, or a chat message. Agents jot three kinds of records into one append-only journal:
 
 - **Cuts** — friction worth keeping. A dead-end tool call, a broken link, a misleading error, a footgun config. Filed at the moment it happens, with optional evidence (the failed command, its exit code, its stderr).
 - **Dogears** — findings. Something an agent noticed that is interesting beyond the task: a surprising measurement, an engineering quirk, a gap in prior art. A dogear is the page-corner you fold to come back to; here it marks a lead worth writing up in public.
 - **Promotions** — durable learning. "These experiences became this artifact": a doc, a skill, a guard, a test, a tool, or a process change.
 
-Agents hit friction constantly and silently push through; the signal evaporates. They also notice interesting things mid-task and drop them for the same reason. `blotter` gives all three a one-line home, and gives you (or another agent) the commands to review, cluster, and act on the backlog.
+Agents hit friction constantly and silently push through; the signal evaporates. They also notice interesting things mid-task and drop them for the same reason. Every one of those was a sentence away from being useful. `blotter` gives all three a one-line home, and gives you (or another agent) the commands to review, cluster, and act on the backlog.
 
 ```
 $ blotter add "yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web" --tag tooling
@@ -15,7 +17,7 @@ $ blotter add "yarn web:test with a root-relative path finds no files; the works
 $ blotter dogear "On five real friction logs, a rare-token linkage rule with ceiling N/4 produced two-thirds unrelated pairs; tightening to N/16 removed 79% of the false links for 17% of the true ones" --tag research
 ```
 
-It is an agent-only tool by design: JSON envelopes on stdout, structured errors on stderr, stable exit codes, and a `blotter schema` command that returns the whole machine contract so agents self-orient without reading docs. You read the log; the agents write it.
+It is an agent-only tool by design: JSON envelopes on stdout, structured errors on stderr, stable exit codes, and a `blotter schema` command that returns the whole machine contract so agents self-orient without reading docs. You read the log; the agents write it. There is no dashboard. There is not going to be a dashboard.
 
 The friction-log idea comes from [a tool Steve Ruiz built](https://x.com/steveruizok) for his own repos: once agents had a place to complain, they immediately surfaced real workflow defects — quoting bugs, wrong test working directories, YAML footguns — that they'd been eating silently for months.
 
@@ -25,13 +27,13 @@ The friction-log idea comes from [a tool Steve Ruiz built](https://x.com/steveru
 cargo install blotter-cli
 ```
 
-The crate is named `blotter-cli` (the crates.io name `blotter` is already taken by a placeholder crate), but the installed binary is plain `blotter`. To build from the latest source instead: `cargo install --git https://github.com/BigCactusLabs/blotter blotter-cli`.
+The crate is named `blotter-cli` because someone claimed `blotter` on crates.io, published a placeholder, and went home. The installed binary is plain `blotter`. To build from the latest source instead: `cargo install --git https://github.com/BigCactusLabs/blotter blotter-cli`.
 
 Coming from 0.15? 1.0.0 needs two manual steps before the new binary runs in an old repo: remove the Claude Code hook and start a fresh ledger. Both are in [Upgrading from 0.15](docs/reference.md#upgrading-from-015).
 
 ## Two minutes
 
-Inside any git repository:
+Inside any git repository. No init step; the first record creates the file.
 
 ```bash
 # 1. Let branches merge the log by concatenation instead of conflicting.
@@ -51,11 +53,11 @@ blotter resolve bl_9f2c --disposition fixed --pr https://github.com/you/repo/pul
 
 Then paste the block under [Give your agents the pen](#give-your-agents-the-pen) into your agent instructions, and come back in a week with `blotter digest --since 7d --format md`.
 
-Records live in an **append-only JSONL file** — by default `.blotter.jsonl` at your repo root, so every entry shows up in `git diff` and travels with the repo. No server, no sync, no telemetry. The file is the product. Multiple agents on one file are fine; nothing ever rewrites history; evidence is bounded and home paths and obvious secrets are redacted at write time. The mechanics are in the [reference](docs/reference.md#the-log-file).
+Records live in an **append-only JSONL file** — by default `.blotter.jsonl` at your repo root, so every entry shows up in `git diff` and travels with the repo. No server, no sync, no telemetry, no account. The file is the product, and `cat` is a supported client. Multiple agents on one file are fine; nothing ever rewrites history; evidence is bounded and home paths and obvious secrets are redacted at write time. The mechanics are in the [reference](docs/reference.md#the-log-file).
 
 ## The commands
 
-Fourteen subcommands, four jobs. Every one is described in full in the [reference](docs/reference.md).
+Fourteen subcommands, four jobs, none of them interactive. Every one is described in full in the [reference](docs/reference.md).
 
 **Write** — append records to the log:
 
@@ -94,7 +96,7 @@ blotter schema                    # the whole machine contract — agents self-o
 
 ## Cuts
 
-A cut is one or two sentences of friction: what you were doing, what got in the way. Not every stumble is a cut. Blotter is a selective ledger, not a transcript, and a cut is a claim that the friction has future value. File one when at least one of these holds:
+A cut is one or two sentences of friction: what you were doing, what got in the way. Not every stumble is a cut. Blotter is a selective ledger, not a transcript, and nobody reads transcripts. A cut is a claim that the friction has future value. File one when at least one of these holds:
 
 - **Transferable** — another competent agent or user would plausibly hit it.
 - **Consequential** — it cost real time, produced incorrect work, forced retries, or stopped the task.
@@ -110,7 +112,7 @@ Every resolution names the cut's fate — `fixed`, `promoted`, `accepted` (frict
 
 ## Dogears
 
-A dogear is a finding: something an agent noticed that is interesting beyond the task in front of it. Dogears are deliberately separate from friction — the default list stays cut-only so the complaint queue and the findings queue never blur.
+A dogear is a finding: something an agent noticed that is interesting beyond the task in front of it. The corner of the page you fold down because you'll want it later, not because it annoyed you. Dogears are deliberately separate from friction — the default list stays cut-only so the complaint queue and the findings queue never blur.
 
 File a dogear when all three hold. A cut needs any one of its five grounds; a dogear needs all three.
 
@@ -157,7 +159,7 @@ did wrong work, low (default) for a qualified cut with limited cost. Run
 or `--stderr-file` when filing tool failures; never feed raw environment dumps.
 ```
 
-Then periodically: `blotter list --format md` and fix what your agents keep tripping over, and `blotter list --kind dogear` to see what they found worth writing up.
+Then periodically: `blotter list --format md` and fix what your agents keep tripping over, and `blotter list --kind dogear` to see what they found worth writing up. The first week is humbling.
 
 ## Team setup
 
@@ -165,11 +167,17 @@ Then periodically: `blotter list --format md` and fix what your agents keep trip
 
 **Private.** Prefer not to commit them? `echo .blotter.jsonl >> .gitignore`, or point `BLOTTER_FILE` somewhere else entirely. Outside a git repo, records go to `~/.blotter/log.jsonl`.
 
-**Public.** Run `blotter doctor --leaks` before pushing a log to a public repository. It flags home paths and any `--deny` literal you name.
+**Public.** Run `blotter doctor --leaks` before pushing a log to a public repository. It flags home paths and any `--deny` literal you name. It cannot flag the thing you didn't think to name, which is what `--deny` is for.
 
 ## Contract
 
 Everything an agent needs is in `blotter schema`: commands and flags with read-only/appends annotations, env vars, record shapes, error codes, and the exit-code dictionary. Empty results are exit 0, never errors, and exit 1 is a finding count, not a failure. The 1.x promise covers the CLI, the JSON envelopes, the stored record format, the exit codes, and `blotter schema`; the Rust library the crate also builds is the binary's implementation, not a supported API. The exit codes and the stability clause are in the [reference](docs/reference.md#exit-codes).
+
+## What it is not
+
+- **Not a bug tracker.** A cut has no assignee, no priority field, no state machine beyond open and resolved. When one grows up, it becomes a ticket somewhere else and a `resolve` here.
+- **Not telemetry.** Nothing leaves the repo unless you run `export` and point it at a collector yourself.
+- **Not a transcript.** Agents that log everything are as useful as agents that log nothing. The admission floor is the feature.
 
 ## Lineage
 
