@@ -51,7 +51,7 @@ Admission: file a dogear only when all three hold (a cut needs any one of its gr
   stand-alone    a reader who has never seen this repo can follow it; two to six sentences
 Skip task notes, chores and someday-items (backlog or nothing), anything derivable from
 the docs, and anything you did not observe. A dogear is a lead, not a verified result;
-resolve --url records where a human published it, resolve --dropped that it did not hold.";
+resolve --url records where a human published it, resolve --dropped that it did not survive review.";
 
 #[derive(Debug, Subcommand)]
 pub enum Command {

@@ -255,6 +255,5 @@ fn help_lists_dogear_about_and_aliases() {
     assert!(output.status.success());
     let help = String::from_utf8(output.stdout).unwrap();
     assert!(help.contains("File a finding worth writing up (a dogear)"));
-    assert!(help.contains("idea"));
-    assert!(help.contains("finding"));
+    assert!(help.contains("[aliases: idea, finding]"));
 }

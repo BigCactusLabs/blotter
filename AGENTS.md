@@ -71,7 +71,7 @@ Some signals that do qualify don't feel like friction from the inside: an error 
 
 One or two sentences: what you were doing → what got in the way (a guess at the cause/fix is a bonus; put it in `--evidence`). Impact describes consequence, not admission: `low` (default) is a qualified cut with limited immediate cost, `material` cost real time or produced incorrect work, `blocking` stopped the task. A low-impact cut is still a cut; friction that does not clear the floor is not a low-impact cut, it is nothing. Logged together, qualified cuts show where the repo needs sanding down.
 
-This is distinct from the backlog (`backlog/` — real tracked work) and from dogears (`cargo run -- dogear "..."` — findings interesting beyond this repo, in your own words, understandable without it; see README `## Dogears`). Chores and "we should someday" thoughts are backlog tasks or nothing, not dogears. If it's a genuine bug you're going to fix now, it's a backlog task; if it merely slowed you down and clears the floor, it's a cut.
+This is distinct from the backlog (`backlog/` — real tracked work) and from dogears (`cargo run -- dogear "..."` — findings interesting beyond this task, in your own words, understandable without this repo — all three, where a cut needs any one of its grounds; see README `## Dogears`). Chores and "we should someday" thoughts are backlog tasks or nothing, not dogears. If it's a genuine bug you're going to fix now, it's a backlog task; if it merely slowed you down and clears the floor, it's a cut.
 
 ## Invariants (do not break)
 

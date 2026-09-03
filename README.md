@@ -140,7 +140,7 @@ File a dogear when all three hold. A cut needs any one of its five grounds; a do
 - **Interesting or possibly novel beyond this task.** A surprising measurement, a quirk with a mechanism behind it, a gap in prior art, a pattern with no name yet. Repo-local is fine; repo-bound is not.
 - **Understandable without the repo.** A reader who has never seen this codebase can follow it. Two to six sentences, the scale of a TIL post.
 
-Skip task notes, chores and "we should someday" items (those belong in a backlog, or nowhere), anything derivable from the docs, and anything you have not actually observed. A dogear is a lead, not a verified result: `resolve --url` records where a human published it, and `resolve --dropped` records that it did not survive a look. `--evidence` carries what makes the finding checkable — a measurement, a link, a command. Blotter applies its usual write-time redaction and nothing more; whoever publishes a dogear checks it first.
+Skip task notes, chores and "we should someday" items (those belong in a backlog, or nowhere), anything derivable from the docs, and anything you have not actually observed. A dogear is a lead, not a verified result: `resolve --url` records where a human published it, and `resolve --dropped` records that it did not survive review. `--evidence` carries what makes the finding checkable — a measurement, a link, a command. Blotter rewrites home paths in dogear text at write time; the secret pass covers `--evidence` and notes, not the text. Whoever publishes a dogear checks it first.
 
 ```bash
 blotter dogear "On five real friction logs, a rare-token linkage rule with ceiling N/4 produced two-thirds unrelated pairs; tightening to N/16 removed 79% of the false links for 17% of the true ones" --tag research --evidence "docs/research/2026-09-02-task71-linkage-precision.md"
@@ -149,7 +149,7 @@ blotter list --kind dogear         # open findings, newest first
 blotter list --kind all --format md
 blotter resolve bl_9f2c           # graduated to writing work
 blotter resolve <id> --url <url>  # where a human published it
-blotter resolve <id> --dropped    # did not survive a look
+blotter resolve <id> --dropped    # did not survive review
 ```
 
 Dogears use the same append-only journal, agent resolution, tags, dry-run, deterministic clock override, and resolve events as cuts. `resolve --task`, `--pr`, and `--commit` work for either kind. `--url` and `--dropped` are dogear-only, conflict with each other, and reject a mixed cut/dogear batch before anything is appended. Dogears have no impact or failure-command fields; `list --impact` is therefore accepted only with the default `--kind cut`.
@@ -306,7 +306,8 @@ rejecting code you just wrote, and one-off mistakes specific to this run.
     blotter add "<what you hit and what would have prevented it>" --tag <area>
 
 When you notice something interesting beyond this task — one finding, in your
-own words, that a reader without this repo could follow — dogear it the same way:
+own words, that a reader without this repo could follow; all three, where a cut
+needs any one of its grounds — dogear it the same way:
 
     blotter dogear "<the finding>" --tag <area>
 

@@ -1128,7 +1128,7 @@ A dogear is a finding: something an agent noticed that is interesting or possibl
 
 #### The admission bar
 
-Conjunctive, all three: one finding in the agent's own words (not a list, not a paste); interesting or possibly novel beyond this task; understandable without the repo (two to six sentences, TIL scale). r48's cut floor is disjunctive — any one of five grounds; the dogear bar is conjunctive — all three. Skip task notes, chores and "we should someday" items (backlog or nothing), anything derivable from the docs, and anything not actually observed. A dogear is a lead, not a verified result. `resolve --url` is glossed as "where a human published the finding" and `resolve --dropped` as "did not survive a look"; both are glosses, and the r6-addendum rule for both flags is unchanged — nothing is fetched or validated.
+Conjunctive, all three: one finding in the agent's own words (not a list, not a paste); interesting or possibly novel beyond this task; understandable without the repo (two to six sentences, TIL scale). r48's cut floor is disjunctive — any one of five grounds; the dogear bar is conjunctive — all three. Skip task notes, chores and "we should someday" items (backlog or nothing), anything derivable from the docs, and anything not actually observed. A dogear is a lead, not a verified result. `resolve --url` is glossed as "where a human published the finding" and `resolve --dropped` as "did not survive review"; both are glosses, and the r6-addendum rule for both flags is unchanged — nothing is fetched or validated.
 
 #### Why
 
