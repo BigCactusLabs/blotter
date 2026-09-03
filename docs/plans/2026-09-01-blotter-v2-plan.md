@@ -248,3 +248,9 @@ PR #26 (TASK-77, TASK-71) closes Phase 5 on `v2`. Every §12 ruling is in the tr
 The TASK-71 gate was measured rather than assumed and it failed: two thirds of rare-token links across five real logs were not the same friction (`docs/research/2026-09-02-task71-linkage-precision.md`). Six rule shapes were measured against the same hand judgments; r53 reshapes the ceiling to `max(2, ceil(N / 16))` and records the table. The residual third is the limit of a lexical rule on pre-floor logs and is accepted for 1.0.0.
 
 Phase 6 (TASK-78, Release 1.0.0) is the only contract work left. `v2` still merges into `main` only at that release, as §5 planned.
+
+## 15. Phase 6 landed, 2026-09-03
+
+The release PR merges `v2` into `main` as 1.0.0, closing Phase 6 and TASK-78. It carries the mechanical release edits and nothing else: the crate version bump to 1.0.0, the CHANGELOG `[Unreleased]` header cut over to `[1.0.0] - 2026-09-03` with the two mandatory upgrade steps hoisted into an `### Upgrading` block at the top of the entry, the OTLP golden's scope version, and the removal of the temporary "Unreleased v2" paragraph from `AGENTS.md`. The readiness audit is archived to `docs/archive/blotter-1.0.0-release-readiness-audit-2026-09-02.md`; its §1–§3 hygiene (all but §3.2, the repository description) landed earlier on `release-hygiene`, and the §4–§8 cut sequence runs from this commit: gates, smoke, merge, tag, publish, release notes, description.
+
+This plan is complete. §8 still stands as written: what it says this plan does not do is the deferred list, not an oversight, and nothing in 1.0.0 quietly picked any of it up.

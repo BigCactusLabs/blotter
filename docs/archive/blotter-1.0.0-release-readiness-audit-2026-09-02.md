@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-02  
 **Branch reviewed:** `v2`  
-**Status:** Incorporated 2026-09-02 — §1.1–1.4, §2.1 (policy statement only), §3.1, §3.3–3.5 landed on the `release-hygiene` branch; §3.2 and §4–§8 folded into TASK-78. Archive this doc in the release PR.
+**Status:** Incorporated 2026-09-02 — §1.1–1.4, §2.1 (policy statement only), §3.1, §3.3–3.5 landed on the `release-hygiene` branch; §3.2 and §4–§8 folded into TASK-78. Archive this doc in the release PR. Archived 2026-09-03 — shipped in 1.0.0.
 **Scope:** Final pre-1.0 audit after all substantive v2 work landed
 
 ---
