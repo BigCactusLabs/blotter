@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- A one-line `about` for every subcommand in `blotter --help`; `dogear` was the only row that had one.
+
 ### Changed
 
 - README rewritten for a person deciding whether to install blotter: what it is, the three record kinds and their admission bars, install, a two-minute quickstart, the command map, and the agent-instructions block. The contract detail it carried — flag matrices, ID grammar, amend and disposition rules, the per-command analysis semantics, the doctor finding table, exit codes, team modes, the 0.15 upgrade mechanics, and the stability clause — moves verbatim to `docs/reference.md`, which the README links section by section. `blotter schema` stays the machine contract and the design doc stays normative; the reference page is descriptive.

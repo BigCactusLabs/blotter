@@ -55,7 +55,11 @@ resolve --url records where a human published it, resolve --dropped that it did 
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    #[command(alias = "log", after_help = ADD_AFTER_HELP)]
+    #[command(
+        alias = "log",
+        about = "File a cut: friction that got in the way",
+        after_help = ADD_AFTER_HELP
+    )]
     Add(AddArgs),
     #[command(
         visible_aliases = ["idea", "finding"],
@@ -63,16 +67,27 @@ pub enum Command {
         after_help = DOGEAR_AFTER_HELP
     )]
     Dogear(DogearArgs),
+    #[command(about = "Record that cuts became a durable artifact (a promotion)")]
     Promote(PromoteArgs),
+    #[command(about = "List open cuts; --kind for dogears, promotions, or all")]
     List(ListArgs),
+    #[command(about = "Write folded cuts as one OTLP LogsData line")]
     Export(ExportArgs),
+    #[command(about = "Find chronic clusters of similar open cuts")]
     Triage(TriageArgs),
+    #[command(about = "Find resolved cuts whose friction came back")]
     Verify(VerifyArgs),
+    #[command(about = "Mine chronic signal for promotion candidates")]
     Retrospect(RetrospectArgs),
+    #[command(about = "Periodic report: chronic, new, and open findings")]
     Digest(DigestArgs),
+    #[command(about = "Roll up the logs of several repositories, read-only")]
     Sweep(SweepArgs),
+    #[command(about = "Resolve cuts or dogears by appending a resolve event")]
     Resolve(ResolveArgs),
+    #[command(about = "Move fully closed, fully old history to a sidecar")]
     Archive(ArchiveArgs),
+    #[command(about = "Print the machine contract agents self-orient with")]
     Schema {
         #[arg(
             value_enum,
@@ -81,6 +96,7 @@ pub enum Command {
         )]
         target: SchemaTarget,
     },
+    #[command(about = "Validate the log file; --fix repairs unreadable lines")]
     Doctor(DoctorArgs),
 }
 

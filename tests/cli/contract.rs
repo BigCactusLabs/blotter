@@ -1523,3 +1523,32 @@ fn a_stored_promotion_line_is_its_envelope_record_plus_the_version_marker() {
         "v is the first member of every stored line"
     );
 }
+
+/// `blotter --help` is the first thing a person reads; a command row with a
+/// blank description says nothing about what it does, and one described row
+/// among thirteen blank ones misreads as the only command that matters.
+#[test]
+fn help_describes_every_command() {
+    let output = run(&["--help"]);
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    let commands = help
+        .split("Commands:")
+        .nth(1)
+        .and_then(|rest| rest.split("Options:").next())
+        .expect("--help lists a Commands block before Options");
+    let rows: Vec<&str> = commands.lines().filter(|l| !l.trim().is_empty()).collect();
+    assert_eq!(
+        rows.len(),
+        15,
+        "fourteen subcommands plus help:\n{commands}"
+    );
+    for row in rows {
+        let mut parts = row.split_whitespace();
+        let name = parts.next().unwrap();
+        assert!(
+            parts.next().is_some(),
+            "`{name}` has no about line in blotter --help:\n{commands}"
+        );
+    }
+}
