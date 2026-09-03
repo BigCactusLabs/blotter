@@ -1,6 +1,13 @@
 # Changelog
 
-## [Unreleased]
+## [1.0.0] - 2026-09-03
+
+### Upgrading
+
+1.0.0 breaks two things at once; both need action before the new binary runs in a repo that used 0.15.
+
+1. Before upgrading, remove the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from Claude Code settings. Otherwise every failed tool call puts an `invalid_argument` error envelope (exit 2, unrecognized subcommand) into the host session: Claude Code shows that stderr to the agent on `PostToolUseFailure` and blocks nothing, but it is noise on every failure.
+2. A log written by 0.15.0 or earlier is refused whole, with `unsupported_log_version` at exit 65. Rename it out of the discovery path to a name that does not exist yet and let the next `blotter add` create a fresh v2 log, or keep the 0.15 binary — `cargo install blotter-cli --version 0.15.0 --root ~/.blotter-0.15` — and point it at the old file with `--file`/`BLOTTER_FILE` when the history is wanted. There is no upcaster, no legacy parser, and no `migrate` command, and nothing rewrites the old file.
 
 ### Changed
 
@@ -414,5 +421,7 @@ Additive only: envelope `meta.contract` stays 4 and every existing log, command,
 
 - Initial release.
 
+[1.0.0]: https://github.com/BigCactusLabs/blotter/compare/v0.15.0...v1.0.0
+[0.15.0]: https://github.com/BigCactusLabs/blotter/releases/tag/v0.15.0
 [0.2.0]: https://github.com/treygoff24/papercuts/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/treygoff24/papercuts/releases/tag/v0.1.0
