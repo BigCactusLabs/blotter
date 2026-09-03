@@ -1117,3 +1117,31 @@ The worst clusters under r44 were same-tag cuts sharing three generic domain tok
 Fixture-scale behaviour is unchanged by construction: the N=2 reworded-repeat case still links under the floor, and no existing test in the tree depends on a ceiling above the floor, which is why a new test pins the value — a corpus where a token occurring in one further open cut was rare under divisor 4 and is not under divisor 16.
 
 `schema`'s `triage` semantics keep stating the rule as "3 shared locally rare tokens"; the README states the ceiling with the new divisor. The gate clause in r51 is discharged and TASK-71 closes with this amendment.
+
+### r54 (2026-09-03, additive + design language: a dogear is a finding, not an idea; `finding` alias)
+
+Additive: `meta.contract` stays 6. No record shape, envelope shape, or exit-code changes; `schema.commands.dogear.alias` gains `finding`, `schema.commands.dogear` gains `admission`, and clap's unrecognized-subcommand tip can now name `finding`. Supersedes only the phrase "idea-log channel" in r5 and "idea-log kind" in r6; every other rule of r5, r6 and its addendum stands, including the `idea` alias.
+
+#### The posture
+
+A dogear is a finding: something an agent noticed that is interesting or possibly novel beyond the task in front of it — a surprising measurement, an engineering quirk, a gap in prior art, a pattern with no name yet — and could stand on its own as a short public post. Repo-local is fine; repo-bound is not. Blotter records the finding and where a human published it.
+
+#### The admission bar
+
+Conjunctive, all three: one finding in the agent's own words (not a list, not a paste); interesting or possibly novel beyond this task; understandable without the repo (two to six sentences, TIL scale). r48's cut floor is disjunctive — any one of five grounds; the dogear bar is conjunctive — all three. Skip task notes, chores and "we should someday" items (backlog or nothing), anything derivable from the docs, and anything not actually observed. A dogear is a lead, not a verified result. `resolve --url` is glossed as "where a human published the finding" and `resolve --dropped` as "did not survive review"; both are glosses, and the r6-addendum rule for both flags is unchanged — nothing is fetched or validated.
+
+#### Why
+
+The TIL convention and Ahrens' permanent-note rule (write one idea, stand-alone, in your own words, for a reader without context) both corroborate a stand-alone, short, context-free note as the right shape for a captured finding; recorded in the 1.1.0 plan rather than a `docs/research/` note, since none exists for this pass. The counter-signals are accountability — unreviewed text published under a person's name reads as slop — and novel ≠ true, which is why this section says lead, not result, rather than finding, full stop.
+
+#### Name and alias
+
+The kind stays `dogear`: renaming `"kind":"dogear"`, `--kind dogear`, the schema, or the ID framing would break the 1.x promise. It is glossed at first mention everywhere a reader arrives cold. `finding` is added as a visible alias beside `idea`, both visible in `--help`. Rename is a 2.0 item, if ever.
+
+#### Sanitization
+
+No new mechanism. The existing write-time home-path rewrite (r22/r34) applies unchanged; publishing hygiene beyond it belongs to whoever publishes. The known asymmetry is recorded as a property, not a fix: dogear text gets `rewrite_home_paths` only, while `--evidence` also gets the span-based secret pass through `redact_evidence` (`src/commands/add.rs`, wrapping `redact_evidence_marked`) — the text lane vs the evidence lane, per r25. The posture widens this property's blast radius by inviting more publishable text into the text lane; it is recorded here and unchanged.
+
+#### README stability clause
+
+README's "What is stable" paragraph read "a change to any of them is a `meta.contract` bump", stricter than this doc's practice — r22, r49, r52 and r53 each added surface on the same contract number. It is narrowed in 1.1.0 to "a breaking change"; additive surface is a minor release on the same contract number.

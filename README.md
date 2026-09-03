@@ -3,16 +3,16 @@
 A tiny Rust CLI that gives AI agents a blotter — a desk pad for the things that don't fit in a commit. Agents jot three kinds of records into one append-only journal:
 
 - **Cuts** — friction worth keeping. A dead-end tool call, a broken link, a misleading error, a footgun config. Filed at the moment it happens, with optional evidence (the failed command, its exit code, its stderr).
-- **Dogears** — ideas. A surprising measurement, a gap in prior art, a pattern worth writing up. The page-corner you fold to come back to later.
+- **Dogears** — findings. Something an agent noticed that is interesting beyond the task: a surprising measurement, an engineering quirk, a gap in prior art. A dogear is the page-corner you fold to come back to; here it marks a lead worth writing up in public.
 - **Promotions** — durable learning. "These experiences became this artifact": a doc, a skill, a guard, a test, a tool, or a process change.
 
-Agents hit friction constantly and silently push through; the signal evaporates. They also have ideas mid-task and drop them for the same reason. `blotter` gives all three a one-line home, and gives you (or another agent) the commands to review, cluster, and act on the backlog.
+Agents hit friction constantly and silently push through; the signal evaporates. They also notice interesting things mid-task and drop them for the same reason. `blotter` gives all three a one-line home, and gives you (or another agent) the commands to review, cluster, and act on the backlog.
 
 ```
 $ blotter add "yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web" --tag tooling
 {"ok":true,"data":{"changed":true,"record":{"kind":"cut","id":"bl_9f2c41d0a8b39f2c41d0","ts":"2026-07-09T21:14:03.412Z","agent":"claude-code","text":"yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web","tags":["tooling"],"impact":"low","cwd":"apps/web","origin":{"type":"agent"}}},"meta":{"contract":6,"file":"/repo/.blotter.jsonl","agent_source":"detected"}}
 
-$ blotter dogear "The retry-backoff pattern in our fetch helper would make a good standalone write-up" --tag research
+$ blotter dogear "On five real friction logs, a rare-token linkage rule with ceiling N/4 produced two-thirds unrelated pairs; tightening to N/16 removed 79% of the false links for 17% of the true ones" --tag research
 ```
 
 It is an agent-only tool by design: JSON envelopes on stdout, structured errors on stderr, stable exit codes, and a `blotter schema` command that returns the whole machine contract so agents self-orient without reading docs.
@@ -60,7 +60,7 @@ Fourteen subcommands, four jobs:
 blotter add "text"                # file a cut (also: blotter log, or pipe stdin to add -)
 blotter add "tool failed" --cmd 'tool --flag' --exit 1 --stderr-file /tmp/stderr
 blotter add "bad response" --evidence 'request_id=abc123'
-blotter dogear "idea worth keeping" --tag research   # file a dogear (also: blotter idea)
+blotter dogear "one finding, in your own words" --tag research   # file a finding (also: blotter idea, blotter finding)
 blotter promote --source bl_9f2c --artifact-type skill --artifact-ref skills/testing.md  # record durable learning
 blotter resolve bl_9f2c --disposition fixed   # resolve one cut (unique ID prefix ok)
 blotter resolve bl_9f2c bl_a81e --disposition fixed   # resolve several atomically
@@ -73,12 +73,12 @@ blotter resolve <id> --amend --note "..."  # correct a resolution you got wrong
 ```bash
 blotter list                      # open cuts, impact-first then newest, JSON envelope
 blotter list --format md          # human review digest
-blotter list --kind dogear        # the idea backlog, newest first
+blotter list --kind dogear        # open findings, newest first
 blotter list --kind promotion     # what friction has already become
 blotter triage                    # identify chronic clusters of similar open cuts
 blotter verify                    # check resolved cuts for later recurrences
 blotter retrospect                # mine chronic signal for typed promotion candidates
-blotter digest --since 7d         # periodic report: chronic, new, open ideas
+blotter digest --since 7d         # periodic report: chronic, new, open findings
 blotter sweep ~/code/a ~/code/b   # roll-up across several repositories
 blotter export --format otlp-json # one OTLP LogsData JSON line for a collector
 ```
@@ -132,16 +132,24 @@ Every resolution of a cut also names its fate: `--disposition fixed|promoted|acc
 
 ## Dogears
 
-Dogears are the idea half of the blotter: append-only entries for a surprising measurement, a gap in prior art, or a reusable pattern worth turning into research or writing. They are deliberately separate from friction — the default list stays cut-only so the complaint queue and the idea queue never blur.
+A dogear is a finding: something an agent noticed that is interesting beyond the task in front of it. The name is the page-corner you fold to come back to; here it marks a lead worth writing up, possibly in public. Dogears are deliberately separate from friction — the default list stays cut-only so the complaint queue and the findings queue never blur.
+
+File a dogear when all three hold. A cut needs any one of its five grounds; a dogear needs all three.
+
+- **One finding, in your own words.** A single observation or lead, not a list, not a paste.
+- **Interesting or possibly novel beyond this task.** A surprising measurement, a quirk with a mechanism behind it, a gap in prior art, a pattern with no name yet. Repo-local is fine; repo-bound is not.
+- **Understandable without the repo.** A reader who has never seen this codebase can follow it. Two to six sentences, the scale of a TIL post.
+
+Skip task notes, chores and "we should someday" items (those belong in a backlog, or nowhere), anything derivable from the docs, and anything you have not actually observed. A dogear is a lead, not a verified result: `resolve --url` records where a human published it, and `resolve --dropped` records that it did not survive review. `--evidence` carries what makes the finding checkable — a measurement, a link, a command. Blotter rewrites home paths in dogear text at write time; the secret pass covers `--evidence` and notes, not the text. Whoever publishes a dogear checks it first.
 
 ```bash
-blotter dogear "The retry-backoff pattern in our fetch helper would make a good standalone write-up" --tag research --evidence "seen in three modules"
-blotter idea - --tag blog-post    # pipe a dogear from stdin
-blotter list --kind dogear         # dogear backlog, newest first
+blotter dogear "On five real friction logs, a rare-token linkage rule with ceiling N/4 produced two-thirds unrelated pairs; tightening to N/16 removed 79% of the false links for 17% of the true ones" --tag research --evidence "docs/research/2026-09-02-task71-linkage-precision.md"
+blotter finding - --tag research  # pipe a dogear from stdin (also: blotter idea)
+blotter list --kind dogear         # open findings, newest first
 blotter list --kind all --format md
 blotter resolve bl_9f2c           # graduated to writing work
-blotter resolve <id> --url <url>  # dogear published at a URL
-blotter resolve <id> --dropped    # dogear intentionally dropped
+blotter resolve <id> --url <url>  # where a human published it
+blotter resolve <id> --dropped    # did not survive review
 ```
 
 Dogears use the same append-only journal, agent resolution, tags, dry-run, deterministic clock override, and resolve events as cuts. `resolve --task`, `--pr`, and `--commit` work for either kind. `--url` and `--dropped` are dogear-only, conflict with each other, and reject a mixed cut/dogear batch before anything is appended. Dogears have no impact or failure-command fields; `list --impact` is therefore accepted only with the default `--kind cut`.
@@ -200,7 +208,7 @@ Retrospect never writes anything — no doc, no skill, no alias, and no record i
 
 ## Digest
 
-`digest` is the periodic read-only report: what keeps recurring, what is new, and what ideas are waiting. It combines three views — chronic clusters (the triage analysis at a threshold of 2), open cuts filed inside the window grouped by tag, and all open dogears. The JSON envelope also carries `accepted_cuts: {count}` — cuts whose winning disposition is `accepted` and whose `disposition_ts` falls inside the window. `--format md` renders nothing for it; `accepted` is the one disposition that hides friction on purpose, and a bare count keeps that hide rate visible.
+`digest` is the periodic read-only report: what keeps recurring, what is new, and what findings are waiting. It combines three views — chronic clusters (the triage analysis at a threshold of 2), open cuts filed inside the window grouped by tag, and all open dogears. The JSON envelope also carries `accepted_cuts: {count}` — cuts whose winning disposition is `accepted` and whose `disposition_ts` falls inside the window. `--format md` renders nothing for it; `accepted` is the one disposition that hides friction on purpose, and a bare count keeps that hide rate visible.
 
 ```bash
 blotter digest --since 7d              # JSON envelope, default window
@@ -297,10 +305,11 @@ rejecting code you just wrote, and one-off mistakes specific to this run.
 
     blotter add "<what you hit and what would have prevented it>" --tag <area>
 
-When you have an idea worth keeping — a measurement, a gap, a pattern — dogear
-it the same way:
+When you notice something interesting beyond this task — one finding, in your
+own words, that a reader without this repo could follow; all three, where a cut
+needs any one of its grounds — dogear it the same way:
 
-    blotter dogear "<the idea>" --tag <area>
+    blotter dogear "<the finding>" --tag <area>
 
 Don't stop working; file it and push through. Impact is consequence, not
 admission: blocking if you could not proceed, material if you lost real time or
@@ -309,7 +318,7 @@ did wrong work, low (default) for a qualified cut with limited cost. Run
 or `--stderr-file` when filing tool failures; never feed raw environment dumps.
 ```
 
-Then periodically: `blotter list --format md` and fix what your agents keep tripping over, and `blotter list --kind dogear` to see what they've been thinking.
+Then periodically: `blotter list --format md` and fix what your agents keep tripping over, and `blotter list --kind dogear` to see what they found worth writing up.
 
 ## Team modes
 
@@ -331,7 +340,7 @@ Everything an agent needs is in `blotter schema`: commands and flags with read-o
 
 Exit 1 is not an error — it is a finding count. `doctor` returns it for an unhealthy log, `triage` for at least one chronic cluster, `verify` for at least one recurrence, and `retrospect` for at least one promotion candidate. Each command's own `exit_codes` entry in `blotter schema` says which meaning applies.
 
-**What is stable.** The 1.x compatibility promise covers the CLI (commands, flags, env vars), the JSON envelopes, the stored JSONL record format, the exit codes, and `blotter schema`; a change to any of them is a `meta.contract` bump. The Rust library the crate also builds (`blotter::*`) is the binary's implementation, not a supported integration API: its items are public to structure the binary and may change in any release without notice. Integrate through the CLI.
+**What is stable.** The 1.x compatibility promise covers the CLI (commands, flags, env vars), the JSON envelopes, the stored JSONL record format, the exit codes, and `blotter schema`; a breaking change to any of them is a `meta.contract` bump; additive surface is a minor release on the same contract number. The Rust library the crate also builds (`blotter::*`) is the binary's implementation, not a supported integration API: its items are public to structure the binary and may change in any release without notice. Integrate through the CLI.
 
 ## License
 

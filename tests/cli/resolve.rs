@@ -118,8 +118,8 @@ fn resolve_help_marks_dogear_only_lifecycle_flags() {
     assert!(help.status.success());
     assert!(help.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&help.stdout);
-    assert!(stdout.contains("Published destination (dogear records only)"));
-    assert!(stdout.contains("Mark dropped (dogear records only)"));
+    assert!(stdout.contains("Where a human published the finding (dogear records only)"));
+    assert!(stdout.contains("The finding did not survive review (dogear records only)"));
 }
 
 #[test]
