@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.1.0] - 2026-09-03
+
+### Upgrading
+
+Chores and "we should someday" items are no longer dogears — track them in your backlog or drop them. Existing dogears are not rewritten and the fold is unchanged; `resolve --dropped` retires any that miss the new bar.
+
+### Added
+
+- `finding` as a visible alias of `dogear` (`idea` stays and becomes visible in `--help` too).
+- `schema.commands.dogear.admission`, the dogear admission bar as one string.
+- A one-line `about` for `dogear` in `blotter --help` and an after-help block stating the bar.
+
+### Changed
+
+- The dogear posture: a dogear is a finding (one finding in the agent's own words, interesting beyond the task, understandable without the repo), not an idea. Every string carrying the old reading moves: README, AGENTS.md, dogear help, `resolve --url`/`--dropped` help and schema text, the crate description. Design doc r54.
+- README's stability clause narrowed to breaking changes.
+
+### Compatibility
+
+No stored-record change and no envelope shape change; `meta.contract` stays 6. `schema.commands.dogear.alias` gains a value and clap's unrecognized-subcommand tip can now name `finding`.
+
 ## [1.0.0] - 2026-09-03
 
 ### Upgrading
@@ -412,6 +433,7 @@ Additive only: envelope `meta.contract` stays 4 and every existing log, command,
 
 - Initial release.
 
+[1.1.0]: https://github.com/BigCactusLabs/blotter/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/BigCactusLabs/blotter/compare/v0.15.0...v1.0.0
 [0.15.0]: https://github.com/BigCactusLabs/blotter/releases/tag/v0.15.0
 [0.2.0]: https://github.com/treygoff24/papercuts/compare/v0.1.0...v0.2.0
