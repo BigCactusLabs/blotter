@@ -21,7 +21,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 ```
 
-All four must pass before any commit. Run the test suite 5x when touching `src/store.rs` or anything concurrency-adjacent — a single green run proves nothing about races. `scripts/dev/gate-5x.sh` does exactly that and keeps every run's output, so a failure that does not reproduce still names the test that failed; counting `ok` lines and discarding the rest loses the one thing the fifth run exists to capture.
+All four must pass before any commit. If an edit to `src/` has no visible effect — `--help`, an envelope, a test that should now pass — check `stat target/debug/blotter` against the file you changed before doubting the edit: cargo has once reported every unit Fresh and left a stale binary in place, and `cargo clean -p blotter-cli` is the recovery. `binary_under_test_is_newer_than_every_source_file` in `tests/cli/docs.rs` fails loudly in that state. Run the test suite 5x when touching `src/store.rs` or anything concurrency-adjacent — a single green run proves nothing about races. `scripts/dev/gate-5x.sh` does exactly that and keeps every run's output, so a failure that does not reproduce still names the test that failed; counting `ok` lines and discarding the rest loses the one thing the fifth run exists to capture.
 
 For a fast iterative test loop, run `scripts/dev/test-fast.sh`. It uses `cargo nextest run --all-features` when cargo-nextest is installed and safely falls back to `cargo test --all-features`. This does not replace the required pre-commit `cargo test --all-features` gate above.
 
