@@ -556,6 +556,7 @@ mod tests {
         for args in [
             vec!["blotter", "add", "-"],
             vec!["blotter", "idea", "-"],
+            vec!["blotter", "finding", "-"],
             vec!["blotter", "list", "--status", "all"],
             vec!["blotter", "list", "--kind", "dogear"],
             vec!["blotter", "export", "--format", "otlp-json"],

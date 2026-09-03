@@ -72,6 +72,21 @@ fn dogear_kind_add_alias_stdin_dry_run_and_tags() {
     assert_eq!(alias.data["record"]["kind"], "dogear");
     assert_eq!(alias.data["record"]["text"], "empty prior-art niche");
 
+    let finding: SuccessEnvelope<Value> = success(
+        &command()
+            .arg("--file")
+            .arg(&file)
+            .args(["finding", "-", "--agent", "researcher", "--tag", "stdin"])
+            .write_stdin("a quirk with a mechanism behind it\n")
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(finding.data["record"]["kind"], "dogear");
+    assert_eq!(
+        finding.data["record"]["text"],
+        "a quirk with a mechanism behind it"
+    );
+
     let before = std::fs::read(&file).unwrap();
     let dry_run: SuccessEnvelope<Value> = success(&run_file(
         &file,
@@ -149,7 +164,16 @@ fn dogear_kind_list_resolve_doctor_schema_and_filter_contract() {
     let doctor: SuccessEnvelope<DoctorData> = success(&run_file(&file, &["doctor"]));
     assert!(doctor.data.healthy);
     let schema: SuccessEnvelope<Value> = success(&run(&["schema"]));
-    assert_eq!(schema.data["commands"]["dogear"]["alias"], json!(["idea"]));
+    assert_eq!(
+        schema.data["commands"]["dogear"]["alias"],
+        json!(["idea", "finding"])
+    );
+    let admission = schema.data["commands"]["dogear"]["admission"]
+        .as_str()
+        .unwrap();
+    assert!(!admission.is_empty());
+    assert!(admission.contains("all three"));
+    assert!(admission.contains("not a verified result"));
     assert_eq!(schema.data["records"]["dogear"]["kind"], "dogear");
     assert!(
         schema.data["commands"]["list"]["flags"]["--kind"]
@@ -206,4 +230,31 @@ fn dogear_and_cut_ids_are_collision_safe_across_tag_boundaries_and_namespaces() 
     assert_eq!(two_tags.len(), 3 + 20);
     assert_eq!(cut_two_tags.len(), 3 + 20);
     assert_ne!(two_tags, cut_two_tags);
+}
+
+#[test]
+fn dogear_help_states_the_admission_bar() {
+    let output = command().args(["dogear", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    for phrase in [
+        "all three",
+        "one finding",
+        "interesting",
+        "stand-alone",
+        "any one of its grounds",
+        "lead, not a verified result",
+    ] {
+        assert!(help.contains(phrase), "dogear --help must state {phrase:?}");
+    }
+}
+
+#[test]
+fn help_lists_dogear_about_and_aliases() {
+    let output = command().arg("--help").output().unwrap();
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(help.contains("File a finding worth writing up (a dogear)"));
+    assert!(help.contains("idea"));
+    assert!(help.contains("finding"));
 }
