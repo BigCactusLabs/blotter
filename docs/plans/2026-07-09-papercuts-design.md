@@ -958,7 +958,7 @@ Also breaking, restated for a consumer's checklist: `meta.contract` 5 → 6; `se
 
 ### r49 (2026-09-01, corrective: `origin` trimmed to a seam, `digest.accepted` renamed, the upgrade refusal named as product surface)
 
-Corrective: envelope `meta.contract` stays 6. r48 is unreleased and no binary carries contract 6 yet, so this amends r48 in place before Phase 3 implements the record model. It supersedes r48's `origin` section and r48's `digest` field name; every other r48 rule stands as written. Prompted by the 2026-09-01 progress review (`docs/plans/blotter-v2-progress-review-feedback-2026-09-01.md`, §14–§16).
+Corrective: envelope `meta.contract` stays 6. r48 is unreleased and no binary carries contract 6 yet, so this amends r48 in place before Phase 3 implements the record model. It supersedes r48's `origin` section and r48's `digest` field name; every other r48 rule stands as written. Prompted by the 2026-09-01 progress review (`docs/archive/blotter-v2-progress-review-feedback-2026-09-01.md`, §14–§16).
 
 #### `origin`, restated
 
