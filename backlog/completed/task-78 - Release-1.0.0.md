@@ -1,10 +1,10 @@
 ---
 id: TASK-78
 title: Release 1.0.0
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-09-01 21:57'
-updated_date: '2026-09-03 02:26'
+updated_date: '2026-09-03 03:46'
 labels:
   - v2
   - release
