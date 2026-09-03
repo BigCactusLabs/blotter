@@ -43,11 +43,25 @@ Skip one-off execution slips unless they recur: typos, shell quoting, a bad firs
 a patch that missed on stale context, a linter correctly rejecting code you just wrote,
 a malformed fixture you authored. Impact records consequence, not admission.";
 
+const DOGEAR_AFTER_HELP: &str = "\
+Admission: file a dogear only when all three hold (a cut needs any one of its grounds).
+  one finding    a single observation or lead, in your own words; not a list, not a paste
+  interesting    surprising or possibly novel beyond this task: a measurement, a quirk with
+                 a mechanism behind it, a gap in prior art, a pattern with no name yet
+  stand-alone    a reader who has never seen this repo can follow it; two to six sentences
+Skip task notes, chores and someday-items (backlog or nothing), anything derivable from
+the docs, and anything you did not observe. A dogear is a lead, not a verified result;
+resolve --url records where a human published it, resolve --dropped that it did not hold.";
+
 #[derive(Debug, Subcommand)]
 pub enum Command {
     #[command(alias = "log", after_help = ADD_AFTER_HELP)]
     Add(AddArgs),
-    #[command(alias = "idea")]
+    #[command(
+        visible_aliases = ["idea", "finding"],
+        about = "File a finding worth writing up (a dogear)",
+        after_help = DOGEAR_AFTER_HELP
+    )]
     Dogear(DogearArgs),
     Promote(PromoteArgs),
     List(ListArgs),
@@ -118,18 +132,18 @@ pub struct AddArgs {
 pub struct DogearArgs {
     #[arg(
         value_name = "TEXT",
-        help = "Dogear text; omit or use - to read from stdin"
+        help = "The finding, in your own words; omit or use - to read from stdin"
     )]
     pub text: Option<String>,
     #[arg(long, help = "Agent name; overrides BLOTTER_AGENT")]
     pub agent: Option<String>,
-    #[arg(long = "tag", help = "Tag the dogear; repeatable")]
+    #[arg(long = "tag", help = "Tag the finding; repeatable")]
     pub tags: Vec<String>,
     #[arg(
         long,
         allow_hyphen_values = true,
         value_name = "TEXT",
-        help = "Optional research note; leading hyphens accepted"
+        help = "What makes the finding checkable: a measurement, link, or command; leading hyphens accepted"
     )]
     pub evidence: Option<String>,
     #[arg(long, help = "Validate without appending")]
@@ -337,10 +351,13 @@ pub struct ResolveArgs {
         long,
         value_name = "URL",
         conflicts_with = "dropped",
-        help = "Published destination (dogear records only)"
+        help = "Where a human published the finding (dogear records only)"
     )]
     pub url: Option<String>,
-    #[arg(long, help = "Mark dropped (dogear records only)")]
+    #[arg(
+        long,
+        help = "The finding did not survive review (dogear records only)"
+    )]
     pub dropped: bool,
     #[arg(
         long,
