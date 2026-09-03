@@ -31,7 +31,12 @@ The crate is named `blotter-cli` (the crates.io name `blotter` is already taken 
 
 ## Upgrade to 1.0.0
 
-Before upgrading, remove the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from your Claude Code settings. Otherwise every failed tool call puts an `invalid_argument` error envelope (exit 2, unrecognized subcommand) into the host session: Claude Code shows that stderr to the agent on `PostToolUseFailure` and blocks nothing, but it is noise on every failure.
+1.0.0 breaks two things at once, and both need action before the new binary runs in a repo that used 0.15.
+
+1. **Remove the Claude Code hook.** Delete the `hooks.PostToolUseFailure` entry naming `blotter hook exec claude-code` from your Claude Code settings. The `hook` subcommand is gone, so otherwise every failed tool call puts an `invalid_argument` error envelope (exit 2, unrecognized subcommand) into the host session: Claude Code shows that stderr to the agent on `PostToolUseFailure` and blocks nothing, but it is noise on every failure.
+2. **Start a fresh ledger.** 1.0.0 refuses a 0.15 log whole (`unsupported_log_version`, exit 65) and leaves it byte-identical. Rename the old `.blotter.jsonl` out of the discovery path to a name that does not exist yet; the next `blotter add` creates a new v2 log beside it. Keep a 0.15 binary (`cargo install blotter-cli --version 0.15.0 --root ~/.blotter-0.15`) and point it at the old file with `--file` when the history is wanted. Nothing rewrites the old file, ever.
+
+The mechanics of the fresh-ledger break are under [Upgrading from 0.15](#upgrading-from-015).
 
 ## How it works
 
@@ -97,7 +102,7 @@ One other path appends besides the write commands: `doctor --fix` appends in the
 
 ## Cuts
 
-A cut is one or two sentences of friction: what you were doing, what got in the way. Not every stumble is a cut. Blotter is a selective ledger, not a transcript, and a cut is a claim that the friction has future value: it is **transferable** (another competent agent or user would plausibly hit it), **consequential** (it cost real time, produced incorrect work, forced retries, or stopped the task), **recurring** (small, but it has happened before, in which case one cut naming the recurrence beats three saying the same thing), **misleading** (the error pointed at the wrong cause or discouraged the correct fix), or **systemic** (a missing affordance, a documentation gap, a brittle interface, a reusable footgun). A cut must be consequential once, or meaningful because it is transferable or recurring.
+A cut is one or two sentences of friction: what you were doing, what got in the way. Not every stumble is a cut. Blotter is a selective ledger, not a transcript, and a cut is a claim that the friction has future value: it is **transferable** (another competent agent or user would plausibly hit it), **consequential** (it cost real time, produced incorrect work, forced retries, or stopped the task), **recurring** (small, but it has happened before, in which case one cut naming the recurrence beats three saying the same thing), **misleading** (the error pointed at the wrong cause or discouraged the correct fix), or **systemic** (a missing affordance, a documentation gap, a brittle interface, a reusable footgun). A cut must be consequential once, or carry knowledge beyond this run: transferable, recurring, misleading, or systemic.
 
 Skip typos, shell quoting mistakes, a bad first guess, using the wrong command or API once, a patch that missed because context was stale, a linter or compiler correctly rejecting code you just wrote, a malformed fixture authored during the task, one broad query that returned too much, and any transient mistake specific to the current run. These are execution events, not knowledge, unless recurrence or system behaviour makes them one.
 
@@ -316,13 +321,15 @@ Duplicate lines after a merge are harmless — the fold is first-wins and `blott
 
 **Private.** Prefer not to commit them? `echo .blotter.jsonl >> .gitignore`, or point `BLOTTER_FILE` somewhere else entirely. Outside a git repo, records go to `~/.blotter/log.jsonl`.
 
-**Historical papercuts migration.** Earlier releases instructed users to run `mv .papercuts.jsonl .blotter.jsonl` (and update `.gitignore`/`.gitattributes`); a rename preserves every byte. Current releases neither discover `.papercuts.jsonl` nor emit migration warnings. Existing records remain readable after that cutoff.
+**Historical papercuts migration.** Earlier releases instructed users to run `mv .papercuts.jsonl .blotter.jsonl` (and update `.gitignore`/`.gitattributes`); a rename preserves every byte. Current releases neither discover `.papercuts.jsonl` nor emit migration warnings, and 1.0.0 refuses any log written before it: those records stay on disk untouched, and the 0.15 binary is the last one that reads them. See [Upgrade to 1.0.0](#upgrade-to-100).
 
 ## Contract
 
 Everything an agent needs is in `blotter schema`: commands and flags with read-only/appends annotations, env vars (`BLOTTER_FILE`, `BLOTTER_AGENT`, `BLOTTER_NOW`), record shapes, error codes, and the exit-code dictionary (0 success · 1 command findings · 2 usage · 65 bad input · 66 not found · 70 internal · 74 I/O · 75 lock timeout, retryable · 77 permission denied · 78 config). Empty results are exit 0, never errors.
 
 Exit 1 is not an error — it is a finding count. `doctor` returns it for an unhealthy log, `triage` for at least one chronic cluster, `verify` for at least one recurrence, and `retrospect` for at least one promotion candidate. Each command's own `exit_codes` entry in `blotter schema` says which meaning applies.
+
+**What is stable.** The 1.x compatibility promise covers the CLI (commands, flags, env vars), the JSON envelopes, the stored JSONL record format, the exit codes, and `blotter schema`; a change to any of them is a `meta.contract` bump. The Rust library the crate also builds (`blotter::*`) is the binary's implementation, not a supported integration API: its items are public to structure the binary and may change in any release without notice. Integrate through the CLI.
 
 ## License
 

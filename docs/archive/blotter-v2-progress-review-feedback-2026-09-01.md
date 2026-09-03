@@ -2,7 +2,8 @@
 
 **Date:** 2026-09-01  
 **Project:** Blotter  
-**Scope:** Review of current v2 progress after the admission-floor policy, r48 contract work, and TASK-72/73 completion.
+**Scope:** Review of current v2 progress after the admission-floor policy, r48 contract work, and TASK-72/73 completion.  
+**Status:** Review feedback, incorporated into the v2 plan. Archived 2026-09-02 — kept for provenance.  
 
 ## Executive Summary
 

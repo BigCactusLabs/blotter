@@ -1,3 +1,11 @@
+//! Implementation of the `blotter` binary.
+//!
+//! This library is not a supported API. Blotter's compatibility promise is the
+//! CLI, the JSON envelopes, the stored JSONL record format, the exit codes, and
+//! `blotter schema` (see `meta.contract`). Every item here is public to
+//! structure the binary and may change in any release without notice.
+//! Integrate through the CLI.
+
 pub mod cli;
 pub mod commands;
 pub mod error;
