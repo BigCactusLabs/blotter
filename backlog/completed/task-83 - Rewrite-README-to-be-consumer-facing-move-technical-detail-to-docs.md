@@ -1,10 +1,10 @@
 ---
 id: TASK-83
 title: Rewrite README to be consumer-facing; move technical detail to docs/
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-09-03 04:45'
-updated_date: '2026-09-03 13:18'
+updated_date: '2026-09-03 14:07'
 labels: []
 dependencies: []
 ordinal: 81000
