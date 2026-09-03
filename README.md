@@ -251,6 +251,8 @@ Output is deterministic: records sort by timestamp, then by id, and an empty sel
 | `dangling_source` | no | A promotion names a source that resolves to nothing, or to a dogear or a promotion, in this log. Only a human knows whether the cut was wrongly archived or the promotion wrongly written. |
 | `orphan_resolve` | no | Either a resolve event whose ID matches no record — often merge ordering, harmless to the fold — or an amend for a known record that has no base resolve anywhere in the log. The second cannot come from merge ordering, so it points at a truncated or hand-edited log; append the missing base resolve. One finding per orphan line. |
 | `unknown_kind` | no | A record kind this build does not know. Left alone for forward compatibility. |
+| `invalid_resolution` | no | A resolve event that breaks a rule of the resolution contract (a disposition on a dogear, none on a cut, a `--promotion` link that is not mutual). The fold skips it; the message names the record and every rule broken. Re-resolve the record with a valid event. |
+| `unsupported_version` | no | The log was written by 0.15 or earlier. Nothing in it is diagnosed under 1.0.0 rules and nothing is changed. See [Upgrade to 1.0.0](#upgrade-to-100). |
 | `gitignored` | no | Fix `.gitignore`, not the log. |
 
 `doctor --fix` repairs unreadable lines by writing a repaired copy and atomically swapping it in — the original is kept as a timestamped backup and every removed line is preserved verbatim in `<log>.quarantine.jsonl`. `--dry-run` plans the repairs without writing.
