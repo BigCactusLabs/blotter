@@ -1,10 +1,10 @@
 ---
 id: TASK-2
 title: 'Distribution: cargo-dist / homebrew / curl installer'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-03 20:39'
-updated_date: '2026-08-13 03:04'
+updated_date: '2026-09-04 21:03'
 labels:
   - release
 dependencies:
@@ -15,15 +15,27 @@ ordinal: 2000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Deferred from v0.1 scope in docs/plans/2026-07-09-papercuts-design.md (line ~168). Contract is stable at 0.5.0; natural next release theme.
+Ship the first Blotter CLI release with cargo-dist binary archives, shell and PowerShell installers, and the Homebrew formula. The distribution workflow is on main; v1.1.0 predates it and has no release assets.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 CLI v1.1.1 passes stable and MSRV checks and cargo-dist planning.
+- [ ] #2 HOMEBREW_TAP_TOKEN is configured with Contents write access limited to BigCactusLabs/homebrew-tap.
+- [ ] #3 The tagged release publishes binary archives and installers, and the tap publishes blotter.rb.
+- [ ] #4 Published installation paths are verified before README commands are advertised.
+<!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+Prepare version and changelog changes and validate them. Configure the scoped tap publishing credential. Publish the release tag, verify release assets and installation, then update README commands and close this task.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Research complete 2026-08-06 (frontier-search + codex sweep). DECISION-READY RECOMMENDATION: adopt dist (upstream axodotdev/cargo-dist) as release engine + shell/powershell installers + auto-published Homebrew tap (BigCactusLabs/homebrew-tap) + cargo-binstall metadata. release-plz deferred (its default GITHUB_TOKEN won't trigger the dist workflow — needs PAT). Key facts: axo.dev web properties dead but OSS project alive (v0.32.0 2026-05-22, docs at axodotdev.github.io/cargo-dist/book/); astral-sh fork ARCHIVED Dec 2025, merged upstream; bus factor ~1 is the real risk, tolerable since dist emits plain committed GH Actions YAML. Blotter gotchas: (1) crate name blotter-cli vs bin name blotter — set formula = "blotter" explicitly; (2) no .github/workflows yet; (3) Homebrew 6.0.0 tap-trust makes third-party tap installs a 2-step prompt flow. Full findings: session artifact task-2-frontier.md. IMPLEMENTATION BLOCKED ON USER: needs tap repo creation + GitHub-side setup.
-
-Codex cross-model sweep completed (task-2-codex-sweep.md): confirms frontier findings on every substantive point (dist alive v0.32.0; Astral fork gone; dist+binstall+GH Releases stack; release-plz optional with single-tag-owner caveat). Divergences: sweep reads maintenance healthier (227 commits/yr incl. woodruffw, eegli, not just dependabot); sweep would defer the tap until macOS demand vs frontier's day-one auto-publish. Both: you own the generated YAML, so tool death is survivable. Sweep adds: dist supplies the curl|sh surface with checksums+attestations, so no hand-rolled installer.
+2026-09-04 current state: cargo-dist 0.32.0 workflow and BigCactusLabs/homebrew-tap already exist. CLI v1.1.1 is prepared. Release build, stable tests (374), Clippy, formatting, Rust 1.89 tests (374), and dist plan --tag v1.1.1 all passed. The plan includes six platform archives, shell/PowerShell installers, and blotter.rb. HOMEBREW_TAP_TOKEN is not configured yet; GitHub requires identity verification before token creation. Do not push the release tag until the scoped token is stored. Verify published assets and installation before adding README installer commands.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
