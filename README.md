@@ -23,6 +23,26 @@ The friction-log idea comes from [a tool Steve Ruiz built](https://x.com/steveru
 
 ## Install
 
+**Homebrew (macOS and Linux):**
+
+```bash
+brew install BigCactusLabs/tap/blotter
+```
+
+**macOS and Linux shell installer:**
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/BigCactusLabs/blotter/releases/latest/download/blotter-cli-installer.sh | sh
+```
+
+**Windows PowerShell:**
+
+```powershell
+irm https://github.com/BigCactusLabs/blotter/releases/latest/download/blotter-cli-installer.ps1 | iex
+```
+
+Prebuilt archives are also available on the [releases page](https://github.com/BigCactusLabs/blotter/releases/latest). To build from crates.io with Rust:
+
 ```bash
 cargo install blotter-cli
 ```
