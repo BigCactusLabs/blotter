@@ -153,8 +153,7 @@ Paste this into your `CLAUDE.md` / `AGENTS.md` / system prompt:
 ```markdown
 ## Blotter
 
-Run `blotter list` first to see what is already known. Do not add global,
-system, or internal friction.
+Run `blotter list` first to see what is already known.
 
 Blotter is a selective ledger, not a transcript. File a cut when friction
 clears the floor: another agent would plausibly hit it (transferable), it
@@ -162,7 +161,8 @@ cost real time or produced wrong work (consequential), it has happened
 before (recurring), the error pointed at the wrong cause (misleading), or
 it reveals a doc gap, a brittle interface, or a footgun (systemic). Skip
 typos, quoting slips, a bad first guess, a linter or compiler correctly
-rejecting code you just wrote, and one-off mistakes specific to this run.
+rejecting code you just wrote, one-off mistakes specific to this run, and
+friction outside this repository: the log is repo-scoped.
 
     blotter add "<what you hit and what would have prevented it>" --tag <area>
 
@@ -176,7 +176,8 @@ Don't stop working; file it and push through. Impact is consequence, not
 admission: blocking if you could not proceed, material if you lost real time or
 did wrong work, low (default) for a qualified cut with limited cost. Run
 `blotter schema` once if you need the full contract. Attach `--cmd`, `--exit`,
-or `--stderr-file` when filing tool failures; never feed raw environment dumps.
+or `--stderr-file` when filing tool failures. Pass only the failing command's
+output, not environment dumps: redaction is best-effort and a dump can leak secrets.
 ```
 
 Then periodically: `blotter list --format md` and fix what your agents keep tripping over, and `blotter list --kind dogear` to see what they found worth writing up. The first week is humbling.

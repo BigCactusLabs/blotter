@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-09-03 14:24'
+updated_date: '2026-09-08 00:45'
 labels:
   - docs
   - agent-ux
@@ -36,3 +37,9 @@ Suggested shape (from the walkmaxx rewrite): one-line framing, bulleted grounds,
 - [ ] #3 Block stays under ~200 words and remains copy-pasteable as-is
 - [ ] #4 AGENTS.md § Dogfood, dogear/resolve help text, and schema strings agree with the revised wording
 <!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+2026-09-07 prompt audit landed two edits inside the README block ahead of this task: the 'global, system, or internal friction' line moved into the skip sentence with its reason (the log is repo-scoped), and 'never feed raw environment dumps' now carries its reason (best-effort redaction). Start the rewrite from the current block, and carry both reasons through.
+<!-- SECTION:NOTES:END -->
