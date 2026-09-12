@@ -59,7 +59,7 @@ cargo run -- add "what you were doing → what got in the way" --tag <area> --im
 
 - **Transferable** — another competent agent or user would plausibly hit the same thing.
 - **Consequential** — it cost meaningful time, produced incorrect work, forced several retries or a context switch, or stopped the task.
-- **Recurring** — the same underlying friction has happened before. Small friction becomes a cut the second time, and one cut naming the recurrence beats three saying the same thing.
+- **Recurring** — the same underlying friction has happened before. Small friction becomes a cut the second time. Do not check the log before filing; a duplicate is more signal, and `triage` clusters it.
 - **Misleading** — an error pointed at the wrong cause, hid the real one, blamed the wrong file, or discouraged the correct fix.
 - **Systemic** — it reveals a missing affordance, a documentation gap, a brittle interface, a flaky command, or a reusable footgun.
 

@@ -120,7 +120,7 @@ A cut is one or two sentences of friction: what you were doing, what got in the 
 
 - **Transferable** — another competent agent or user would plausibly hit it.
 - **Consequential** — it cost real time, produced incorrect work, forced retries, or stopped the task.
-- **Recurring** — small, but it has happened before. One cut naming the recurrence beats three saying the same thing.
+- **Recurring** — small, but it has happened before. Duplicates are fine: the same cut filed twice is more signal that it needs fixing, and `triage` clusters them.
 - **Misleading** — the error pointed at the wrong cause or discouraged the correct fix.
 - **Systemic** — a missing affordance, a documentation gap, a brittle interface, a reusable footgun.
 
@@ -148,39 +148,61 @@ A promotion is durable learning, recorded as "these experiences became this arti
 
 ## Give your agents the pen
 
-Paste this into your `CLAUDE.md` / `AGENTS.md` / system prompt:
+Blotter only fills up if the agents doing the work write to it, and they only write to it if their instructions say when. Paste the block below into your `CLAUDE.md`, `AGENTS.md`, or system prompt. It is written for the agent, not for you: a floor for what counts, the three commands, and an order not to stop. Replace `<area>` with your own tag vocabulary (`build`, `tests`, `docs`, `ci`, ...) so clusters form.
 
 ```markdown
 ## Blotter
 
-Run `blotter list` first to see what is already known.
+This repo keeps a friction log in `.blotter.jsonl`. Log to it in the moment,
+then keep working. Never stop to ask whether something is worth filing: file
+it or don't. `blotter schema` prints the full machine contract.
 
-Blotter is a selective ledger, not a transcript. File a cut when friction
-clears the floor: another agent would plausibly hit it (transferable), it
-cost real time or produced wrong work (consequential), it has happened
-before (recurring), the error pointed at the wrong cause (misleading), or
-it reveals a doc gap, a brittle interface, or a footgun (systemic). Skip
-typos, quoting slips, a bad first guess, a linter or compiler correctly
-rejecting code you just wrote, one-off mistakes specific to this run, and
-friction outside this repository: the log is repo-scoped.
+### File a cut when friction clears the floor
 
-    blotter add "<what you hit and what would have prevented it>" --tag <area>
+    blotter add "what you were doing → what got in the way" --tag <area> --impact low|material|blocking
 
-When you notice something interesting beyond this task — one finding, in your
-own words, that a reader without this repo could follow; all three, where a cut
-needs any one of its grounds — dogear it the same way:
+Blotter is a selective ledger, not a transcript. A cut needs at least one
+of these grounds:
 
-    blotter dogear "<the finding>" --tag <area>
+- **transferable** — another agent or user would plausibly hit it
+- **consequential** — it cost real time, produced wrong work, forced retries, or stopped the task
+- **recurring** — it has happened before. Do not check the log first; a duplicate is more signal, not noise
+- **misleading** — the error pointed at the wrong cause, hid it, or blamed the wrong file
+- **systemic** — a doc gap, a missing affordance, a brittle interface, a reusable footgun
 
-Don't stop working; file it and push through. Impact is consequence, not
-admission: blocking if you could not proceed, material if you lost real time or
-did wrong work, low (default) for a qualified cut with limited cost. Run
-`blotter schema` once if you need the full contract. Attach `--cmd`, `--exit`,
-or `--stderr-file` when filing tool failures. Pass only the failing command's
-output, not environment dumps: redaction is best-effort and a dump can leak secrets.
+Skip typos, quoting slips, a bad first guess, a linter or compiler correctly
+rejecting code you just wrote, a patch that missed on stale context, and
+anything outside this repository. Those are execution events, not knowledge.
+
+Some things that qualify do not feel like friction: an error that does not
+point at the fix, docs that did not answer so you fell back on memory, the
+user correcting something the tooling let you get wrong. Build failures are
+friction, not stopping points: log the ones that qualify and keep going.
+
+Impact is consequence, not admission. `blocking` if you could not proceed,
+`material` if you lost real time or did wrong work, `low` (default) otherwise.
+A low-impact cut is still a cut. Put a guess at the cause or fix in
+`--evidence`. For a failed command add `--cmd`, `--exit`, and `--stderr-file`
+with that command's output only, never an environment dump: redaction is
+best-effort.
+
+### File a dogear when you notice something worth keeping
+
+    blotter dogear "the finding, in your own words" --tag <area>
+
+All three must hold: one finding, not a list; interesting beyond this task;
+understandable by someone who has never seen this repo. Chores and "we
+should someday" thoughts are not dogears.
+
+### Close what you fix
+
+    blotter resolve <id> --disposition fixed
+
+If your change removes the friction a cut describes, resolve it. Other
+dispositions: `accepted` (tolerated on purpose), `invalid` (never friction).
 ```
 
-Then periodically: `blotter list --format md` and fix what your agents keep tripping over, and `blotter list --kind dogear` to see what they found worth writing up. The first week is humbling.
+Then once a week, `blotter digest --since 7d --format md` shows what is chronic, what is new, and what your agents found worth writing up. Fix what they keep tripping over. The first week is humbling.
 
 ## Team setup
 
