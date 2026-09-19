@@ -49,6 +49,12 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/blotter-discovery-tools"
           --no-audit --no-fund --ignore-scripts
           skills@1.7.0 @anthropic-ai/claude-code@2.1.278
+      # Claude's pinned npm package selects the native executable in postinstall.
+      # Allow only that package's lifecycle, not arbitrary dependency scripts.
+      - name: Select the pinned Claude native executable
+        run: >-
+          npm rebuild --prefix "$RUNNER_TEMP/blotter-discovery-tools"
+          --foreground-scripts @anthropic-ai/claude-code@2.1.278
       - name: Validate and install in disposable homes
         run: >-
           python3 scripts/dev/check-discovery-hosts.py
