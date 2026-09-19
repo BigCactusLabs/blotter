@@ -43,6 +43,13 @@ class ProofTests(unittest.TestCase):
         for key in ("BLOTTER_FILE", "BLOTTER_NOW", "GITHUB_TOKEN", "ANTHROPIC_API_KEY"):
             self.assertNotIn(key, env)
 
+    def test_report_does_not_claim_independent_corroboration(self):
+        source = PATH.read_text()
+        self.assertIn('"synthetic_records_before_fix":', source)
+        self.assertNotIn('"independent_observations_before_fix":', source)
+        self.assertIn('"independent_corroboration_tested": False', source)
+        self.assertIn('"causal_effect_tested": False', source)
+
     def snapshot(self):
         return {"count": 1, "distinct_recurring_cuts": 2, "recurrences": [
             {"resolved_id": "anchor", "recurrence_ids": ["later-a", "later-b"],

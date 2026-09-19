@@ -18,13 +18,13 @@ The [demonstration](../scripts/dev/demo-discovery-proof.py) creates a disposable
 
 It exercises an inspectable sequence rather than asking a model whether the tool sounds useful:
 
-1. Three independently identified observations of one workflow defect form a chronic cluster.
+1. Three distinct synthetic records of one fixture defect form a chronic cluster. They are produced by one script, not independently observed or corroborated.
 2. One cut is marked fixed while two matching **pre-fix** cuts remain open. Those older cuts must not count as later recurrences.
 3. Two **post-fix** observations cause `verify` to report one resolved anchor and two distinct recurring cuts. Anchors and occurrences are different counts.
 4. A later note-only amendment must not move the original fix boundary or hide those recurrences.
 5. `retrospect` surfaces failed-intervention evidence, while the read commands leave the ledger byte-identical and create no promotion records.
 
-The script exits nonzero if an assertion fails and emits JSON evidence on success. CI runs it against the real compiled executable. This demonstrates existing CLI behavior; it is not new functionality, a model-activation benchmark, a productivity measurement, or proof that another memory system cannot implement a similar workflow.
+The script exits nonzero if an assertion fails and emits JSON evidence on success. CI runs it against the real compiled executable. This demonstrates existing CLI behavior; it does not measure observational independence or a causal effect of a fix. It is not new functionality, a model-activation benchmark, a productivity measurement, or proof that another memory system cannot implement a similar workflow.
 
 The concrete reason to choose Blotter is an inspectable, host-independent record of **what recurred after which intervention**. A useful integration can pair that record with an agent's native memory rather than trying to replace it.
 

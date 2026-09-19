@@ -91,7 +91,7 @@ def demonstrate(binary: Path) -> dict:
         for agent in AGENTS:
             record = invoke("add", TEXT, "--agent", agent, "--tag", "tests", "--impact", "material")
             original.append(record["record"]["id"])
-        require(len(set(original)) == 3, "independent fixture observations must remain distinct")
+        require(len(set(original)) == 3, "synthetic fixture records must remain distinct")
 
         triage = invoke("triage", expected_exit=1, read_only=True)
         require(triage["count"] == 1, "expected one chronic cluster")
@@ -129,9 +129,11 @@ def demonstrate(binary: Path) -> dict:
             "status": "passed",
             "scenario": "synthetic CLI demonstration; agent names are fixture labels",
             "model_activation_tested": False,
+            "independent_corroboration_tested": False,
+            "causal_effect_tested": False,
             "network_or_installation_performed": False,
             "contract": contract["contract"],
-            "independent_observations_before_fix": len(original),
+            "synthetic_records_before_fix": len(original),
             "chronic_clusters": triage["count"],
             "resolved_anchors": after_amend["count"],
             "distinct_later_recurrences": after_amend["distinct_recurring_cuts"],
