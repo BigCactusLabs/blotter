@@ -12,6 +12,7 @@ on:
       - 'scripts/dev/*discovery*'
       - 'tests/discovery/**'
       - '.github/workflows/discovery.yml'
+      - '.github/workflows/context7.yml'
   push:
     branches: [main]
     paths:
@@ -24,6 +25,7 @@ on:
       - 'scripts/dev/*discovery*'
       - 'tests/discovery/**'
       - '.github/workflows/discovery.yml'
+      - '.github/workflows/context7.yml'
   workflow_dispatch:
 
 permissions:
@@ -44,6 +46,10 @@ jobs:
           node-version: '24'
       - name: Test audit and isolation helpers offline
         run: python3 -m unittest discover -s tests/discovery -p 'test_*.py' -v
+      - name: Check Context7 publication plan without credentials or network
+        run: >-
+          python3 scripts/dev/publish-discovery-context7.py
+          --action plan --report "$RUNNER_TEMP/discovery-reports/context7-plan.json"
       - name: Install pinned host tools without lifecycle scripts
         run: >-
           npm install --prefix "$RUNNER_TEMP/blotter-discovery-tools"
@@ -61,6 +67,18 @@ jobs:
           --skills "$RUNNER_TEMP/blotter-discovery-tools/node_modules/.bin/skills"
           --claude "$RUNNER_TEMP/blotter-discovery-tools/node_modules/.bin/claude"
           --report "$RUNNER_TEMP/discovery-reports/installers.json"
+      # Fork refs do not exist in the fixed upstream repository; test those locally.
+      - name: Verify Git-hosted delivery and native plugin caching
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          REMOTE_REF: ${{ github.head_ref || github.ref_name }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          python3 scripts/dev/check-discovery-remote.py
+          --skills "$RUNNER_TEMP/blotter-discovery-tools/node_modules/.bin/skills"
+          --claude "$RUNNER_TEMP/blotter-discovery-tools/node_modules/.bin/claude"
+          --ref "$REMOTE_REF" --expected-sha "$EXPECTED_SHA"
+          --report "$RUNNER_TEMP/discovery-reports/remote.json"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
