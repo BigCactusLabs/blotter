@@ -27,6 +27,16 @@ jobs:
         run: cargo fmt --check
       - name: Discovery packaging and isolated CLI smoke
         run: python3 scripts/dev/check-discovery.py --binary target/release/blotter
+      - name: Demonstrate recurrence and intervention evidence
+        run: |
+          python3 scripts/dev/demo-discovery-proof.py --binary target/release/blotter > "$RUNNER_TEMP/discovery-proof.json"
+          cat "$RUNNER_TEMP/discovery-proof.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: discovery-proof-${{ github.run_id }}
+          path: ${{ runner.temp }}/discovery-proof.json
+          retention-days: 14
+          if-no-files-found: error
       - name: Leak gate on the dogfood log
         run: cargo run --quiet -- doctor --leaks
 
