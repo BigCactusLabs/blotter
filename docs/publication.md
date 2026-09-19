@@ -1,31 +1,35 @@
-# Publish Blotter where coding agents can find it
+# Publication runbook
 
-Status checked: September 19, 2026. This is the operational companion to
-[the discovery research and catalog history](discovery.md), not a new runtime contract.
+Use this page for distribution operations, not ordinary installation. Consumers start with [agent installation](discovery.md). Build/deploy operations for the consumer site are in [the site runbook](discovery-site.md).
 
-## What is shipped and what is still external
+## Evidence and status
 
-[PR #38](https://github.com/BigCactusLabs/blotter/pull/38) is merged at
-`38eab7ac2230d3a1d99a237fe1f4cd29c0938502`. Its corrected synthetic demonstration is
-on `main`, alongside the distribution layer merged in #37. The final correction
-was directly reviewed after the external review service reached its account limit;
-do not describe the unavailable automated re-review as completed.
+The following is a **September 19, 2026 repository audit snapshot**, not a live status service:
 
-Public Git files, tested installation, accepted submission, searchable listing,
-retrievable documentation, and useful model activation are distinct milestones.
-Do not treat CI installation as a real-user adoption count or run installations
-to inflate a directory ranking.
+| Surface | Evidence available | Not established by that evidence |
+| --- | --- | --- |
+| Skills and native Claude plugin | Packaging plus local/remote installer checks are implemented in the discovery workflow | Automatic model activation or useful adoption |
+| Skills catalog | [Five-query baseline](../tests/discovery/baseline-2026-09-19.json) did not return Blotter | Global absence or the cause of nonappearance |
+| Awesome Copilot | [Existing issue #2944](https://github.com/github/awesome-copilot/issues/2944) was rejected for product fit | A pending listing or a packaging failure needing a duplicate submission |
+| Context7 | Configuration and explicit submit/verify workflow exist | Successful submission, finalized indexing, or correct retrieval |
+| Consumer site | An allowlisted site bundle builds | A live deployment, correct hosted responses, or search indexing |
 
-## Git-hosted delivery, not just local copies
+Keep new observations in the relevant issue/PR or generated report, with the source commit and timestamp. Do not accumulate merged-PR narration or stale “next step” lists in the installation guide. Successful installation, accepted submission, searchable listing, useful retrieval, and model activation remain separate claims.
 
-The Agent discovery workflow now includes `check-discovery-remote.py` in addition
-to the local host checks. It downloads the skill through Skills CLI at a full
-commit SHA, fetches the native Claude marketplace by its published branch/ref,
-checks the clone's resolved SHA, and verifies the plugin's separate cache contains
-exactly the expected skill bytes. It then uninstalls the plugin and removes the
-marketplace from its disposable home. A moving ref fails rather than being
-silently treated as the expected build. The live run result, not this description,
-is the evidence of success.
+## Installer validation
+
+Use disposable environments and the versions pinned in [.github/workflows/discovery.yml](../.github/workflows/discovery.yml):
+
+```bash
+python3 -m unittest discover -s tests/discovery -p 'test_*.py' -v
+python3 scripts/dev/check-discovery-hosts.py \
+  --skills "$(command -v skills)" --claude "$(command -v claude)" \
+  --report /tmp/blotter-installers.json
+```
+
+The local test checks skill bytes across supported targets and the native plugin/marketplace in an isolated home. It opts out of telemetry, invokes no model, and uses no inference credentials. Inspect its report rather than treating tool presence as a successful installation.
+
+Test Git-hosted delivery against a clean checkout of a **published** ref:
 
 ```bash
 python3 scripts/dev/check-discovery-remote.py \
@@ -34,82 +38,49 @@ python3 scripts/dev/check-discovery-remote.py \
   --report /tmp/blotter-remote.json
 ```
 
-Run against a clean checkout of the named, published ref. The workflow supplies
-the actual PR head or push SHA. Fork PRs retain local validation; their branches
-are not falsely assumed to exist in the fixed upstream repository. Tests disable
-host telemetry, inherit no inference credentials, and invoke no model. A remote
-installation is not an automatic catalog registration claim.
+The expected SHA must match that ref. The test rejects a moving ref, compares cached skill bytes, and cleans up the disposable installation. Fork pull requests retain local validation rather than pretending their branches exist upstream. Installer success is not a catalog registration or an activation score.
 
-Sources: [Skills CLI SHA-fetch implementation](https://github.com/vercel-labs/skills/blob/v1.7.0/src/git.ts)
-and [Claude marketplace source, ref, and caching documentation](https://code.claude.com/docs/en/plugin-marketplaces).
+## Context7 submission and verification
 
-## Context7: one credential, explicit submission, separate verification
+Use the supported [Add Library page](https://context7.com/add-library), or the main-only **Context7 publication** workflow. The earlier denied GitHub-issue route is not a provider rejection and should not be retried as the publication mechanism.
 
-Use the supported [Add Library page](https://context7.com/add-library), or the
-repository's **Context7 publication** GitHub Actions workflow. The workflow uses
-Context7's authenticated API, not the previously denied GitHub issue route.
-No successful live submission or indexing is claimed merely because the workflow
-exists. No usable Context7 connection or credential was available during this
-implementation; the earlier 403 did not establish that the provider rejects Blotter.
+An authorized maintainer provisions the Actions secret `CONTEXT7_API_KEY`, then explicitly runs action `submit`. Keep the key out of chat, committed files, command arguments, and workflow inputs. This submits only the public Blotter repository URL, not local files or private ledgers. Submission may incur provider usage charges; ordinary CI must not silently enable live requests.
 
-An authorized maintainer adds a repository Actions secret named
-`CONTEXT7_API_KEY`, then runs **Context7 publication** from `main` with action
-`submit`. The secret must be a Context7 API key, not a GitHub token; keep it out of
-chat, command arguments, committed files, and workflow inputs. This submits only
-`https://github.com/BigCactusLabs/blotter` with `private: false`. It does not upload
-local files, customer data, or private ledgers.
-
-After the provider processes it, run the workflow with action `verify`. Verification
-first requires the exact library identity in a search response and a `finalized`
-provider state. It then requests installation, friction-capture, and recurrence
-examples and requires nonempty snippets attributed to this repository for each.
-The report records response hashes, timestamps, and source URLs, not private
-teamspace rules. Human review still needs to check whether the retrieved examples
-are current and correct; source attribution alone does not establish relevance.
-
-The equivalent local commands use an already-provisioned environment key:
+After processing, run action `verify`. Verification requires the exact library identity, finalized metadata, and attributable nonempty snippets for three probes. Inspect the snippets for current installation, capture, and recurrence guidance; attribution alone is not correctness.
 
 ```bash
-# Offline default: inspect the one public submission payload; no key needed.
+# Offline payload preview; no key or network request.
 python3 scripts/dev/publish-discovery-context7.py
 
-# Each action is explicit; submit once, not on every CI run.
+# Explicit live actions, using an already-provisioned environment key.
 python3 scripts/dev/publish-discovery-context7.py --action submit --report /tmp/context7-submit.json
 python3 scripts/dev/publish-discovery-context7.py --action verify --report /tmp/context7-verify.json
 ```
 
-| Report status | Meaning |
-| --- | --- |
-| `planned` | No network request occurred. |
-| `submission_accepted` | Provider returned the expected library ID; indexing has not been verified. |
-| `not_ready` | Exact identity found, but the provider is not finalized. |
-| `not_returned` | Exact identity was absent from this search response; not proof of global absence. |
-| `retrieval_available` | Finalized metadata and own-repository snippets returned for all three probes; not an accuracy or activation score. |
-| `retrieval_incomplete` | Finalized metadata, but at least one probe lacked attributable nonempty snippets. |
-| `missing_or_invalid_credential` / `unauthorized` / `forbidden` | Credential/authorization problem; no success inferred. |
-| `already_exists_unverified` | Submission returned 409; run verification rather than treating the conflict as successful indexing. |
-| `rate_limited` / `transport_unavailable` / `malformed_response` | Observation failed; do not label the library absent. |
+`planned` means offline only; `submission_accepted` is not verified indexing; `retrieval_available` means all three attribution probes returned, not that a model used them correctly. `not_ready`, `not_returned`, and `retrieval_incomplete` are bounded observations. A 409 is `already_exists_unverified`: verify rather than inferring success. Credential, rate-limit, transport, and malformed-response errors are not evidence of absence. Only planned, accepted, and retrieval-available reports exit 0; read the action and status, not just the job color.
 
-`index_verified: false` means this run did not verify indexing, not that the library
-is necessarily unindexed. Only `planned`, `submission_accepted`, and
-`retrieval_available` exit 0; inspect the action/status, not just a green job.
-Requests have time and size bounds, refuse redirects, and do not retry writes.
-The workflow never runs on PRs, pushes, or a schedule, and is restricted to this
-repository's `main`. Provider limits or usage charges may apply to authorized API
-requests. Do not silently enable paid API calls in ordinary CI.
+The script uses bounded requests, refuses redirects, and does not retry writes. The workflow is manual, not triggered by pull requests, pushes, or a schedule. Sources: [Context7 API guide](https://context7.com/docs/api-guide) and [adding libraries](https://context7.com/docs/adding-libraries).
 
-Sources: [Adding libraries](https://context7.com/docs/adding-libraries),
-[API guide](https://context7.com/docs/api-guide), and
-[canonical OpenAPI contract](https://context7.com/docs/openapi.json), checked
-September 19, 2026. The API guide calls for authentication; this integration
-requires it for all live actions even though some GET operations in the OpenAPI
-also describe anonymous access. No undocumented anonymous write route is used.
+## Retrieval observations
 
-## Catalog decisions
+```bash
+python3 scripts/dev/audit-discovery.py --live --report /tmp/blotter-catalog.json
+```
 
-Awesome Copilot's existing rejected [issue #2944](https://github.com/github/awesome-copilot/issues/2944)
-is a product-fit decision, not a packaging failure. Do not create a duplicate
-submission or make self-serve distribution depend on reconsideration. Skills.sh
-[documents real-user installation telemetry](https://www.skills.sh/docs/faq) as its
-listing mechanism; our disabled-telemetry CI installs are not a substitute for
-users choosing the tool.
+This performs five read-only public requests, not installs or submissions. Reports distinguish found, not returned, unavailable, and malformed; include timestamps, response hashes, and returned order. A finite query result is not proof of global catalog absence. Do not turn the observational job into a ranking gate.
+
+For non-branded web retrieval, retain the provider, date, query, returned identities, and semantic-fit notes. Compare like-for-like settings. A public `llms.txt` is a fetch index, not a ranking guarantee. Ordinary crawlability and useful linked content remain the foundation; see [Google's AI search guidance](https://developers.google.com/search/docs/appearance/ai-features).
+
+## Activation evaluation
+
+[The trigger queries](../tests/discovery/trigger-queries.json) contain 20 labeled positive/negative cases split into development and held-out validation. They are inputs, not a measured activation rate.
+
+Expose the skill through the real host's normal discovery path. Use fresh sessions without preloading the skill, repeat each case three times, and record host/model version, skill commit, prompt, activation, and outcome. Tune on development cases and report validation separately. Positive cases must use the right record type and preserve privacy/promotion boundaries; negatives should avoid ordinary execution noise. Read-only requests must remain read-only.
+
+The [synthetic lifecycle demonstration](agent-workflows.md#run-the-friction-lifecycle-demonstration) tests CLI mechanics, not independent observations, causal productivity gains, or model behavior. Sources: [Agent Skills description evaluation](https://agentskills.io/skill-creation/optimizing-descriptions).
+
+## Publication boundaries
+
+Do not create a duplicate Awesome Copilot request; address the existing product-fit feedback only when reconsideration is justified. Do not manufacture Skills telemetry through CI installations. Do not submit an MCP server manifest for a CLI, add promotional output to the runtime, spread instructions into unrelated repositories, or publish findings/private ledgers automatically.
+
+Useful reviewed artifacts can carry appropriate provenance. A source hash establishes byte consistency, not independent trust or installation permission. Follow [release guidance](../CONTRIBUTING.md#releases-and-distribution) before creating any tag: the generated CLI release workflow has a broad version-like trigger, and skill versions are independent.

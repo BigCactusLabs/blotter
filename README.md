@@ -4,251 +4,142 @@
 
 A tiny Rust CLI that gives AI agents a blotter — the pad on the desk where you note the thing before it's gone. Nothing on it is a commit, a ticket, or a chat message. Agents jot three kinds of records into one append-only journal:
 
-- **Cuts** — friction worth keeping. A dead-end tool call, a broken link, a misleading error, a footgun config. Filed at the moment it happens, with optional evidence (the failed command, its exit code, its stderr).
-- **Dogears** — findings. Something an agent noticed that is interesting beyond the task: a surprising measurement, an engineering quirk, a gap in prior art. A dogear is the page-corner you fold to come back to; here it marks a lead worth writing up in public.
-- **Promotions** — durable learning. "These experiences became this artifact": a doc, a skill, a guard, a test, a tool, or a process change.
+- **Cuts:** friction worth keeping. A misleading error, a broken setup step, a recurring tool failure.
+- **Dogears:** findings worth returning to. One observed engineering quirk, measurement, or lead, in the agent's own words.
+- **Promotions:** durable learning. These experiences became this doc, skill, guard, test, tool, or process change.
 
-Agents hit friction constantly and silently push through; the signal evaporates. They also notice interesting things mid-task and drop them for the same reason. Every one of those was a sentence away from being useful. `blotter` gives all three a one-line home, and gives you (or another agent) the commands to review, cluster, and act on the backlog.
+Agents silently push through friction and drop interesting findings mid-task. Every one was a sentence away from being useful. Blotter gives them a one-line home, then helps you review what recurs and what happened after a fix.
 
-```
-$ blotter add "yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web" --tag tooling
-{"ok":true,"data":{"changed":true,"record":{"kind":"cut","id":"bl_9f2c41d0a8b39f2c41d0","ts":"2026-07-09T21:14:03.412Z","agent":"claude-code","text":"yarn web:test with a root-relative path finds no files; the workspace test cwd is apps/web","tags":["tooling"],"impact":"low","cwd":"apps/web","origin":{"type":"agent"}}},"meta":{"contract":6,"file":"/repo/.blotter.jsonl","agent_source":"detected"}}
+JSON envelopes on stdout. Structured errors on stderr. Stable exit codes. `blotter schema` tells an agent how the installed executable works. There is no dashboard. There is not going to be a dashboard.
 
-$ blotter dogear "On five real friction logs, a rare-token linkage rule with ceiling N/4 produced two-thirds unrelated pairs; tightening to N/16 removed 79% of the false links for 17% of the true ones" --tag research
-```
-
-It is an agent-only tool by design: JSON envelopes on stdout, structured errors on stderr, stable exit codes, and a `blotter schema` command that returns the whole machine contract so agents self-orient without reading docs. You read the log; the agents write it. There is no dashboard. There is not going to be a dashboard.
-
-The friction-log idea comes from [a tool Steve Ruiz built](https://x.com/steveruizok) for his own repos: once agents had a place to complain, they immediately surfaced real workflow defects — quoting bugs, wrong test working directories, YAML footguns — that they'd been eating silently for months.
+The friction-log idea comes from [a tool Steve Ruiz built](https://x.com/steveruizok) for his own repos: give agents somewhere to complain and the workflow defects stop disappearing.
 
 ## Install
 
-**Homebrew (macOS and Linux):**
+Homebrew, on macOS or Linux:
 
 ```bash
 brew install BigCactusLabs/tap/blotter
 ```
 
-**macOS and Linux shell installer:**
+Or use a prebuilt installer:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/BigCactusLabs/blotter/releases/latest/download/blotter-cli-installer.sh | sh
 ```
 
-**Windows PowerShell:**
-
 ```powershell
 irm https://github.com/BigCactusLabs/blotter/releases/latest/download/blotter-cli-installer.ps1 | iex
 ```
 
-Prebuilt archives are also available on the [releases page](https://github.com/BigCactusLabs/blotter/releases/latest). To build from crates.io with Rust:
+Inspect remote installer scripts before executing them. [Release archives](https://github.com/BigCactusLabs/blotter/releases/latest) are available for manual installation. To compile from crates.io:
 
 ```bash
-cargo install blotter-cli
+cargo install blotter-cli --locked
 ```
 
-The crate is named `blotter-cli` because someone claimed `blotter` on crates.io, published a placeholder, and went home. The installed binary is plain `blotter`. To build from the latest source instead: `cargo install --git https://github.com/BigCactusLabs/blotter blotter-cli`.
-
-Coming from 0.15? 1.0.0 needs two manual steps before the new binary runs in an old repo: remove the Claude Code hook and start a fresh ledger. Both are in [Upgrading from 0.15](docs/reference.md#upgrading-from-015).
+The crate is `blotter-cli`; the executable is plain `blotter`. Upgrading from 0.15 or earlier requires removing the retired hook and starting a new ledger; read [the upgrade steps](docs/reference.md#upgrading-from-015) first.
 
 ## Install the agent skill
 
-The [Agent Skill](skills/blotter/SKILL.md) teaches agents when to capture friction and how to review it. Install the CLI above separately, then add the skill to a supported coding agent:
+Install the CLI separately, then install the [canonical skill](skills/blotter/SKILL.md):
 
 ```bash
-# Inspect the available skill before installing.
 npx skills add BigCactusLabs/blotter --list
-
-# Install the skill; choose the target agent interactively.
 npx skills add BigCactusLabs/blotter --skill blotter
 ```
 
-For Claude Code's native plugin manager, the repository is also a skill-only marketplace:
+For Claude Code's native plugin manager:
 
 ```text
 /plugin marketplace add BigCactusLabs/blotter
 /plugin install blotter@blotter-tools
 ```
 
-Choose one route per agent to avoid loading the same skill twice. Neither route installs a hook, server, or CLI binary. The third-party Skills CLI has its own install telemetry; `DISABLE_TELEMETRY=1` disables it. Blotter itself remains local and telemetry-free.
-
-[Agent installation and discovery](docs/discovery.md) covers noninteractive setup, verification, and directory publication. [llms.txt](llms.txt) is the compact documentation index; `blotter schema` remains the executable's machine contract.
+Choose one skill route per agent. Neither installs the binary, a hook, or a server. The third-party Skills CLI has its own installation telemetry; `DISABLE_TELEMETRY=1` opts out. Blotter itself has no telemetry. See [agent installation](docs/discovery.md) for scope, prerequisites, and verification.
 
 ## Two minutes
 
-Inside any git repository. No init step; the first record creates the file.
+Inside a repository, with Blotter installed. No init step; the first record creates `.blotter.jsonl` at the repository root. These are demonstration records; use a disposable repository when trying them unchanged.
 
+<!-- blotter:quickstart -->
 ```bash
-# 1. Let branches merge the log by concatenation instead of conflicting.
-echo '.blotter.jsonl merge=union' >> .gitattributes
-
-# 2. File a cut and a finding. The log appears at the repo root.
-blotter add "cargo test on a fresh clone fails until the fixtures submodule is pulled" --tag onboarding --impact material
-blotter dogear "A single 1 MiB read bound on every input lane made three separate DoS guards unnecessary" --tag design
-
-# 3. Read them back.
-blotter list --format md          # open cuts, worst first
-blotter list --kind dogear        # open findings, newest first
-
-# 4. Close one out.
-blotter resolve bl_9f2c --disposition fixed --pr https://github.com/you/repo/pull/12
+blotter add "The documented test command fails on a fresh clone because fixtures are missing" --tag onboarding --impact material
+blotter dogear "A single bounded input reader replaced three separate size guards in this implementation" --tag design
+blotter list --format md
+blotter list --kind dogear
 ```
 
-Then paste the block under [Give your agents the pen](#give-your-agents-the-pen) into your agent instructions, and come back in a week with `blotter digest --since 7d --format md`.
+To close a cut after fixing it, use its **actual returned ID** with `blotter resolve ID --disposition fixed`. The [workflow guide](docs/agent-workflows.md#check-whether-a-workflow-fix-held) shows resolution and recurrence checks. No example ID is guaranteed to exist in your ledger.
 
-Records live in an **append-only JSONL file** — by default `.blotter.jsonl` at your repo root, so every entry shows up in `git diff` and travels with the repo. No server, no sync, no telemetry, no account. The file is the product, and `cat` is a supported client. Multiple agents on one file are fine; nothing ever rewrites history; evidence is bounded and home paths and obvious secrets are redacted at write time. The mechanics are in the [reference](docs/reference.md#the-log-file).
+For committed logs, add `.blotter.jsonl merge=union` to `.gitattributes` once. Duplicate lines from concatenated branches are harmless. For private logs, ignore the file or select another path with `BLOTTER_FILE`.
+
+The file is the product, and `cat` is a supported client. No account, server, or sync. Ordinary writes append; `archive` and `doctor --fix` are explicit copy-and-swap maintenance operations that preserve backups. Redaction is best-effort, not a confidentiality guarantee. [Storage and privacy details](docs/reference.md#evidence-and-redaction).
 
 ## The commands
 
-Fourteen subcommands, four jobs, none of them interactive. Every one is described in full in the [reference](docs/reference.md).
-
-**Write** — append records to the log:
-
-```bash
-blotter add "text" --tag <area>   # file a cut (also: blotter log, or pipe stdin to add -)
-blotter dogear "one finding, in your own words" --tag <area>   # file a finding (also: finding, idea)
-blotter promote --source bl_9f2c --artifact-type skill --artifact-ref skills/testing.md  # record durable learning
-blotter resolve bl_9f2c --disposition fixed   # resolve a cut; --url / --dropped for a dogear
-```
-
-**Read and analyze** — read-only views over the log:
+| Job | Commands |
+| --- | --- |
+| Capture and close | `add`, `dogear`, `promote`, `resolve` |
+| Read and analyze | `list`, `triage`, `verify`, `retrospect`, `digest`, `sweep`, `export` |
+| Maintain the file | `doctor`, `archive` |
+| Inspect the contract | `schema` |
 
 ```bash
-blotter list                      # open cuts, impact-first then newest (--format md for humans)
-blotter list --kind dogear        # open findings; --kind promotion, --kind all
-blotter triage                    # chronic clusters of similar open cuts
-blotter verify                    # resolved cuts whose friction came back
-blotter retrospect                # what has hurt often enough to build something for
-blotter digest --since 7d         # periodic report: chronic, new, open findings
-blotter sweep ~/code/a ~/code/b   # roll-up across several repositories
-blotter export --format otlp-json # one OTLP LogsData line for a collector
+blotter digest --since 7d --format md
+blotter triage
+blotter verify
+blotter retrospect
 ```
 
-**Maintain** — the log file itself:
-
-```bash
-blotter doctor                    # validate the log (--leaks before a public push, --fix for torn lines)
-blotter archive --before 180d     # move fully closed, fully old history to a sidecar
-```
-
-**Contract**:
-
-```bash
-blotter schema                    # the whole machine contract — agents self-orient with this
-```
+Those review commands are read-only. `triage`, `verify`, and `retrospect` use exit **1** to signal findings, not execution failure or the number of findings. Use the [reference](docs/reference.md) for semantics and `blotter schema` for every flag and output shape.
 
 ## Cuts
 
-A cut is one or two sentences of friction: what you were doing, what got in the way. Not every stumble is a cut. Blotter is a selective ledger, not a transcript, and nobody reads transcripts. A cut is a claim that the friction has future value. File one when at least one of these holds:
+Write what you were doing and what got in the way. File a cut when **any one** applies: the knowledge is transferable; the consequence was meaningful; the problem recurred; the error was misleading; or it exposes a systemic gap or footgun.
 
-- **Transferable** — another competent agent or user would plausibly hit it.
-- **Consequential** — it cost real time, produced incorrect work, forced retries, or stopped the task.
-- **Recurring** — small, but it has happened before. Duplicates are fine: the same cut filed twice is more signal that it needs fixing, and `triage` clusters them.
-- **Misleading** — the error pointed at the wrong cause or discouraged the correct fix.
-- **Systemic** — a missing affordance, a documentation gap, a brittle interface, a reusable footgun.
+Skip ordinary one-off typos, quoting slips, bad first guesses, stale patches, and a compiler correctly rejecting code you just wrote. They become useful only when recurrence or system behavior gives them meaning beyond the execution slip. Blotter is a selective ledger, not a transcript, and nobody reads transcripts.
 
-Skip typos, shell quoting mistakes, a bad first guess, using the wrong command or API once, a patch that missed because context was stale, a linter or compiler correctly rejecting code you just wrote, a malformed fixture authored during the task, one broad query that returned too much, and any transient mistake specific to the current run. These are execution events, not knowledge, unless recurrence or system behaviour makes them one.
-
-Impact describes consequence after that decision, not whether to file: `low` (default) is a qualified cut with limited immediate cost, `material` cost real time or caused incorrect work, `blocking` stopped the task. A low-impact cut is still a cut.
-
-Every resolution names the cut's fate — `fixed`, `promoted`, `accepted` (friction deliberately tolerated), or `invalid` (never friction) — and a resolution you got wrong is corrected with `--amend`, never rewritten. Details: [resolve](docs/reference.md#resolve).
+Impact describes consequence **after admission**: `low` is qualified friction with limited immediate cost, `material` cost real time or caused incorrect work, and `blocking` stopped progress. A low-impact cut is still a cut. Independent recurrences are useful evidence; do not search for a duplicate before filing an actual occurrence.
 
 ## Dogears
 
-A dogear is a finding: something an agent noticed that is interesting beyond the task in front of it. The corner of the page you fold down because you'll want it later, not because it annoyed you. Dogears are deliberately separate from friction — the default list stays cut-only so the complaint queue and the findings queue never blur.
+A dogear is the page-corner you fold down because you will want it later, not because it annoyed you. All three must hold: **one observed finding in your own words; interesting beyond this task; understandable without this repository**. Two to six sentences is usually enough.
 
-File a dogear when all three hold. A cut needs any one of its five grounds; a dogear needs all three.
-
-- **One finding, in your own words.** A single observation or lead, not a list, not a paste.
-- **Interesting or possibly novel beyond this task.** A surprising measurement, a quirk with a mechanism behind it, a gap in prior art, a pattern with no name yet. Repo-local is fine; repo-bound is not.
-- **Understandable without the repo.** A reader who has never seen this codebase can follow it. Two to six sentences, the scale of a TIL post.
-
-Skip task notes, chores and "we should someday" items (those belong in a backlog, or nowhere), anything derivable from the docs, and anything you have not actually observed. A dogear is a lead, not a verified result: `resolve --url` records where a human published it, and `resolve --dropped` records that it did not survive review. Whoever publishes a dogear checks it first. Details: [dogear](docs/reference.md#dogear).
+Chores, task notes, untested guesses, and “we should someday” items belong in a backlog or nowhere. A dogear is a lead, not a verified result. A human checks it before publication; `resolve --url` records where it was published, and `resolve --dropped` records that it did not survive review. The default list remains cut-only.
 
 ## Promotions
 
-A promotion is durable learning, recorded as "these experiences became this artifact". It names one or more source cuts, an artifact type (`doc|skill|guard|test|tool|process`), and where the artifact lives. `retrospect` packages the argument for one; a human decides whether to make it, and `promote` is the only command that writes one. Details: [promote](docs/reference.md#promote).
+A promotion records which cuts became an approved artifact that actually exists. `retrospect` supplies candidates, not permission. `promote` is the only writer of promotion records, and it does not resolve source cuts automatically. [Promotion and resolution rules](docs/reference.md#promote).
 
 ## Give your agents the pen
 
-Blotter only fills up if the agents doing the work write to it, and they only write to it if their instructions say when. Paste the block below into your `CLAUDE.md`, `AGENTS.md`, or system prompt. It is written for the agent, not for you: a floor for what counts, the three commands, and an order not to stop. Replace `<area>` with your own tag vocabulary (`build`, `tests`, `docs`, `ci`, ...) so clusters form.
+Add this short instruction to your project's existing `AGENTS.md` or `CLAUDE.md`. The skill carries the detailed procedure; do not paste the entire reference into every prompt.
 
 ```markdown
 ## Blotter
 
-This repo keeps a friction log in `.blotter.jsonl`. Log to it in the moment,
-then keep working. Never stop to ask whether something is worth filing: file
-it or don't. `blotter schema` prints the full machine contract.
+Log repository friction in the moment, then keep working. A cut needs
+transferable, consequential, recurring, misleading, or systemic value.
+Skip ordinary execution slips; record independent recurrences without a
+pre-filing lookup. Use `blotter add "observation" --tag AREA` and choose
+low, material, or blocking impact according to consequence.
 
-### File a cut when friction clears the floor
+Use `blotter dogear` only for one observed finding in your own words that
+is interesting beyond this task and understandable without the repo.
+Keep chores in the backlog. Resolve actual cut IDs after fixing them.
 
-    blotter add "what you were doing → what got in the way" --tag <area> --impact low|material|blocking
-
-Blotter is a selective ledger, not a transcript. A cut needs at least one
-of these grounds:
-
-- **transferable** — another agent or user would plausibly hit it
-- **consequential** — it cost real time, produced wrong work, forced retries, or stopped the task
-- **recurring** — it has happened before. Do not check the log first; a duplicate is more signal, not noise
-- **misleading** — the error pointed at the wrong cause, hid it, or blamed the wrong file
-- **systemic** — a doc gap, a missing affordance, a brittle interface, a reusable footgun
-
-Skip typos, quoting slips, a bad first guess, a linter or compiler correctly
-rejecting code you just wrote, a patch that missed on stale context, and
-anything outside this repository. Those are execution events, not knowledge.
-
-Some things that qualify do not feel like friction: an error that does not
-point at the fix, docs that did not answer so you fell back on memory, the
-user correcting something the tooling let you get wrong. Build failures are
-friction, not stopping points: log the ones that qualify and keep going.
-
-Impact is consequence, not admission. `blocking` if you could not proceed,
-`material` if you lost real time or did wrong work, `low` (default) otherwise.
-A low-impact cut is still a cut. Put a guess at the cause or fix in
-`--evidence`. For a failed command add `--cmd`, `--exit`, and `--stderr-file`
-with that command's output only, never an environment dump: redaction is
-best-effort.
-
-### File a dogear when you notice something worth keeping
-
-    blotter dogear "the finding, in your own words" --tag <area>
-
-All three must hold: one finding, not a list; interesting beyond this task;
-understandable by someone who has never seen this repo. Chores and "we
-should someday" thoughts are not dogears.
-
-### Close what you fix
-
-    blotter resolve <id> --disposition fixed
-
-If your change removes the friction a cut describes, resolve it. Other
-dispositions: `accepted` (tolerated on purpose), `invalid` (never friction).
+Read `blotter schema` for the installed contract. Do not attach secrets
+or environment dumps. Review commands are read-only; recurrence never
+authorizes automatic promotion or publication.
 ```
 
-Then once a week, `blotter digest --since 7d --format md` shows what is chronic, what is new, and what your agents found worth writing up. Fix what they keep tripping over. The first week is humbling.
-
-## Team setup
-
-**Committed (default).** `.blotter.jsonl` is a normal tracked file — records appear in diffs and PRs. Add `.blotter.jsonl merge=union` to `.gitattributes` so parallel branches merge cleanly; duplicate lines after a merge are harmless.
-
-**Private.** Prefer not to commit them? `echo .blotter.jsonl >> .gitignore`, or point `BLOTTER_FILE` somewhere else entirely. Outside a git repo, records go to `~/.blotter/log.jsonl`.
-
-**Public.** Run `blotter doctor --leaks` before pushing a log to a public repository. It flags home paths and any `--deny` literal you name. It cannot flag the thing you didn't think to name, which is what `--deny` is for.
+Then come back with `blotter digest --since 7d --format md`. Fix what the agents keep tripping over. The first week is humbling.
 
 ## Contract
 
-Everything an agent needs is in `blotter schema`: commands and flags with read-only/appends annotations, env vars, record shapes, error codes, and the exit-code dictionary. Empty results are exit 0, never errors, and exit 1 is a finding count, not a failure. The 1.x promise covers the CLI, the JSON envelopes, the stored record format, the exit codes, and `blotter schema`; the Rust library the crate also builds is the binary's implementation, not a supported API. The exit codes and the stability clause are in the [reference](docs/reference.md#exit-codes).
+The supported interface is the CLI, JSON envelopes, stored records, exit codes, and `blotter schema` — not the internal Rust library. Breaking interface changes require an explicit contract change and appropriate major release; additive features do not automatically change `meta.contract`. [Compatibility details](docs/reference.md#what-is-stable).
 
-## What it is not
+For readers: [documentation map](docs/README.md), [when to choose Blotter](docs/choose-blotter.md), [agent workflows](docs/agent-workflows.md), and the compact [llms.txt](llms.txt) index. For contributors: [CONTRIBUTING.md](CONTRIBUTING.md) and the [current implementation contract](docs/contract.md).
 
-- **Not a bug tracker.** A cut has no assignee, no priority field, no state machine beyond open and resolved. When one grows up, it becomes a ticket somewhere else and a `resolve` here.
-- **Not telemetry.** Nothing leaves the repo unless you run `export` and point it at a collector yourself.
-- **Not a transcript.** Agents that log everything are as useful as agents that log nothing. The admission floor is the feature.
-
-## Lineage
-
-This project began as a fork of [treygoff24/papercuts](https://github.com/treygoff24/papercuts) and owes its core design — the append-only journal, the agent-first envelope contract, the concurrency model — to that upstream project. The fork added dogears, structured resolve provenance, and a Claude Code hook integration (since retired), and chronic-cut triage with its analysis family, then took the name **blotter** to stand on its own. `cargo install papercuts` still installs the upstream crate, which has none of those additions. Other tools explore the same space with different bets — e.g. wevm's frog takes a remote-canonical approach where blotter stays local and append-only.
-
-## License
-
-MIT
+MIT licensed. See [LICENSE](LICENSE).
