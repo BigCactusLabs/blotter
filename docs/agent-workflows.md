@@ -4,6 +4,30 @@ Blotter is a local friction log for AI coding agents. Use it when a misleading e
 
 This is selective experience capture, not conversation memory or issue tracking. Keep product tasks in your issue tracker, chat history in your transcript, and meaningful workflow friction in Blotter. For exact flags and output contracts, run `blotter schema` or read the [CLI reference](reference.md).
 
+## Run the friction-lifecycle demonstration
+
+From a clone, with Python 3.10+ and an already installed Blotter:
+
+```bash
+python3 scripts/dev/demo-discovery-proof.py
+# Or use the executable you just built:
+python3 scripts/dev/demo-discovery-proof.py --binary target/release/blotter
+```
+
+The [demonstration](../scripts/dev/demo-discovery-proof.py) creates a disposable workspace and uses an explicit ledger path. It downloads nothing, invokes no model, and never opens your real ledger. Every observation is a synthetic fixture; the three agent names are labels, not three running AI systems.
+
+It exercises an inspectable sequence rather than asking a model whether the tool sounds useful:
+
+1. Three distinct synthetic records of one fixture defect form a chronic cluster. They are produced by one script, not independently observed or corroborated.
+2. One cut is marked fixed while two matching **pre-fix** cuts remain open. Those older cuts must not count as later recurrences.
+3. Two **post-fix** observations cause `verify` to report one resolved anchor and two distinct recurring cuts. Anchors and occurrences are different counts.
+4. A later note-only amendment must not move the original fix boundary or hide those recurrences.
+5. `retrospect` surfaces failed-intervention evidence, while the read commands leave the ledger byte-identical and create no promotion records.
+
+The script exits nonzero if an assertion fails and emits JSON evidence on success. CI runs it against the real compiled executable. This demonstrates existing CLI behavior; it does not measure observational independence or a causal effect of a fix. It is not new functionality, a model-activation benchmark, a productivity measurement, or proof that another memory system cannot implement a similar workflow.
+
+The concrete reason to choose Blotter is an inspectable, host-independent record of **what recurred after which intervention**. A useful integration can pair that record with an agent's native memory rather than trying to replace it.
+
 ## Set up Claude Code, Codex, Cursor, or another coding agent
 
 Install the [CLI](../README.md#install) and [agent skill](discovery.md#install-a-skill-not-a-second-product) separately. The skill teaches admission and review rules; it does not bundle the executable. The same workflow works with any agent allowed to invoke the CLI in the target repository. A successful skill installation does not establish that the host will automatically load it for every relevant situation.

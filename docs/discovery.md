@@ -4,6 +4,16 @@ Research checked: **2026-09-19**. This is a public integration and distribution 
 
 For task-oriented examples, start with [Keep coding-agent friction from disappearing](agent-workflows.md).
 
+## Publication status — verified September 19, 2026
+
+[PR #37](https://github.com/BigCactusLabs/blotter/pull/37) is merged at `3e32788f77c1efcdc44ca28b81ad615c494d9dca`; its distribution files are now on `main`. Do not describe that PR as awaiting merge.
+
+**Awesome Copilot already has a submission.** [Issue #2944](https://github.com/github/awesome-copilot/issues/2944) was opened on September 4 for plugin 1.0.1 at `e2a179b9e0ab3ff4c745a887b64383241b851bf5`. Its automated manifest, lint, installation, and version checks passed. A maintainer [rejected it on September 8](https://github.com/github/awesome-copilot/issues/2944#issuecomment-5578124028), describing the overlap with built-in Copilot memory and skill creation. This is a product-fit decision, not an unresolved packaging error. Do not create a duplicate submission or call it a pending listing. If reconsideration is warranted, address that feedback in the existing thread using the documented author `/rerun-intake` route, not a new issue.
+
+**Context7 is configured, not confirmed indexed.** On September 19, an attempt to create a public-library assistance request in `upstash/context7` returned HTTP 403 (`Resource not accessible by integration`); no issue was created. This does not establish a problem with Context7's web form or API. The [Add Library page](https://context7.com/add-library) and [authenticated GitHub-repository API](https://context7.com/docs/api-guide) remain the submission routes. An authorized account must complete submission and record the returned library ID. Never treat the proposed `/BigCactusLabs/blotter` identity as an observed successful index.
+
+**Skills visibility remains a bounded observation.** The five-query baseline below did not return Blotter. Installer tests opt out of telemetry and must not be repurposed into install farming. Successful installation, catalog acceptance, and useful model activation remain separate claims.
+
 ## Install a skill, not a second product
 
 The canonical skill is [`skills/blotter/SKILL.md`](../skills/blotter/SKILL.md). It is deliberately self-contained: a skill installer may copy that directory without copying this repository's documentation. There are two independent components: the `blotter` executable, and guidance that tells a coding agent when and how to use it. Installing the skill or plugin does **not** install the executable.
@@ -93,7 +103,7 @@ A successful manifest check proves only a small part of that chain. Optimize for
 | Context7 | A submitted repository's documentation is parsed for coding-assistant retrieval | `context7.json` with current usage scope and history exclusions | Submission, successful indexing, retrieval quality, and freshness |
 | GitHub / web search | Search engines and code-search tools retrieve public source and documentation | Problem-language README, linked reference, explicit integration guide | Non-branded query results; neither public files nor metadata guarantee indexing |
 | Explicit documentation fetch | A reader follows an index to the relevant raw Markdown | Root `llms.txt` with a short, curated set of links | A consumer actually fetching it; it is not a ranking or access-control directive |
-| awesome-copilot external plugins | A reviewed external-plugin request can enter the catalog | Public plugin/skill packaging that can be pinned for review | An immutable release pin, submission, automated checks, and maintainer approval |
+| awesome-copilot external plugins | A reviewed external-plugin request can enter the catalog | Public plugin/skill packaging that can be pinned for review | Existing rejected submission; immutable commit/tag, product-fit review, and approval |
 
 This guide records repository readiness, **not accepted directory submissions**. It does not assert that Blotter is currently listed by skills.sh, Context7, awesome-copilot, or Anthropic's official marketplace. Verify live state separately; a failed lookup is not proof that a listing is absent.
 
@@ -129,14 +139,16 @@ The [llms.txt proposal, revised August 10, 2026](https://llmstxt.org/), describe
 
 ### Reviewed catalogs: submit once, with verifiable provenance
 
-The [awesome-copilot contribution guide](https://github.com/github/awesome-copilot/blob/main/CONTRIBUTING.md) sends new external plugins through its issue form, not a direct unreviewed edit to `plugins/external.json`. Prepare the plugin name, repository, root path, license, author, plugin version, release tag/ref, and full commit SHA. Follow the current form's pinning requirements; do not submit `main` as an immutable release. Automated lint/install checks and maintainer approval are separate gates.
+The [awesome-copilot contribution guide](https://github.com/github/awesome-copilot/blob/main/CONTRIBUTING.md) sends external plugins through a reviewed issue workflow, not a direct edit of `plugins/external.json`. The current [issue form](https://github.com/github/awesome-copilot/blob/main/.github/ISSUE_TEMPLATE/external-plugin.yml) and [canonical public-submission validator](https://github.com/github/awesome-copilot/blob/main/eng/external-plugin-validation.mjs) accept **a full commit SHA, a tag, or both**. A separate plugin release is not required for a SHA-pinned submission. The earlier release-first checklist imposed an unnecessary dependency. Never use `main` as an immutable pin.
 
-After host validation and a release containing these files, make one relevant submission and record its public URL and status. Do not post multiple near-identical directory requests or claim an unmerged PR is a catalog listing.
+The existing Blotter submission and rejection are recorded above. Before any reconsideration, make the concrete workflow inspectable: [the synthetic friction-lifecycle demonstration](agent-workflows.md#run-the-friction-lifecycle-demonstration) exercises distinct synthetic records, pre/post-fix boundaries, note-only amendments, and read-only analysis. It does not establish independent corroboration or measure a causal effect. These mechanics already existed; the demonstration is new evidence for understanding them, not a claim that Blotter gained new runtime capabilities or outperformed native memory. A maintainer may still reasonably decide the catalog fit is insufficient.
+
+Do not add a release merely to satisfy a requirement the catalog does not have. Blotter's generated CLI release workflow matches broad version-like tags; any future separately versioned skill release must be designed not to trigger an unintended CLI publication. Do not change the generated release workflow casually.
 
 ## Prioritized continuation
 
 1. **Keep installer evidence green; measure activation separately.** The workflow now exercises real installers. Run the trigger evaluation below through an actual model host; installer success is not automatic activation.
-2. **Close the ingestion gap.** Verify skills.sh search visibility after a legitimate install, submit/refresh Context7 after its config is on the default branch, and prepare the pinned awesome-copilot request after the plugin release. Record provider responses, not inferred success.
+2. **Prioritize self-serve discovery and useful evidence.** The config is on `main`; complete Context7 submission through an authorized route and verify its returned content. Pair genuine Skills installations with bounded search observations. Treat Awesome Copilot as a rejected channel unless a maintainer reopens review; do not put the whole distribution plan behind catalog approval.
 3. **Measure non-branded discovery.** Keep a dated retrieval baseline for queries such as "coding agent friction log", "recurring agent tool failures", "local agent retrospective", and "verify agent workflow fixes". Use the same providers and settings before and after changes. Store query, UTC timestamp, provider, returned URLs, target rank or not-found, and semantic-fit notes. Search position is provider- and time-dependent; do not treat it as an attribution model.
 4. **Publish useful, consented artifacts rather than advertisements.** A genuinely useful guard, test, or engineering note derived from Blotter can carry an appropriate provenance link. Publish only reviewed artifacts and synthetic or explicitly approved examples, never private ledgers. The hypothesis is that useful artifacts bring agents back to the capture tool; validate it instead of adding promotional text to every output.
 
