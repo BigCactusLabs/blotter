@@ -1,0 +1,35 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "Blotter CLI",
+  "description": "Local append-only friction ledger for coding agents: capture meaningful failures and findings, review recurrence, and verify fixes.",
+  "folders": [
+    "docs",
+    "skills/blotter"
+  ],
+  "excludeFolders": [
+    "docs/plans",
+    "docs/archive",
+    "docs/research",
+    "backlog",
+    "tests",
+    "target"
+  ],
+  "excludeFiles": [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CHANGELOG.md",
+    "discovery.md",
+    "LICENSE",
+    "LICENSE.md"
+  ],
+  "rules": [
+    "Use blotter schema for the installed CLI contract; the Rust library is not a supported public API.",
+    "The package is blotter-cli and the executable is blotter. Install only with authorization.",
+    "Capture qualifying repository-local friction without running list first; independent recurrences are evidence.",
+    "A cut needs transferable, consequential, recurring, misleading, or systemic value. Skip ordinary execution noise.",
+    "Dogears are observed findings, not generic ideas or backlog tasks. Never invent evidence.",
+    "Triage and retrospect are read-only. Only record a promotion for an approved durable artifact that exists.",
+    "Use current impact and disposition fields. Do not recommend the retired hook or automatic capture lane.",
+    "Review secrets before sharing logs; best-effort redaction and doctor --leaks are not confidentiality guarantees."
+  ]
+}

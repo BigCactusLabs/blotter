@@ -51,6 +51,29 @@ The crate is named `blotter-cli` because someone claimed `blotter` on crates.io,
 
 Coming from 0.15? 1.0.0 needs two manual steps before the new binary runs in an old repo: remove the Claude Code hook and start a fresh ledger. Both are in [Upgrading from 0.15](docs/reference.md#upgrading-from-015).
 
+## Install the agent skill
+
+The [Agent Skill](skills/blotter/SKILL.md) teaches agents when to capture friction and how to review it. Install the CLI above separately, then add the skill to a supported coding agent:
+
+```bash
+# Inspect the available skill before installing.
+npx skills add BigCactusLabs/blotter --list
+
+# Install the skill; choose the target agent interactively.
+npx skills add BigCactusLabs/blotter --skill blotter
+```
+
+For Claude Code's native plugin manager, the repository is also a skill-only marketplace:
+
+```text
+/plugin marketplace add BigCactusLabs/blotter
+/plugin install blotter@blotter-tools
+```
+
+Choose one route per agent to avoid loading the same skill twice. Neither route installs a hook, server, or CLI binary. The third-party Skills CLI has its own install telemetry; `DISABLE_TELEMETRY=1` disables it. Blotter itself remains local and telemetry-free.
+
+[Agent installation and discovery](docs/discovery.md) covers noninteractive setup, verification, and directory publication. [llms.txt](llms.txt) is the compact documentation index; `blotter schema` remains the executable's machine contract.
+
 ## Two minutes
 
 Inside any git repository. No init step; the first record creates the file.

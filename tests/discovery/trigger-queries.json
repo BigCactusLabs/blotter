@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "purpose": "Hand-labeled activation queries; not measured model outcomes. See docs/discovery.md.",
+  "cases": [
+    {
+      "id": "cut-repeat",
+      "split": "development",
+      "should_trigger": true,
+      "expected_operation": "cut",
+      "query": "The documented test command failed in a fresh clone again because its working directory is wrong. Keep this for the next agent and continue fixing the test.",
+      "reason": "Independent recurring and misleading repo friction deserves capture."
+    },
+    {
+      "id": "review-week",
+      "split": "development",
+      "should_trigger": true,
+      "expected_operation": "review",
+      "query": "Review the agent friction recorded in this repository over the last week and tell me what keeps recurring.",
+      "reason": "Explicit repository-friction review; analysis should stay read-only."
+    },
+    {
+      "id": "cut-misleading",
+      "split": "development",
+      "should_trigger": true,
+      "expected_operation": "cut",
+      "query": "The error said invalid credentials, but the token was valid and a missing config key was the cause. We lost an hour before discovering that. Preserve the finding as workflow friction.",
+      "reason": "Consequential misleading error, not a transient typo."
+    },
+    {
+      "id": "dogear-observed",
+      "split": "development",
+      "should_trigger": true,
+      "expected_operation": "dogear",
+      "query": "We measured the parser on five fixtures: checking the input bound once let us remove three redundant downstream guards. Save this observation for a possible engineering write-up.",
+      "reason": "One observed, self-contained finding with a mechanism."
+    },
+    {
+      "id": "verify-recur",
+      "split": "development",
+      "should_trigger": true,
+      "expected_operation": "review",
+      "query": "Check whether the test-runner friction we marked fixed has appeared in the ledger since that resolution.",
+      "reason": "Recurrence verification is a read operation."
+    },
+    {
+      "id": "cut-small-repeat",
+      "split": "validation",
+      "should_trigger": true,
+      "expected_operation": "cut",
+      "query": "This same undocumented workspace setup tripped me twice this week. The workaround is small, but other agents will hit it. Record this occurrence without stopping work.",
+      "reason": "Low cost does not disqualify independent transferable recurrence."
+    },
+    {
+      "id": "cut-systemic",
+      "split": "validation",
+      "should_trigger": true,
+      "expected_operation": "cut",
+      "query": "The setup docs omit the required fixtures checkout, so every fresh clone fails before its first test. I recovered locally; keep a note of the defect.",
+      "reason": "Recovered systemic friction still qualifies."
+    },
+    {
+      "id": "review-promote",
+      "split": "validation",
+      "should_trigger": true,
+      "expected_operation": "review",
+      "query": "Use our recorded agent friction to identify which repeated problem merits a durable guard or test. Show the evidence; do not create a promotion yet.",
+      "reason": "Evidence mining is useful without automatic promotion."
+    },
+    {
+      "id": "resolve-real",
+      "split": "validation",
+      "should_trigger": true,
+      "expected_operation": "resolve",
+      "query": "I fixed the wrong-workspace defect described by a cut in this repo. Find the matching recorded cut and close it with the outcome that actually happened.",
+      "reason": "An explicit, legitimate review and resolution request."
+    },
+    {
+      "id": "digest",
+      "split": "validation",
+      "should_trigger": true,
+      "expected_operation": "review",
+      "query": "Summarize this project's chronic friction and open findings for a maintainer review, without changing the ledger.",
+      "reason": "Fits digest; no new writes requested."
+    },
+    {
+      "id": "typo",
+      "split": "development",
+      "should_trigger": false,
+      "expected_operation": "none",
+      "query": "I typed cargp instead of cargo once, corrected it, and the command worked. Continue with the implementation.",
+      "reason": "Ordinary one-off typo is execution noise."
+    },
+    {
+      "id": "compiler",
+      "split": "development",
+      "should_trigger": false,
+      "expected_operation": "none",
+      "query": "The compiler correctly rejected the missing semicolon I just added. Fix it and run the tests.",
+      "reason": "Correct rejection of newly authored code is not durable friction."
+    },
+    {
+      "id": "todo",
+      "split": "development",
+      "should_trigger": false,
+      "expected_operation": "none",
+      "query": "Add a backlog task to improve the settings screen next month.",
+      "reason": "A chore belongs in a task tracker, not a dogear."
+    },
+    {
+      "id": "transcript",
+      "split": "development",
+      "should_trigger": false,
+      "expected_operation": "none",
+      "query": "Create a full transcript of every tool call in this session.",
+      "reason": "Transcript capture is outside the selective ledger's purpose."
+    },
+    {
+      "id": "speculation",
+      "split": "development",
+      "should_trigger": false,
+      "expected_operation": "none",
+      "query": "I have not run an experiment, but maybe replacing this parser would make it ten times faster. Add the idea to my brainstorm.",
+      "reason": "No observed finding; do not fabricate evidence."
+    },
+    {
+      "id": "stale-patch",
+      "split": "validation",
+      "should_trigger": false,
+      "expected_operation": "none",
+      "query": "My patch missed because the file changed after I read it. Reread and apply the change once.",
+      "reason": "A single stale patch is not transferable system friction."
+    },
+    {
+      "id": "new-fixture",
+      "split": "validation",
+      "should_trigger": false,
+      "expected_operation": "none",
+      "query": "I just wrote a malformed JSON fixture and the parser rejected it correctly. Correct the fixture.",
+      "reason": "A malformed fixture authored during the task is routine noise."
+    },
+    {
+      "id": "ordinary-feature",
+      "split": "validation",
+      "should_trigger": false,
+      "expected_operation": "none",
+      "query": "Implement a light and dark theme selector for this app.",
+      "reason": "Generic feature work does not itself call for the skill."
+    },
+    {
+      "id": "personal",
+      "split": "validation",
+      "should_trigger": false,
+      "expected_operation": "none",
+      "query": "Remember that I prefer aisle seats for future travel planning.",
+      "reason": "Personal memory does not belong in a repository ledger."
+    },
+    {
+      "id": "issue-track",
+      "split": "validation",
+      "should_trigger": false,
+      "expected_operation": "none",
+      "query": "Create a bug ticket with an assignee, priority, milestone, and acceptance criteria.",
+      "reason": "This is issue tracking rather than a selective agent experience record."
+    }
+  ]
+}

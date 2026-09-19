@@ -1,5 +1,5 @@
 {
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "blotter",
   "description": "Give coding agents a local append-only ledger for meaningful friction, findings, retrospectives, and durable learning.",
   "version": "1.1.0",
