@@ -1,0 +1,7 @@
+[
+  {"source":"README.md","route":"","title":"Blotter — friction logs for coding agents","description":"Your agents have complaints. Give them somewhere to write them down. A local CLI for meaningful friction, findings, and durable learning."},
+  {"source":"docs/choose-blotter.md","route":"why-blotter/","title":"Friction logs, agent memory, and issue trackers","description":"Choose a repository-owned friction ledger when you need to inspect recurring workflow failures and what was recorded after a fix."},
+  {"source":"docs/agent-workflows.md","route":"workflows/","title":"Capture recurring agent failures and review workflow fixes","description":"Task-oriented Blotter examples: capture qualified friction, review chronic problems, and check later recurrence without rewriting history."},
+  {"source":"docs/reference.md","route":"reference/","title":"Blotter CLI reference","description":"Commands, flags, records, exit codes, and upgrades. Use blotter schema for the contract of your installed executable."},
+  {"source":"skills/blotter/SKILL.md","route":"skill/","title":"Blotter Agent Skill","description":"When a coding agent should record friction or findings, how to review them, and how to keep ordinary execution noise out of the ledger."}
+]

@@ -1,0 +1,3 @@
+# Documentation build only; never a Blotter runtime dependency.
+markdown-it-py==4.2.0
+mdurl==0.1.2

@@ -1,0 +1,95 @@
+name: Discovery site
+
+on:
+  pull_request:
+    paths:
+      - 'README.md'
+      - 'Cargo.toml'
+      - 'docs/**'
+      - 'skills/**'
+      - 'site/**'
+      - 'scripts/dev/build-discovery-site.py'
+      - 'tests/site/**'
+      - '.github/workflows/discovery-site.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'Cargo.toml'
+      - 'docs/**'
+      - 'skills/**'
+      - 'site/**'
+      - 'scripts/dev/build-discovery-site.py'
+      - 'tests/site/**'
+      - '.github/workflows/discovery-site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: discovery-site-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and check consumer site
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install documentation-only dependencies
+        run: >-
+          python -m pip install --disable-pip-version-check
+          --only-binary=:all: -r site/requirements.txt
+      - name: Test publication boundaries and rendering
+        run: python -m unittest discover -s tests/site -v
+      - name: Read the actual configured Pages URL when publishing
+        id: pages
+        if: github.repository == 'BigCactusLabs/blotter' && github.ref == 'refs/heads/main' && vars.BLOTTER_DOCS_DEPLOY == 'true'
+        uses: actions/configure-pages@v6
+      - name: Build the selected consumer documents
+        env:
+          SITE_BASE_URL: ${{ steps.pages.outputs.base_url || 'https://bigcactuslabs.github.io/blotter/' }}
+        run: python scripts/dev/build-discovery-site.py --base-url "$SITE_BASE_URL" --output "$RUNNER_TEMP/blotter-site"
+      # v5's hidden-file option keeps .nojekyll and root-hosted .well-known.
+      # Only the generated allowlisted directory is ever uploaded, not the repo.
+      - name: Package the site for inspection or Pages deployment
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ runner.temp }}/blotter-site
+          include-hidden-files: true
+          retention-days: 14
+      - name: Record build versus deployment status
+        env:
+          DEPLOY_ENABLED: ${{ vars.BLOTTER_DOCS_DEPLOY }}
+        run: |
+          echo 'Site bundle built and links checked. A build is not a deployment or indexing result.' >> "$GITHUB_STEP_SUMMARY"
+          if [ "$DEPLOY_ENABLED" != 'true' ]; then
+            echo 'Pages deployment is disabled. Follow docs/discovery-site.md for the one-time setup.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  deploy:
+    name: Publish consumer documentation
+    if: github.repository == 'BigCactusLabs/blotter' && github.ref == 'refs/heads/main' && vars.BLOTTER_DOCS_DEPLOY == 'true'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment
