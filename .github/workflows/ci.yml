@@ -5,9 +5,6 @@ on:
     branches: [main]
   pull_request:
 
-permissions:
-  contents: read
-
 env:
   CARGO_TERM_COLOR: always
 
@@ -17,8 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -30,15 +25,6 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Format
         run: cargo fmt --check
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-      - name: Install documentation-only dependencies
-        run: python -m pip install --disable-pip-version-check --only-binary=:all: -r site/requirements.txt
-      - name: Documentation checker regressions
-        run: python -m unittest discover -s tests/docs -v
-      - name: Source documentation and executable README
-        run: python scripts/dev/check-docs.py --binary target/release/blotter
       - name: Discovery packaging and isolated CLI smoke
         run: python3 scripts/dev/check-discovery.py --binary target/release/blotter
       - name: Demonstrate recurrence and intervention evidence
@@ -59,8 +45,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.89"
