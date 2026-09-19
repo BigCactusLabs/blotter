@@ -4,6 +4,16 @@ User-visible changes belong here. Current behavior is documented in the [referen
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-09-19
+
+No runtime, ledger, contract, or CLI behavior change; binaries are rebuilt from the same source as 1.1.1.
+
+### Agent skill and plugin distribution
+
+- Package the canonical skill for cross-agent and native Claude plugin installation, with installer lifecycle checks in isolated environments; the independently versioned skill/plugin package is 1.1.0.
+- Verify Git-hosted delivery at an exact SHA and add an explicit, main-only Context7 submit/verify workflow.
+- Generate publishable consumer documentation pages with an integrity-checked skill index, and record a Skills catalog baseline and reproducible friction lifecycle evidence.
+
 ### Documentation and development
 
 - Replace mandatory historical-amendment reading with a current implementation contract and task-oriented documentation map.
@@ -11,7 +21,7 @@ User-visible changes belong here. Current behavior is documented in the [referen
 - Separate agent installation from catalog operations and consumer-site deployment.
 - Correct the quickstart's assumed ID, text-redaction claims, and exit-1 interpretation.
 - Add source Markdown links/anchors/navigation checks, schema/reference command coverage, and an isolated executable README smoke test to CI.
-- Remove the superseded design document from the active tree and condense release history, retaining immutable historical links. No runtime, ledger, CLI version, contract number, or skill/plugin version change.
+- Remove the superseded design document from the active tree and condense release history, retaining immutable historical links.
 
 ## [1.1.1] - 2026-09-04
 
