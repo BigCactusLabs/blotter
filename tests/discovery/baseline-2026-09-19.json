@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "kind": "observed-catalog-baseline-summary",
+  "source_run": "https://github.com/BigCactusLabs/blotter/actions/runs/35425438957",
+  "source_job_id": 105850444761,
+  "source_commit": "533f946557b3fe2e8e5df6ef0c395eb9e249a810",
+  "target": "bigcactuslabs/blotter/blotter",
+  "provider": "https://skills.sh/api/search",
+  "limit": 20,
+  "scope": "Finite CLI-endpoint search snapshot, not proof of global catalog absence. Full returned identities are in the run logs and catalog artifact.",
+  "observations": [
+    {
+      "query": "blotter",
+      "observed_at": "2026-09-19T06:00:35.179825+00:00",
+      "status": "not_returned",
+      "http_status": 200,
+      "returned_count": 18,
+      "api_rank": null,
+      "cli_rank": null,
+      "response_sha256": "c068bd2705937f97660ebd552aa377cf03c9f47b120c10572a1e2e06b6f892e8"
+    },
+    {
+      "query": "friction",
+      "observed_at": "2026-09-19T06:00:36.001021+00:00",
+      "status": "not_returned",
+      "http_status": 200,
+      "returned_count": 20,
+      "api_rank": null,
+      "cli_rank": null,
+      "response_sha256": "99be369ddab0756c6e80f1a37bb4980235cd2d8da8c0ff2a821bed9161c40881"
+    },
+    {
+      "query": "agent friction",
+      "observed_at": "2026-09-19T06:00:36.881253+00:00",
+      "status": "not_returned",
+      "http_status": 200,
+      "returned_count": 20,
+      "api_rank": null,
+      "cli_rank": null,
+      "response_sha256": "874ebc3a9bc305a447df1e7d9d514ed7cece0304d15af7a118819c88177f2b90"
+    },
+    {
+      "query": "retrospective",
+      "observed_at": "2026-09-19T06:00:37.873231+00:00",
+      "status": "not_returned",
+      "http_status": 200,
+      "returned_count": 20,
+      "api_rank": null,
+      "cli_rank": null,
+      "response_sha256": "c3032c994f76d35902df275cdd542a0be564318467209a71d7f98652c17b9028"
+    },
+    {
+      "query": "recurring tool failures",
+      "observed_at": "2026-09-19T06:00:38.591789+00:00",
+      "status": "not_returned",
+      "http_status": 200,
+      "returned_count": 20,
+      "api_rank": null,
+      "cli_rank": null,
+      "response_sha256": "4a1607729213ba7f4b627b888d3e8f8b6469ad1e9848ea8c31dc054774811b39"
+    }
+  ]
+}

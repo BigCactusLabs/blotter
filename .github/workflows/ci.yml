@@ -25,6 +25,8 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Format
         run: cargo fmt --check
+      - name: Discovery packaging and isolated CLI smoke
+        run: python3 scripts/dev/check-discovery.py --binary target/release/blotter
       - name: Leak gate on the dogfood log
         run: cargo run --quiet -- doctor --leaks
 

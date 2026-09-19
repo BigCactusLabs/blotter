@@ -1,0 +1,15 @@
+# Blotter
+
+> A local append-only friction ledger for coding agents. Preserve meaningful failures, observed findings, and the provenance of durable improvements without a server, account, or telemetry.
+
+Install the package `blotter-cli`; run the executable `blotter`. The Agent Skill is guidance, not a binary installer. Use `blotter schema` for the contract of the installed executable. Do not treat historical release notes as current usage instructions. This index helps readers that fetch it; it is not a search-engine registration or access directive.
+
+## Use Blotter
+
+- [Quick start and installation](https://raw.githubusercontent.com/BigCactusLabs/blotter/main/README.md): What Blotter does, installation, and agent setup.
+- [CLI reference](https://raw.githubusercontent.com/BigCactusLabs/blotter/main/docs/reference.md): Commands, flags, records, exit codes, and upgrade guidance.
+- [Agent Skill](https://raw.githubusercontent.com/BigCactusLabs/blotter/main/skills/blotter/SKILL.md): Admission rules, local capture, review, and privacy boundaries.
+
+## Optional
+
+- [Agent integrations and discovery](https://raw.githubusercontent.com/BigCactusLabs/blotter/main/docs/discovery.md): Skill installation, plugin packaging, verification, and evidence-backed distribution strategy.

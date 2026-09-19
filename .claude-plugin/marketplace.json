@@ -1,0 +1,14 @@
+{
+  "name": "blotter-tools",
+  "description": "Blotter: local friction capture and retrospective guidance for coding agents.",
+  "owner": {
+    "name": "BigCactusLabs"
+  },
+  "plugins": [
+    {
+      "name": "blotter",
+      "source": "./",
+      "description": "Give coding agents a local append-only ledger for meaningful friction, findings, retrospectives, and durable learning."
+    }
+  ]
+}

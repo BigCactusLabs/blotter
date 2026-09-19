@@ -1,0 +1,91 @@
+name: Agent discovery
+
+on:
+  pull_request:
+    paths:
+      - 'skills/**'
+      - '.claude-plugin/**'
+      - 'plugin.json'
+      - 'context7.json'
+      - 'llms.txt'
+      - 'docs/**'
+      - 'scripts/dev/*discovery*'
+      - 'tests/discovery/**'
+      - '.github/workflows/discovery.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'skills/**'
+      - '.claude-plugin/**'
+      - 'plugin.json'
+      - 'context7.json'
+      - 'llms.txt'
+      - 'docs/**'
+      - 'scripts/dev/*discovery*'
+      - 'tests/discovery/**'
+      - '.github/workflows/discovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installers:
+    name: Real skill and plugin installers
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test audit and isolation helpers offline
+        run: python3 -m unittest discover -s tests/discovery -p 'test_*.py' -v
+      - name: Install pinned host tools without lifecycle scripts
+        run: >-
+          npm install --prefix "$RUNNER_TEMP/blotter-discovery-tools"
+          --no-audit --no-fund --ignore-scripts
+          skills@1.7.0 @anthropic-ai/claude-code@2.1.278
+      # Claude's pinned npm package selects the native executable in postinstall.
+      # Allow only that package's lifecycle, not arbitrary dependency scripts.
+      - name: Select the pinned Claude native executable
+        run: >-
+          npm rebuild --prefix "$RUNNER_TEMP/blotter-discovery-tools"
+          --foreground-scripts @anthropic-ai/claude-code@2.1.278
+      - name: Validate and install in disposable homes
+        run: >-
+          python3 scripts/dev/check-discovery-hosts.py
+          --skills "$RUNNER_TEMP/blotter-discovery-tools/node_modules/.bin/skills"
+          --claude "$RUNNER_TEMP/blotter-discovery-tools/node_modules/.bin/claude"
+          --report "$RUNNER_TEMP/discovery-reports/installers.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: discovery-installers-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/discovery-reports/
+            ${{ runner.temp }}/blotter-discovery-tools/package-lock.json
+          retention-days: 14
+          if-no-files-found: warn
+
+  catalog:
+    name: Public catalog observation (not a ranking gate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Observe branded and problem-language searches
+        run: python3 scripts/dev/audit-discovery.py --live --report "$RUNNER_TEMP/catalog.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: discovery-catalog-${{ github.run_id }}
+          path: ${{ runner.temp }}/catalog.json
+          retention-days: 14
+          if-no-files-found: warn
