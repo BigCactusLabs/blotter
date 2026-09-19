@@ -84,8 +84,9 @@ class DistributionTests(unittest.TestCase):
     def test_native_listing_shape(self):
         self.assertEqual(hosts.plugin_rows([]), [])
         self.assertEqual(hosts.plugin_rows({"installed": []}), [])
-        with self.assertRaises(ValueError):
-            hosts.plugin_rows("not a listing")
+        for value in ("not a listing", {}, {"installed": None}):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                hosts.plugin_rows(value)
 
 
 if __name__ == "__main__":

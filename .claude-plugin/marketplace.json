@@ -1,5 +1,6 @@
 {
   "name": "blotter-tools",
+  "description": "Blotter: local friction capture and retrospective guidance for coding agents.",
   "owner": {
     "name": "BigCactusLabs"
   },

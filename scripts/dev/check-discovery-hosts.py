@@ -34,7 +34,7 @@ def isolated_env(home: Path) -> dict[str, str]:
 
 
 def plugin_rows(value: object) -> list[dict]:
-    rows = value.get("installed", []) if isinstance(value, dict) else value
+    rows = value.get("installed") if isinstance(value, dict) else value
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
         raise ValueError("unexpected Claude plugin-list shape")
     return rows
@@ -92,7 +92,12 @@ def main() -> int:
             shutil.copytree(ROOT / "skills", staged / "skills")
             for label, path in (("native-manifest", staged), ("marketplace", ROOT)):
                 run(label, "claude", native, env, "plugin", "validate", str(path), "--strict", "--json")
-            run("marketplace-add", "claude", native, env, "plugin", "marketplace", "add", str(ROOT))
+            # Local-directory marketplaces can load plugins in place. Copy the
+            # checkout into the disposable boundary instead of assuming caching.
+            marketplace = native / "marketplace"
+            shutil.copytree(ROOT, marketplace, symlinks=True,
+                            ignore=shutil.ignore_patterns(".git", "target", "__pycache__"))
+            run("marketplace-add", "claude", native, env, "plugin", "marketplace", "add", str(marketplace))
             run("native-install", "claude", native, env, "plugin", "install", "blotter@blotter-tools", "--scope", "user")
             rows = plugin_rows(json.loads(run("native-list", "claude", native, env, "plugin", "list", "--json")))
             matches = [row for row in rows if row.get("id") == "blotter@blotter-tools"]
@@ -111,7 +116,11 @@ def main() -> int:
         report.update(status="failed", error=str(exc))
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps(report, indent=2))
+    # Full output is kept in the artifact; logs need not repeat six ANSI banners.
+    summary = report | {"checks": [{key: value for key, value in check.items()
+                                  if key not in ("stdout", "stderr")}
+                                 for check in report["checks"]]}
+    print(json.dumps(summary, indent=2))
     return 0 if report["status"] == "passed" else 1
 
 
