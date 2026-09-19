@@ -70,7 +70,7 @@ The README introduces the product and installation. The skill owns the self-cont
 
 When changing behavior, update the implementation, schema, contract/reference, regression tests, and Unreleased changelog together. Keep runnable examples concrete: shell pipes are not a notation for enum alternatives, and a made-up ID is not a usable quickstart result. Do not add a hand-maintained schema snapshot or a second set of site prose. Site pages come from the existing source allowlist.
 
-New current docs must be reachable from the documentation map. Put durable decisions in the relevant current page; use Git history for superseded specifications, release archaeology, and completed handoffs. Do not reintroduce “newest amendment wins” governance or mandatory local-only documents.
+Every current page under `docs/` must be linked directly from the documentation map, and every other current page must be reachable from it; the docs checker enforces both. Put durable decisions in the relevant current page; use Git history for superseded specifications, release archaeology, and completed handoffs. Do not reintroduce “newest amendment wins” governance or mandatory local-only documents.
 
 ## Backlog
 

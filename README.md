@@ -60,12 +60,12 @@ Choose one skill route per agent. Neither installs the binary, a hook, or a serv
 
 ## Two minutes
 
-Inside a repository, with Blotter installed. No init step; the first record creates `.blotter.jsonl` at the repository root. These are demonstration records; use a disposable repository when trying them unchanged.
+Inside a repository, with Blotter installed. No init step; the first record creates `.blotter.jsonl` at the repository root. The two records below describe friction and a finding actually observed while building Blotter; use a disposable repository when trying them unchanged.
 
 <!-- blotter:quickstart -->
 ```bash
-blotter add "The documented test command fails on a fresh clone because fixtures are missing" --tag onboarding --impact material
-blotter dogear "A single bounded input reader replaced three separate size guards in this implementation" --tag design
+blotter add "Edited src/ and rebuilt, but cargo reported every unit Fresh and ran the stale binary; cargo clean -p blotter-cli was the recovery" --tag build --impact material
+blotter dogear "Backlog.md issues task IDs as max+1 over the tasks and completed directories, but never reads archive, so archiving a task lets a later create reuse its number" --tag tooling
 blotter list --format md
 blotter list --kind dogear
 ```

@@ -25,6 +25,7 @@ from markdown_it import MarkdownIt
 ROOT = Path(__file__).resolve().parents[2]
 ENTRY_LIMITS = {"README.md": 10_000, "AGENTS.md": 6_000}
 HISTORY = {"CHANGELOG.md", "docs/history.md"}
+MAP = "docs/README.md"
 MARKER = "<!-- blotter:quickstart -->"
 
 
@@ -180,13 +181,16 @@ def audit(root: Path, paths: set[str] | None = None) -> list[str]:
             errors.append(f"{path}: {exc}")
 
     seen: set[str] = set()
-    pending = deque(["README.md"])
+    pending = deque([MAP])
     while pending:
         path = pending.popleft()
         if path not in seen:
             seen.add(path)
             pending.extend(graph.get(path, set()) - seen)
     errors.extend(f"unreachable active document: {p}" for p in sorted(active - seen))
+    listed = graph.get(MAP, set())
+    errors.extend(f"active document missing from the documentation map: {p}"
+                  for p in sorted(active - listed - {MAP}) if p.startswith("docs/"))
     for path, maximum in ENTRY_LIMITS.items():
         if path not in active:
             errors.append(f"missing entry point: {path}")

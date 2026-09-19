@@ -69,7 +69,8 @@ class RepositoryTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.files = {
-            'README.md': '# Demo\n[Agents](AGENTS.md) [Reference](docs/reference.md#list)\n' + QUICKSTART,
+            'README.md': '# Demo\n[Map](docs/README.md) [Reference](docs/reference.md#list)\n' + QUICKSTART,
+            'docs/README.md': '# Map\n[README](../README.md) [Agents](../AGENTS.md) [Reference](reference.md)\n',
             'AGENTS.md': '# Agents\n[Reference](docs/reference.md)\n',
             'docs/reference.md': '# Reference\n## list\n',
             'context7.json': json.dumps({'excludeFiles': ['AGENTS.md', 'CLAUDE.md', 'CONTRIBUTING.md', 'CHANGELOG.md', 'contract.md', 'history.md', 'publication.md', 'discovery-site.md']}),
@@ -97,6 +98,18 @@ class RepositoryTests(unittest.TestCase):
         self.write('docs/orphan.md', '# Orphan\n')
         result = docs.audit(self.root, self.paths | {'docs/orphan.md'})
         self.assertIn('unreachable active document: docs/orphan.md', result)
+
+    def test_docs_page_linked_only_from_readme_fails(self):
+        self.write('docs/side.md', '# Side\n')
+        self.write('README.md', '# Demo\n[Map](docs/README.md) [Side](docs/side.md)\n' + QUICKSTART)
+        result = docs.audit(self.root, self.paths | {'docs/side.md'})
+        self.assertIn('active document missing from the documentation map: docs/side.md', result)
+        self.assertNotIn('unreachable active document: docs/side.md', result)
+
+    def test_top_level_page_reachable_through_map_passes(self):
+        self.write('CONTRIBUTING.md', '# Contributing\n')
+        self.write('AGENTS.md', '# Agents\n[Contributing](CONTRIBUTING.md)\n')
+        self.assertEqual(docs.audit(self.root, self.paths | {'CONTRIBUTING.md'}), [])
 
     def test_local_unpublished_target_does_not_mask_omission(self):
         self.write('untracked.md', '# Not in the supplied file set\n')
