@@ -2,6 +2,8 @@
 
 Research checked: **2026-09-19**. This is a public integration and distribution guide, not a replacement for the CLI contract. Maintainers changing behavior must still follow `AGENTS.md` and the design document; consumers should start with the installed `blotter schema` and the [reference](reference.md).
 
+For task-oriented examples, start with [Keep coding-agent friction from disappearing](agent-workflows.md).
+
 ## Install a skill, not a second product
 
 The canonical skill is [`skills/blotter/SKILL.md`](../skills/blotter/SKILL.md). It is deliberately self-contained: a skill installer may copy that directory without copying this repository's documentation. There are two independent components: the `blotter` executable, and guidance that tells a coding agent when and how to use it. Installing the skill or plugin does **not** install the executable.
@@ -20,7 +22,7 @@ npx skills add BigCactusLabs/blotter --skill blotter --agent codex --yes
 # Alternatives to codex include claude-code and github-copilot.
 ```
 
-Node/npm is an installer prerequisite, not a Blotter runtime dependency. Follow the installer prompts and the host's scope rules. Do not install both the standalone skill and plugin into the same client unless testing duplicate handling. The [Skills CLI](https://github.com/vercel-labs/skills) supports standard skill locations and client-specific installation; its anonymous install telemetry is separate from Blotter. To disable that third-party telemetry and associated audit requests:
+Node/npm is an installer prerequisite, not a Blotter runtime dependency. The tested Skills CLI version is 1.7.0, which declares Node >=22.20.0; the distribution workflow uses Node 24. Follow the installer prompts and the host's scope rules. Do not install both the standalone skill and plugin into the same client unless testing duplicate handling. The [Skills CLI](https://github.com/vercel-labs/skills) supports standard skill locations and client-specific installation; its anonymous install telemetry is separate from Blotter. To disable that third-party telemetry and associated audit requests:
 
 ```bash
 DISABLE_TELEMETRY=1 npx skills add BigCactusLabs/blotter --skill blotter
@@ -63,7 +65,18 @@ claude plugin validate .
 npx skills add . --list
 ```
 
-Then install into one disposable target client and check that exactly one Blotter skill appears. Record the client and installer versions. These host checks are separate from Python's repository-specific consistency checks; the Python script is not a substitute for the providers' full validators or a real installation.
+The [Agent discovery workflow](../.github/workflows/discovery.yml) now runs those real tools, not just repository-specific schema checks. It pins Skills CLI 1.7.0 and Claude Code 2.1.278. It installs the canonical skill into six disposable targets: Claude Code, Codex, Cursor, GitHub Copilot, OpenCode, and Gemini CLI. It checks installed bytes, strictly validates the native plugin and marketplace, then installs, inspects, and uninstalls the native plugin in an isolated home. Only the pinned Claude package's lifecycle setup runs; suppressing that setup leaves its platform executable unconfigured. The first fully passing run is [35425766789](https://github.com/BigCactusLabs/blotter/actions/runs/35425766789) at commit `84b856b53ed8ce45b4b12188078d07dfc367d9a2` on September 19, 2026; it also caught and led to fixing a missing marketplace description before strict validation passed.
+
+Run the equivalent locally with already installed host tools:
+
+```bash
+python3 -m unittest discover -s tests/discovery -p 'test_*.py' -v
+python3 scripts/dev/check-discovery-hosts.py \
+  --skills "$(command -v skills)" --claude "$(command -v claude)" \
+  --report /tmp/blotter-installers.json
+```
+
+The test uses local source, telemetry opt-outs, and no inference credentials. It is installer compatibility evidence, not a measured activation rate. Claude can load local-directory plugins in place rather than into a separate cache, so the native test uses a disposable checkout copy. Git-hosted download/caching and actual model behavior remain separate checks. Installer reports include versions, commit, and skill SHA-256; Actions preserves the full outputs and the resolved npm lockfile as artifacts for 14 days. The repository pins direct host versions; the captured lockfile records the actual transitive dependency resolution for each run.
 
 ## The discovery model
 
@@ -86,9 +99,21 @@ This guide records repository readiness, **not accepted directory submissions**.
 
 ### Skills: availability is not discovery
 
-The [skills.sh FAQ](https://www.skills.sh/docs/faq) describes automatic indexing through real installations performed with the Skills CLI. Merely adding a `SKILL.md` is not evidence of search placement. Its [API documentation](https://www.skills.sh/docs/api) also exposes programmatic catalog access; obey the documented authentication and limits rather than assuming an anonymous endpoint. Repository-level `skills.sh.json` controls presentation of indexed pages, not an independent registration channel, so it is intentionally omitted for this one-skill package.
+The [skills.sh FAQ](https://www.skills.sh/docs/faq) describes automatic indexing through real installations performed with the Skills CLI. Merely adding a `SKILL.md` is not evidence of search placement. Its [API documentation](https://www.skills.sh/docs/api) exposes an authenticated `/api/v1` interface. Separately, the [Skills CLI search implementation](https://github.com/vercel-labs/skills/blob/v1.7.0/src/find.ts) uses `/api/search` and sorts returned candidates by installs. The audit below observes that implementation-level endpoint; it is not a promise of a stable public API or a bypass of the documented API's authentication. Repository-level `skills.sh.json` controls presentation of indexed pages, not an independent registration channel, so it is intentionally omitted for this one-skill package.
 
 The [Agent Skills specification](https://agentskills.io/specification) makes the skill name and description the small initial discovery surface. The full instructions load on activation. That supports a compact description with genuine problem language, followed by precise operational guidance. It does not justify stuffing keywords or telling agents to load the skill on every task.
+
+### Measured catalog baseline and repeatable audit
+
+The first [live run](https://github.com/BigCactusLabs/blotter/actions/runs/35425438957) queried the Skills CLI endpoint on **September 19, 2026, 06:00:35–06:00:39 UTC**. All five requests returned HTTP 200 with valid JSON. Blotter's exact identity was not returned for `blotter` (18 candidates), `friction` (20), `agent friction` (20), `retrospective` (20), or `recurring tool failures` (20). This finite snapshot does not establish global catalog absence, Google visibility, or the cause of nonappearance. The checked-in [baseline summary](../tests/discovery/baseline-2026-09-19.json) preserves timestamps, response hashes, and run provenance; the run logs and artifact contain returned identities.
+
+```bash
+python3 scripts/dev/audit-discovery.py --live --report /tmp/blotter-catalog.json
+```
+
+This performs five public read-only GETs, never installs or registers anything. Results distinguish `found`, `not_returned`, `unavailable`, and `malformed`. HTTP failures, challenges, bad JSON, and oversized responses do not become false evidence of absence. This matters because the Skills CLI implementation collapses failed requests into an empty result list. The report retains API order and the CLI's install-sorted order separately. It records where Blotter appeared, not a semantic-quality score.
+
+The workflow's catalog job is an observation, not a ranking gate: a completed job does not mean Blotter was found. Read each observation's status. New changes and manual workflow runs can produce comparable snapshots without a cron job or new telemetry in Blotter.
 
 ### Context7: help agents retrieve current usage, not old history
 
@@ -110,7 +135,7 @@ After host validation and a release containing these files, make one relevant su
 
 ## Prioritized continuation
 
-1. **Verify activation and one real installation.** Run the host checks, then the trigger evaluation below. Correct under-triggering and noise before pushing traffic into a bad experience.
+1. **Keep installer evidence green; measure activation separately.** The workflow now exercises real installers. Run the trigger evaluation below through an actual model host; installer success is not automatic activation.
 2. **Close the ingestion gap.** Verify skills.sh search visibility after a legitimate install, submit/refresh Context7 after its config is on the default branch, and prepare the pinned awesome-copilot request after the plugin release. Record provider responses, not inferred success.
 3. **Measure non-branded discovery.** Keep a dated retrieval baseline for queries such as "coding agent friction log", "recurring agent tool failures", "local agent retrospective", and "verify agent workflow fixes". Use the same providers and settings before and after changes. Store query, UTC timestamp, provider, returned URLs, target rank or not-found, and semantic-fit notes. Search position is provider- and time-dependent; do not treat it as an attribution model.
 4. **Publish useful, consented artifacts rather than advertisements.** A genuinely useful guard, test, or engineering note derived from Blotter can carry an appropriate provenance link. Publish only reviewed artifacts and synthetic or explicitly approved examples, never private ledgers. The hypothesis is that useful artifacts bring agents back to the capture tool; validate it instead of adding promotional text to every output.
