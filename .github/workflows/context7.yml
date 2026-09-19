@@ -1,0 +1,44 @@
+name: Context7 publication
+
+# Deliberate provider writes only. Never run on PR, push, or a schedule.
+# Setup and response semantics: docs/publication.md
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'submit the public repository once, or verify retrieval'
+        required: true
+        default: verify
+        type: choice
+        options: [verify, submit]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: context7-publication
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'BigCactusLabs/blotter' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Submit or verify through the authenticated Context7 API
+        env:
+          CONTEXT7_API_KEY: ${{ secrets.CONTEXT7_API_KEY }}
+          ACTION: ${{ inputs.action }}
+        run: >-
+          python3 scripts/dev/publish-discovery-context7.py
+          --action "$ACTION" --report "$RUNNER_TEMP/context7-publication.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: context7-publication-${{ github.run_id }}
+          path: ${{ runner.temp }}/context7-publication.json
+          retention-days: 30
+          if-no-files-found: warn
