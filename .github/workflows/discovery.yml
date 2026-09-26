@@ -8,7 +8,6 @@ on:
       - 'plugin.json'
       - 'context7.json'
       - 'llms.txt'
-      - 'docs/**'
       - 'scripts/dev/*discovery*'
       - 'tests/discovery/**'
       - '.github/workflows/discovery.yml'
@@ -21,12 +20,21 @@ on:
       - 'plugin.json'
       - 'context7.json'
       - 'llms.txt'
-      - 'docs/**'
       - 'scripts/dev/*discovery*'
       - 'tests/discovery/**'
       - '.github/workflows/discovery.yml'
       - '.github/workflows/context7.yml'
   workflow_dispatch:
+    inputs:
+      check:
+        description: Choose installer validation, catalog observation, or both
+        type: choice
+        required: true
+        default: installers
+        options:
+          - installers
+          - catalog
+          - all
 
 permissions:
   contents: read
@@ -34,6 +42,7 @@ permissions:
 jobs:
   installers:
     name: Real skill and plugin installers
+    if: github.event_name != 'workflow_dispatch' || inputs.check == 'installers' || inputs.check == 'all'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -91,6 +100,8 @@ jobs:
 
   catalog:
     name: Public catalog observation (not a ranking gate)
+    # External observation is opt-in, independent of ordinary PR validation.
+    if: github.event_name == 'workflow_dispatch' && (inputs.check == 'catalog' || inputs.check == 'all')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

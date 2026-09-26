@@ -10,7 +10,7 @@ A tiny Rust CLI that gives AI agents a blotter — the pad on the desk where you
 
 Agents silently push through friction and drop interesting findings mid-task. Every one was a sentence away from being useful. Blotter gives them a one-line home, then helps you review what recurs and what happened after a fix.
 
-JSON envelopes on stdout. Structured errors on stderr. Stable exit codes. `blotter schema` tells an agent how the installed executable works. There is no dashboard. There is not going to be a dashboard.
+JSON envelopes on stdout. Structured errors on stderr. Stable exit codes. `blotter schema` tells an agent how the installed executable works. No dashboard required. The file is the interface; other views are optional.
 
 The friction-log idea comes from [a tool Steve Ruiz built](https://x.com/steveruizok) for his own repos: give agents somewhere to complain and the workflow defects stop disappearing.
 
@@ -100,13 +100,13 @@ Write what you were doing and what got in the way. File a cut when **any one** a
 
 Skip ordinary one-off typos, quoting slips, bad first guesses, stale patches, and a compiler correctly rejecting code you just wrote. They become useful only when recurrence or system behavior gives them meaning beyond the execution slip. Blotter is a selective ledger, not a transcript, and nobody reads transcripts.
 
-Impact describes consequence **after admission**: `low` is qualified friction with limited immediate cost, `material` cost real time or caused incorrect work, and `blocking` stopped progress. A low-impact cut is still a cut. Independent recurrences are useful evidence; do not search for a duplicate before filing an actual occurrence.
+Impact describes consequence **after admission**: `low` is qualified friction with limited cost, `material` cost real time or caused incorrect work, and `blocking` stopped progress. A low-impact cut is still a cut. Independent recurrences are useful evidence; do not search for a duplicate before filing an actual occurrence.
 
 ## Dogears
 
 A dogear is the page-corner you fold down because you will want it later, not because it annoyed you. All three must hold: **one observed finding in your own words; interesting beyond this task; understandable without this repository**. Two to six sentences is usually enough.
 
-Chores, task notes, untested guesses, and “we should someday” items belong in a backlog or nowhere. A dogear is a lead, not a verified result. A human checks it before publication; `resolve --url` records where it was published, and `resolve --dropped` records that it did not survive review. The default list remains cut-only.
+Chores, task notes, untested guesses, and “we should someday” items belong in a backlog or nowhere. A dogear is a lead, not a verified result. It can remain worth revisiting without becoming a publication. A human checks it before sharing; `resolve --url` records a publication, and `resolve --dropped` records a rejected lead. The default list remains cut-only.
 
 ## Promotions
 
