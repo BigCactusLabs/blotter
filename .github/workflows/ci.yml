@@ -21,6 +21,10 @@ jobs:
         run: cargo build --release
       - name: Test
         run: cargo test --all-features
+      - name: Test read-only presentation experiment
+        env:
+          BLOTTER_TEST_BINARY: ${{ github.workspace }}/target/release/blotter
+        run: python3 -m unittest discover -s tests/experiments -v
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
       - name: Format
