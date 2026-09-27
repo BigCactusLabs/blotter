@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import copy
+import contextlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -46,6 +48,14 @@ class PresentationTests(unittest.TestCase):
         self.assertEqual(report["patterns"][0]["record_ids"], [A, B])
         self.assertEqual(report["patterns"][0]["suggested"], [])
         self.assertEqual(report["min_count"], 2)
+
+    def test_pattern_names_latest_title_occurrences(self):
+        data = triage()
+        data["clusters"][0]["occurrences"] = 1
+        pattern = patterns.compose(data, retrospect())["patterns"][0]
+        self.assertEqual(pattern["latest_title_occurrences"], 1)
+        self.assertEqual(pattern["record_count"], 2)
+        self.assertNotIn("occurrences", pattern)
 
     def test_exact_sources_attach_advice_independent_of_order(self):
         report = patterns.compose(triage(), retrospect([candidate()]))
@@ -111,6 +121,35 @@ class PresentationTests(unittest.TestCase):
         self.assertIn("Unknown", rendered)
         self.assertIn(A, rendered)
 
+    def test_markdown_patterns_and_interventions_use_separate_blocks(self):
+        item = candidate()
+        item.update(pattern="failed_intervention", title="Cache recovery guide failed",
+                    suggested=["skill"], resolved_anchor_ids=[C])
+        report = patterns.compose(triage(), retrospect([item]))
+        report["warnings"] = []
+        rendered = patterns.markdown(report)
+        self.assertIn(
+            "## Pattern 1\n\nService startup command fails\n\n"
+            "- Recorded members: 2\n- Tags: ops\n- Source IDs: " + f"{A}, {B}\n"
+            "- Suggested artifact: Unknown — inspect the sources before choosing a remedy.\n\n",
+            rendered,
+        )
+        self.assertIn(
+            "### Intervention 1\n\nCache recovery guide failed\n\n"
+            f"- Resolved anchor IDs: {C}\n- Later record IDs: {B}, {A}\n"
+            "- Suggested artifact: skill\n\n",
+            rendered,
+        )
+        self.assertEqual(report["failed_interventions"][0]["occurrences"], 2)
+
+    def test_prose_escapes_github_mentions_and_references(self):
+        self.assertEqual(patterns.prose("ping @octocat"), "ping @<!-- -->octocat")
+        self.assertEqual(patterns.prose("see #42"), "see \\#<!-- -->42")
+        self.assertEqual(patterns.prose("a@b#c"), "a@<!-- -->b\\#<!-- -->c")
+        self.assertEqual(patterns.prose("<!-- x -->"), r"\<\!\-\- x \-\-\>")
+        self.assertEqual(patterns.prose(r"a\#b"), r"a\\\#<!-- -->b")
+        self.assertEqual(patterns.prose("plain <tag>!"), r"plain \<tag\>\!")
+
     def test_reads_only_two_explicit_commands_and_retains_warnings(self):
         with tempfile.TemporaryDirectory() as tmp:
             ledger = Path(tmp).resolve() / "ledger.jsonl"
@@ -160,6 +199,35 @@ class PresentationTests(unittest.TestCase):
                 with self.assertRaises(patterns.PreviewError) as caught:
                     patterns.read_analysis("blotter", Path("ledger"), ["triage", "--min-count", "2"])
                 self.assertEqual(caught.exception.exit_code, 75 if result.returncode == 75 else 2)
+
+    def test_main_relays_blotter_stderr_before_script_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp).resolve() / "ledger.jsonl"
+            ledger.write_text("synthetic fixture\n")
+            lock_error = json.dumps({
+                "ok": False,
+                "error": {"code": "lock_timeout", "message": "Timed out waiting for the ledger lock.",
+                          "details": {"file": str(ledger)}, "retryable": True,
+                          "suggested_fix": "Check the ledger file and retry."},
+            })
+            cases = [
+                (subprocess.CompletedProcess([], 75, "", lock_error), lock_error,
+                 "patterns: triage failed (exit 75)"),
+                (subprocess.CompletedProcess([], 0, "", "unexpected diagnostic\n"),
+                 "unexpected diagnostic\n", "patterns: Unexpected stderr from triage; inspect it directly"),
+            ]
+            for result, detail, message in cases:
+                with self.subTest(result=result), patch.object(patterns.shutil, "which", return_value="/mock/blotter"), \
+                        patch.object(patterns.subprocess, "run", return_value=result), \
+                        patch.object(sys, "argv", ["patterns", "--file", str(ledger)]):
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                        code = patterns.main()
+                    self.assertEqual(code, 75 if result.returncode == 75 else 2)
+                    self.assertEqual(stdout.getvalue(), "")
+                    lines = stderr.getvalue().splitlines()
+                    self.assertEqual(lines[0], detail.rstrip("\n"))
+                    self.assertTrue(lines[1].startswith(message))
 
 
 class BinaryTests(unittest.TestCase):
