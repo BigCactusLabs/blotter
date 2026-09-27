@@ -24,9 +24,10 @@ import sys
 
 
 class PreviewError(ValueError):
-    def __init__(self, message: str, exit_code: int = 2):
+    def __init__(self, message: str, exit_code: int = 2, detail: str = ""):
         super().__init__(message)
         self.exit_code = exit_code
+        self.detail = detail
 
 
 def strings(value, label: str) -> list[str]:
@@ -94,7 +95,7 @@ def compose(triage: dict, retrospect: dict) -> dict:
                 "title": cluster["text"],
                 "record_ids": cluster["ids"],
                 "record_count": cluster["count"],
-                "occurrences": count(cluster["occurrences"], "occurrences"),
+                "latest_title_occurrences": count(cluster["occurrences"], "occurrences"),
                 "tags": strings(cluster["tags"], "tags"),
                 "suggested": advice.pop(key, []),
             })
@@ -120,9 +121,9 @@ def read_analysis(binary: str, file: Path, command: list[str]) -> tuple[dict, li
     # These two readers use 1 for findings. A lock timeout remains retryable.
     if result.returncode not in (0, 1):
         raise PreviewError(f"{command[0]} failed (exit {result.returncode}); inspect it directly",
-                           75 if result.returncode == 75 else 2)
+                           75 if result.returncode == 75 else 2, result.stderr)
     if result.stderr:
-        raise PreviewError(f"Unexpected stderr from {command[0]}; inspect it directly")
+        raise PreviewError(f"Unexpected stderr from {command[0]}; inspect it directly", detail=result.stderr)
     try:
         envelope = json.loads(result.stdout)
         if not isinstance(envelope, dict) or envelope.get("ok") is not True:
@@ -152,10 +153,19 @@ def preview(binary: str, file: Path) -> dict:
 
 
 def prose(text: str) -> str:
-    """Render ledger text as inert prose, not Markdown links/HTML/terminal escapes."""
+    """Render ledger text as inert prose: no Markdown/HTML/terminal escapes, GitHub mentions or issue links."""
     text = " ".join(text.splitlines())
     text = "".join(c if c.isprintable() else f"\\u{ord(c):04x}" for c in text)
-    return re.sub(r"([\\`*_{}\[\]<>()#+.!|~\-])", r"\\\1", text)
+
+    def escape(match: re.Match) -> str:
+        char = match.group(1)
+        if char == "@":
+            return "@<!-- -->"
+        if char == "#":
+            return r"\#<!-- -->"
+        return "\\" + char
+
+    return re.sub(r"([\\`*_{}\[\]<>()#+.!|~\-@])", escape, text)
 
 
 def markdown(report: dict) -> str:
@@ -169,18 +179,18 @@ def markdown(report: dict) -> str:
     for number, item in enumerate(report["patterns"], 1):
         advice = ", ".join(prose(v) for v in item["suggested"]) or "Unknown — inspect the sources before choosing a remedy."
         lines.extend([f"## Pattern {number}", "", prose(item["title"]), "",
-                      f"Recorded members: {item['record_count']}; occurrences reported by triage: {item['occurrences']}.",
-                      "Tags: " + (", ".join(prose(v) for v in item["tags"]) or "none"),
-                      "Source IDs: " + ", ".join(item["record_ids"]),
-                      "Suggested artifact: " + advice, ""])
+                      f"- Recorded members: {item['record_count']}",
+                      "- Tags: " + (", ".join(prose(v) for v in item["tags"]) or "none"),
+                      "- Source IDs: " + ", ".join(item["record_ids"]),
+                      "- Suggested artifact: " + advice, ""])
     if report["failed_interventions"]:
         lines.extend(["## Later recurrence after an intervention", "",
                       "These may share records with the patterns above; do not add their counts together.", ""])
-    for item in report["failed_interventions"]:
-        lines.extend([prose(item["title"]),
-                      "Resolved anchor IDs: " + ", ".join(item["resolved_anchor_ids"]),
-                      "Later record IDs: " + ", ".join(item["record_ids"]),
-                      "Suggested artifact: " + ", ".join(prose(v) for v in item["suggested"]), ""])
+    for number, item in enumerate(report["failed_interventions"], 1):
+        lines.extend([f"### Intervention {number}", "", prose(item["title"]), "",
+                      "- Resolved anchor IDs: " + ", ".join(item["resolved_anchor_ids"]),
+                      "- Later record IDs: " + ", ".join(item["record_ids"]),
+                      "- Suggested artifact: " + ", ".join(prose(v) for v in item["suggested"]), ""])
     lines.append("No records were promoted or resolved by this view. Output may contain private ledger text; review before sharing.")
     return "\n".join(lines) + "\n"
 
@@ -199,6 +209,10 @@ def main() -> int:
         print(json.dumps(report, indent=2) if args.format == "json" else markdown(report), end="\n" if args.format == "json" else "")
         return 0  # A preview with patterns is still a successful presentation.
     except PreviewError as exc:
+        if exc.detail:
+            sys.stderr.write(exc.detail)
+            if not exc.detail.endswith("\n"):
+                sys.stderr.write("\n")
         print(f"patterns: {exc}", file=sys.stderr)
         return exc.exit_code
     except (OSError, UnicodeError, subprocess.SubprocessError) as exc:
