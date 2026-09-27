@@ -1,45 +1,89 @@
 # Contributing
 
-Start with [the documentation map](docs/README.md). The [current contract](docs/contract.md) records implementation invariants; the executable's `schema` describes the version being run. Historical design discussions are optional context, not an onboarding prerequisite.
+Start with [the documentation map](docs/README.md). The [current contract](docs/contract.md) separates trust guarantees, supported behavior, and revisitable choices. Historical discussions are optional context.
 
 ## Set up
 
-Use a Rust toolchain at or above `package.rust-version` in [Cargo.toml](Cargo.toml), with Clippy and rustfmt. Python 3.11+ is needed for documentation tooling, not for the installed CLI.
+Use a Rust toolchain at or above `package.rust-version` in [Cargo.toml](Cargo.toml), with Clippy and rustfmt. Python 3.11+ supports documentation and experiments, not the installed CLI.
 
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install --only-binary=:all: -r site/requirements.txt
-cargo build --release
 ```
 
-Keep the local environment untracked. Do not run host installers, credentialed publication scripts, or writes against a real ledger merely to test documentation.
+Keep the environment untracked. Do not run host installers, credentialed publication scripts, or real-ledger writes merely to test documentation.
 
 ## Validate a change
+
+Iterate with owning tests; `scripts/dev/test-fast.sh` uses nextest when available, otherwise cargo test. Before landing, run the checks for affected surfaces and inspect actual CI results. Checking whether a surface is affected does not require editing it. CI retains the full Rust suite.
+
+| Changed surface | Validation |
+| --- | --- |
+| Rust behavior, helpers, dependencies | Rust suite; applicable interface checks |
+| Storage, locking, archive, repair, concurrency | Rust suite plus `scripts/dev/gate-5x.sh`; retain all five outputs |
+| Markdown or docs tooling | Source docs checks; runtime checks for CLI examples/interface; site tests for published inputs/rendering |
+| Skill, plugin, distribution tooling | Discovery checks; real installers for installation/delivery changes |
+| Presentation experiment | Owning Python tests and real-binary integration tests |
+
+### Rust
 
 ```bash
 cargo build --release
 cargo test --all-features
 cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
-python3 -m unittest discover -s tests/docs -v
-python3 scripts/dev/check-docs.py --binary target/release/blotter
-python3 scripts/dev/check-discovery.py --binary target/release/blotter
-python3 -m unittest discover -s tests/discovery -p 'test_*.py' -v
-python3 -m unittest discover -s tests/site -v
 ```
 
-`check-docs.py` validates active Markdown links, heading anchors, navigation, entry-point size, and the `CLAUDE.md` symlink. With `--binary`, it compares reference command coverage to `schema` and runs the marked README quickstart in a disposable repository with an explicit temporary ledger. It never shells out to arbitrary Markdown commands. Without a binary, those runtime checks are reported as skipped.
+After dependency changes and before releases, run `scripts/dev/check-msrv.sh` against the locked tree using the declared Rust floor. The fast loop does not replace the full suite. Retain the five-run storage gate until a targeted replacement demonstrates equivalent relevant coverage.
 
-The consumer-site builder validates rendered links separately. Its publication inputs must be committed, and its destination must not exist:
+### Documentation and site
+
+```bash
+python3 -m unittest discover -s tests/docs -v
+python3 scripts/dev/check-docs.py
+```
+
+These check links, anchors, navigation, entry-point size, and the `CLAUDE.md` symlink. For changed CLI examples or interfaces, build the release binary and run:
+
+```bash
+python3 scripts/dev/check-docs.py --binary target/release/blotter
+```
+
+This compares command coverage to `schema` and runs the marked README quickstart in a disposable repository, not arbitrary Markdown commands. Missing binary coverage is explicitly skipped.
+
+For consumer-site inputs/rendering, run `python3 -m unittest discover -s tests/site -v`. The builder checks rendered links; inputs must be committed and the destination absent:
 
 ```bash
 python3 scripts/dev/build-discovery-site.py --output /tmp/blotter-docs-preview
 ```
 
-For a fast Rust iteration loop, `scripts/dev/test-fast.sh` uses nextest when available and falls back to cargo test. It does not replace the standard cargo test gate. For storage, locking, archive, or concurrency changes, run `scripts/dev/gate-5x.sh` and preserve all five outputs. After dependency changes and before a release, install the declared Rust floor and run `scripts/dev/check-msrv.sh` against the locked dependency tree.
+### Discovery
 
-An environment limitation is not a passing check. State what ran locally, what ran in CI, and what remains unverified.
+```bash
+python3 -m unittest discover -s tests/discovery -p 'test_*.py' -v
+python3 scripts/dev/check-discovery.py --binary target/release/blotter
+```
+
+Build that binary first. Follow [installer validation](docs/publication.md#installer-validation) for host installation/delivery changes. Ordinary docs edits no longer trigger real installers. Manual input `check` in **Agent discovery** selects `installers`, `catalog`, or `all`; catalog observations do not run on pushes or PRs.
+
+Report what ran locally, ran in CI, failed, or remains unverified. Environment limitations are not passes. Do not change required-status settings to accommodate skipped work.
+
+## Try an idea
+
+Use the existing task or PR for the hypothesis, scope, and keep-or-delete evidence. No ADR or experiment registry is needed. Preserve durable rationale for costly-to-reverse choices or new trust boundaries; a past deferral is not a permanent veto.
+
+[Patterns before prescriptions](experiments/patterns.py) combines existing readers without changing the stable CLI:
+
+```bash
+python3 experiments/patterns.py --binary target/release/blotter --file /path/to/review.jsonl
+python3 -m unittest discover -s tests/experiments -v
+BLOTTER_TEST_BINARY="$PWD/target/release/blotter" python3 -m unittest discover -s tests/experiments -v
+```
+
+Choose an authorized ledger. The preview uses `triage --min-count 2`, matching retrospect's threshold without changing triage's default. Unknown remedies no longer hide patterns; advice joins only identical source-ID sets. It writes no records. `--format json` is experimental, not a supported schema. Use a quiescent ledger: two reads are not an atomic snapshot, and detected changes fail with a retry message. Review private text before sharing.
+
+Missing `BLOTTER_TEST_BINARY` explicitly skips integration tests; CI supplies it. Tests use synthetic ledgers. Keep the prototype only if useful extra patterns outweigh misleading matches, not merely because it emits more results.
 
 ## Find the implementation
 
@@ -47,30 +91,25 @@ An environment limitation is not a passing check. State what ran locally, what r
 | --- | --- |
 | CLI parsing and flags | [src/cli.rs](src/cli.rs) |
 | Envelope and contract number | [src/output.rs](src/output.rs) |
-| Error/exit dictionary | [src/error.rs](src/error.rs) |
+| Errors and exits | [src/error.rs](src/error.rs) |
 | Executable schema | [src/commands/schema.rs](src/commands/schema.rs) |
-| File discovery, locks, fold, append and repair mechanics | [src/store.rs](src/store.rs) |
-| Command behavior | [src/commands](src/commands) |
-| Black-box regression tests | [tests/cli](tests/cli) |
-| Documentation/installation/site tooling | [scripts/dev](scripts/dev) |
-
-Mutations belong inside the established lock/read/fold/validate/append transaction. `archive` and `doctor --fix` have the same change-with-care bar as `store.rs`. Do not trade failure atomicity for a shorter implementation.
+| Discovery, locks, fold, append, repair | [src/store.rs](src/store.rs) |
+| Commands and black-box tests | [src/commands](src/commands), [tests/cli](tests/cli) |
+| Documentation/distribution tooling | [scripts/dev](scripts/dev) |
 
 ## Test ownership and troubleshooting
 
-Add a black-box test to the module owning the behavior. Put cross-cutting cases in `contract`, `store`, `redaction`, or the other existing subject module rather than duplicating them per command. `tests/cli/main.rs` must declare every sibling Rust module; otherwise its tests never run. `common.rs` is for helpers used by multiple modules. Use subprocess-local environment variables, not process-global mutation.
+Put black-box tests in the owning `tests/cli/` module and declare new modules in `main.rs`. Use existing cross-cutting modules instead of duplicating cases. Share helpers when a second module needs them. Set subprocess environment through `Command::env`, never process-global mutation.
 
-Cargo accepts one positional test filter; pass additional filters to the test harness after `--`. When a source edit appears to have no effect, inspect the binary timestamp before doubting the edit. The suite has a stale-binary sentinel; recover with `cargo clean -p blotter-cli`, rebuild, and rerun the failing test.
-
-Do not run examples against `.blotter.jsonl` as test fixtures. The discovery smoke and lifecycle demonstration already create disposable ledgers.
+For suspected stale binaries, inspect timestamps, then `cargo clean -p blotter-cli`, rebuild, and rerun the failing test. Never use `.blotter.jsonl` as a smoke-test fixture.
 
 ## Keep documentation single-purpose
 
-The README introduces the product and installation. The skill owns the self-contained agent procedure. The reference explains current behavior; `schema` owns the executable's complete flag and output inventory. The contract records implementation invariants. Publication and site runbooks own external operations. Link between these instead of copying whole sections.
+README introduces; the skill teaches agent procedure; reference explains behavior; `schema` inventories the machine interface; contract records guarantees and compatibility-sensitive semantics. Runbooks own external operations. Link instead of copying whole sections.
 
-When changing behavior, update the implementation, schema, contract/reference, regression tests, and Unreleased changelog together. Keep runnable examples concrete: shell pipes are not a notation for enum alternatives, and a made-up ID is not a usable quickstart result. Do not add a hand-maintained schema snapshot or a second set of site prose. Site pages come from the existing source allowlist.
+Update affected surfaces for behavior changes, including Unreleased for shipped changes. Private refactors need no contract edit; moving prose needs no changelog entry. Use concrete runnable examples and returned IDs, not enum notation or invented quickstart IDs. Keep schema inventories executable and site prose single-source.
 
-Every current page under `docs/` must be linked directly from the documentation map, and every other current page must be reachable from it; the docs checker enforces both. Put durable decisions in the relevant current page; use Git history for superseded specifications, release archaeology, and completed handoffs. Do not reintroduce “newest amendment wins” governance or mandatory local-only documents.
+Every current `docs/` page must be linked directly from the documentation map; other current pages must be reachable from it. The docs checker enforces this. Keep current decisions in their owning page, superseded rationale in Git, and historical reports out of mandatory reading.
 
 ## Backlog
 
@@ -82,12 +121,12 @@ backlog task create "A concrete unit of work"
 backlog task edit TASK_ID -s "In Progress"
 ```
 
-Replace `TASK_ID` with a real task ID. Set the configured terminal status before `backlog task complete TASK_ID`. Do not use `backlog task archive` to retire work: ID allocation reads `backlog/tasks/` and `backlog/completed/`, not `backlog/archive/`, so archiving can release an ID for reuse. Retained completed files preserve their real status; they are not proof that every retired proposal shipped. Use `backlog doctor` after structural task moves.
+Use real IDs. Set the configured terminal status before `backlog task complete TASK_ID`. Do not retire with `backlog task archive`: allocation reads `tasks/` and `completed/`, not `archive/`, so archiving can release IDs for reuse. Retired files retain their real status, not proof every proposal shipped. Use the active-task view and run `backlog doctor` after structural moves.
 
 ## Releases and distribution
 
-CLI version: [Cargo.toml](Cargo.toml), synchronized with Cargo.lock. Skill/plugin version: [plugin.json](plugin.json), [.claude-plugin/plugin.json](.claude-plugin/plugin.json), and skill metadata; it is independent of the CLI version. [Distribution checks](scripts/dev/check-discovery.py) guard their consistency.
+CLI version: [Cargo.toml](Cargo.toml), synchronized with Cargo.lock. Skill/plugin version: [plugin.json](plugin.json), [.claude-plugin/plugin.json](.claude-plugin/plugin.json), and skill metadata; independent of CLI version. [Distribution checks](scripts/dev/check-discovery.py) guard consistency.
 
-The [release workflow](.github/workflows/release.yml) is generated from [dist-workspace.toml](dist-workspace.toml). Its version-like tag trigger is broad. Do not invent a separate plugin tag or edit generated release steps without inspecting the trigger and regenerating with the configured cargo-dist version. A documentation cleanup needs no release tag or runtime version bump.
+The [release workflow](.github/workflows/release.yml) is generated from [dist-workspace.toml](dist-workspace.toml) and has a broad version-like tag trigger. Inspect it before tagging; regenerate generated steps with the configured cargo-dist version. Documentation cleanup and unshipped prototypes need no tag or version bump.
 
-Before publishing, run all gates, the declared MSRV check, and applicable installer/site tests; inspect the package file list with `cargo package --list`. Then follow [publication operations](docs/publication.md). No tag, catalog submission, credentialed API request, or Pages deployment is implied by a documentation commit.
+Before publishing, run all applicable groups, MSRV and installer/site tests; inspect `cargo package --list`. Follow [publication operations](docs/publication.md). No commit implicitly authorizes a tag, catalog submission, credentialed API request, or Pages deployment.

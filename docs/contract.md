@@ -4,6 +4,12 @@ This is the contributor contract for the current implementation, replacing the h
 
 The complete version-specific machine interface is emitted by `blotter schema`, implemented in [schema.rs](../src/commands/schema.rs). The contract number lives in [output.rs](../src/output.rs), the package version in [Cargo.toml](../Cargo.toml), and the error/exit dictionary in [error.rs](../src/error.rs). Do not maintain another numeric version table here. [The reference](reference.md) explains command behavior. If code, schema, and prose diverge, reproduce the discrepancy and reconcile them with regression coverage; historical prose does not silently override the current interface.
 
+## Guarantees, current behavior, and choices
+
+Storage safety, truthful evidence, and explicit authorization are trust guarantees. Experiments do not bypass them. The detailed identity, output, matching, and resolution rules below describe supported behavior today: preserve them until deliberately changed, not because every present choice must last forever.
+
+CLI-first operation without a required service is the product default. Optional local presentations and read-only analysis experiments can explore better ways to use the ledger. Keep them separate from supported interfaces while testing an idea; they need a scoped task or PR, not a new amendment or standing mandate. A useful regression test records current expectations, not a permanent veto on an intentional improvement.
+
 ## Product and admission
 
 Blotter is a local, noninteractive ledger, not a transcript, task tracker, server, or publication service. Cuts record friction with at least one transferable, consequential, recurring, misleading, or systemic ground. Impact records consequence after admission. Dogears require all three: one observed finding in the author's own words, useful beyond the task, and understandable without the repository. Promotions record an explicit relationship between source cuts and an approved durable artifact.
@@ -46,6 +52,6 @@ Do not introduce telemetry, hidden network writes, automatic publishing, new hoo
 
 ## Changing this contract
 
-A behavioral change must update the relevant implementation, executable schema, current reference/contract, and regression tests in the same change. Breaking a supported interface requires an explicit compatibility decision, a `meta.contract` change, and the appropriate major release. Additive changes can retain the contract number. The internal Rust library is implementation, not a supported public API.
+For a behavioral change, update the affected implementation, executable schema, reference/contract, and regression tests together. A private refactor or an unshipped prototype need not edit unrelated contract prose. Breaking a supported interface requires an explicit compatibility decision, a `meta.contract` change, and the appropriate major release. Additive changes can retain the contract number. The internal Rust library is implementation, not a supported public API.
 
 Record current rules in place. Preserve superseded rationale through [history](history.md), not another append-only amendment section. Acceptance of breaking changes is permission to simplify deliberately, not permission to break storage safety or silently change published semantics.
