@@ -113,7 +113,7 @@ class PresentationTests(unittest.TestCase):
 
     def test_reads_only_two_explicit_commands_and_retains_warnings(self):
         with tempfile.TemporaryDirectory() as tmp:
-            ledger = Path(tmp) / "ledger.jsonl"
+            ledger = Path(tmp).resolve() / "ledger.jsonl"
             ledger.write_text("synthetic fixture\n")
             with patch.dict(os.environ, {"BLOTTER_FILE": "/wrong", "BLOTTER_NOW": "invalid"}), patch.object(
                     patterns.subprocess, "run", side_effect=[envelope(triage(), warnings=["skipped malformed line"]),
